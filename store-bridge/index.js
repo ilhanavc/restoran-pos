@@ -11,7 +11,7 @@ async function main() {
   const health = await api.health();
   console.log('[store-bridge] health:', health);
 
-  const cid = new Cid812Provider({ apiBase: cfg.apiBase });
+  const cid = new Cid812Provider({ api, cfg, log: console });
   cid.start();
 
   const stopPoller = startJobPoller({ api, cfg, log: console });
@@ -26,7 +26,7 @@ async function main() {
   process.on('SIGTERM', shutdown);
 
   console.log(
-    `[store-bridge] çalışıyor poll=${cfg.pollIntervalMs}ms dryRun=${cfg.dryRun} api=${cfg.apiBase}`,
+    `[store-bridge] çalışıyor poll=${cfg.pollIntervalMs}ms dryRun=${cfg.dryRun} api=${cfg.apiBase} cid812=${cfg.cid812Enabled ? `on port=${cfg.cid812Port}` : 'off'}`,
   );
 }
 

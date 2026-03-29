@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import db from '../config/database.js';
 import { bridgeAuth } from '../middleware/bridgeAuth.js';
+import { processIncomingCall } from '../services/callerIdService.js';
 
 const router = Router();
 router.use(bridgeAuth);
@@ -59,6 +60,38 @@ function mapPrinterRow(row) {
 /** GET /api/bridge/health — token doğrulama */
 router.get('/health', (req, res) => {
   res.json({ ok: true, business_id: req.businessId, time: new Date().toISOString() });
+});
+
+/**
+ * POST /api/bridge/caller-id/incoming
+ * StoreBridge / CID donanımı — JWT yok, bridgeAuth. processIncomingCall ile call_logs.
+ * Body: phone (zorunlu), raw_payload (opsiyonel), source_type (örn. cid812, hardware)
+ */
+router.post('/caller-id/incoming', (req, res) => {
+  try {
+    const body = req.body || {};
+    const phone = body.phone;
+    const rawPayload = body.raw_payload != null ? body.raw_payload : body.rawPayload;
+    const sourceType = body.source_type || body.sourceType || 'hardware';
+
+    if (phone == null || String(phone).trim() === '') {
+      return res.status(400).json({ error: 'phone gerekli' });
+    }
+
+    const result = processIncomingCall({
+      businessId: req.businessId,
+      userId: null,
+      rawPhone: phone,
+      sourceType,
+      rawPayload: rawPayload ?? null,
+    });
+
+    res.json(result);
+  } catch (err) {
+    if (err.isBadRequest) return res.status(400).json({ error: err.message });
+    console.error('[bridge] caller-id/incoming', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
 });
 
 /**

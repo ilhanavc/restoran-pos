@@ -50,6 +50,11 @@ export function createApiClient(cfg) {
 
   return {
     health: () => get('/bridge/health'),
+    /**
+     * Caller ID — bridgeAuth ile POST /api/bridge/caller-id/incoming
+     * @param {{ phone: string, raw_payload?: unknown, source_type?: string }} body
+     */
+    postCallerIdIncoming: (body) => post('/bridge/caller-id/incoming', body),
     listPendingJobs: (limit = 20) =>
       get(`/bridge/print-jobs?status=pending&limit=${limit}&unclaimed_only=1`),
     claimJob: (jobId) => post(`/bridge/print-jobs/${encodeURIComponent(jobId)}/claim`, { claim_id: cfg.claimId }),

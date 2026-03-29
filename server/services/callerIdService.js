@@ -43,7 +43,7 @@ export function loadCustomerForCallerId(customerId, businessId) {
 }
 
 /**
- * @param {{ businessId: string, userId: string, rawPhone: string, sourceType?: string, rawPayload?: unknown }} opts
+ * @param {{ businessId: string, userId: string | null, rawPhone: string, sourceType?: string, rawPayload?: unknown }} opts
  */
 export function processIncomingCall(opts) {
   const { businessId, userId, rawPhone, sourceType = 'http', rawPayload } = opts;
