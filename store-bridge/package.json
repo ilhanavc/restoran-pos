@@ -1,0 +1,6 @@
+{
+  "name": "store-bridge",
+  "private": true,
+  "type": "module",
+  "description": "Yerel yazıcı köprüsü — print_jobs polling"
+}

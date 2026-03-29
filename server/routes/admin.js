@@ -1,0 +1,906 @@
+import { Router } from 'express';
+import bcryptjs from 'bcryptjs';
+import db from '../config/database.js';
+import { authenticate, businessScope, authorize } from '../middleware/auth.js';
+import { genId, auditLog } from '../utils/helpers.js';
+
+const router = Router();
+router.use(authenticate, businessScope, authorize('admin'));
+
+function getJsonSetting(businessId, key, defaultValue) {
+  const row = db.prepare('SELECT value FROM settings WHERE business_id = ? AND key = ?').get(businessId, key);
+  if (!row?.value) return defaultValue;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return defaultValue;
+  }
+}
+
+function upsertSetting(businessId, key, valueObj) {
+  const val = JSON.stringify(valueObj);
+  const existing = db.prepare('SELECT id FROM settings WHERE business_id = ? AND key = ?').get(businessId, key);
+  if (existing) {
+    db.prepare(`UPDATE settings SET value = ?, updated_at = datetime('now') WHERE business_id = ? AND key = ?`).run(
+      val,
+      businessId,
+      key,
+    );
+  } else {
+    db.prepare(`INSERT INTO settings (id, business_id, key, value, updated_at) VALUES (?, ?, ?, ?, datetime('now'))`).run(
+      genId(),
+      businessId,
+      key,
+      val,
+    );
+  }
+}
+
+const PRINTER_TYPES = new Set(['receipt', 'kitchen', 'bar']);
+
+function defaultPrintOptions() {
+  return {
+    roles: {
+      receipt: false,
+      kitchen: false,
+      bar: false,
+      courier: false,
+      server: false,
+    },
+    kitchenGroups: {
+      FIRIN: false,
+      IZGARA: false,
+      ICECEKLER: false,
+    },
+    output: {
+      showPrices: false,
+      showOrderTotal: false,
+      showOrderNumber: true,
+      showVat: false,
+      footerNote: '',
+    },
+  };
+}
+
+function mergePrintOptions(rawJson, type) {
+  const base = defaultPrintOptions();
+  let parsed = {};
+  if (rawJson) {
+    try {
+      parsed = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+    } catch {
+      parsed = {};
+    }
+  }
+  const merged = {
+    roles: { ...base.roles, ...(parsed.roles || {}) },
+    kitchenGroups: { ...base.kitchenGroups, ...(parsed.kitchenGroups || {}) },
+    output: { ...base.output, ...(parsed.output || {}) },
+  };
+  const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
+  merged.roles[pk] = true;
+  return merged;
+}
+
+function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
+  const base = mergePrintOptions(existingRaw, type);
+  if (!incomingObj || typeof incomingObj !== 'object') return base;
+  const out = {
+    roles: { ...base.roles, ...(incomingObj.roles || {}) },
+    kitchenGroups: { ...base.kitchenGroups, ...(incomingObj.kitchenGroups || {}) },
+    output: { ...base.output, ...(incomingObj.output || {}) },
+  };
+  const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
+  out.roles[pk] = true;
+  return out;
+}
+
+function mapPrinterRow(row) {
+  if (!row) return null;
+  const print_options = mergePrintOptions(row.print_options, row.type);
+  return {
+    id: row.id,
+    business_id: row.business_id,
+    branch_id: row.branch_id,
+    name: row.name,
+    type: row.type,
+    connection_type: row.connection_type,
+    ip_address: row.ip_address,
+    port: row.port,
+    is_active: row.is_active === 1 || row.is_active === true,
+    created_at: row.created_at,
+    print_options,
+  };
+}
+
+/** Kalıcı silme öncesi: varsayılan, yönlendirme, bekleyen iş; toplam iş sayısı bilgi amaçlı. */
+function getPrinterDeleteEligibility(businessId, printerId) {
+  const row = db.prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`).get(printerId, businessId);
+  if (!row) return null;
+
+  const cfg = getJsonSetting(businessId, 'printer.config', {});
+  const isDefault = cfg.defaultPrinterId === printerId;
+
+  const routingCount =
+    db
+      .prepare(`SELECT COUNT(*) as c FROM printer_routing WHERE business_id = ? AND printer_id = ?`)
+      .get(businessId, printerId).c || 0;
+
+  const pendingJobs =
+    db
+      .prepare(
+        `SELECT COUNT(*) as c FROM print_jobs WHERE business_id = ? AND printer_id = ? AND status = 'pending'`,
+      )
+      .get(businessId, printerId).c || 0;
+
+  const totalJobs =
+    db
+      .prepare(`SELECT COUNT(*) as c FROM print_jobs WHERE business_id = ? AND printer_id = ?`)
+      .get(businessId, printerId).c || 0;
+
+  const blockers = [];
+  if (isDefault) {
+    blockers.push('Bu yazıcı varsayılan yazıcı. Önce başka bir yazıcıyı varsayılan yapın veya varsayılanı kaldırın.');
+  }
+  if (routingCount > 0) {
+    blockers.push(
+      'Bu yazıcı bir veya daha fazla kategori yönlendirmesinde kullanılıyor. Kategori → Yazıcı ekranından eşleşmeleri kaldırın veya yazıcıyı pasifleştirin (pasifleştirmede yönlendirmeler temizlenir).',
+    );
+  }
+  if (pendingJobs > 0) {
+    blockers.push('Bu yazıcıya ait bekleyen yazdırma işi var. İşlem bitene veya iptal edilene kadar kalıcı silinemez.');
+  }
+
+  const canHardDelete = !isDefault && routingCount === 0 && pendingJobs === 0;
+  const canDeactivate = row.is_active === 1 || row.is_active === true;
+
+  return {
+    canHardDelete,
+    canDeactivate,
+    blockers,
+    usage: {
+      isDefault,
+      routingCount,
+      pendingJobs,
+      totalJobs,
+    },
+  };
+}
+
+function countActiveAdmins(businessId) {
+  return db
+    .prepare(
+      `SELECT COUNT(*) as c FROM users u
+       JOIN roles r ON u.role_id = r.id
+       WHERE u.business_id = ? AND u.is_active = 1 AND r.slug = 'admin'`,
+    )
+    .get(businessId).c;
+}
+
+function getUserRoleSlug(userId) {
+  const r = db.prepare(`SELECT r.slug FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`).get(userId);
+  return r?.slug || null;
+}
+
+// ── Business ──
+router.get('/business', (req, res) => {
+  try {
+    const b = db.prepare(
+      `SELECT id, name, address, tax_id, receipt_header, phone, tax_office, receipt_footer
+       FROM businesses WHERE id = ?`,
+    ).get(req.businessId);
+    if (!b) return res.status(404).json({ error: 'İşletme bulunamadı' });
+    res.json({ business: b });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.patch('/business', (req, res) => {
+  try {
+    const { name, address, tax_id, receipt_header } = req.body;
+    const n = (name ?? '').trim();
+    if (!n) return res.status(400).json({ error: 'İşletme adı boş olamaz' });
+    const tax = (tax_id ?? '').trim();
+    if (!tax) return res.status(400).json({ error: 'Vergi numarası zorunludur' });
+    if (tax.length < 5 || !/^[\dA-Za-z]+$/.test(tax)) {
+      return res.status(400).json({ error: 'Vergi numarası en az 5 karakter ve yalnızca harf/rakam olmalıdır' });
+    }
+    db.prepare(
+      `UPDATE businesses SET name = ?, address = ?, tax_id = ?, receipt_header = ?, updated_at = datetime('now')
+       WHERE id = ?`,
+    ).run(n, (address ?? '').trim(), tax, (receipt_header ?? '').trim(), req.businessId);
+    auditLog(req.businessId, req.user.id, 'update_business', 'business', req.businessId);
+    const b = db.prepare(
+      `SELECT id, name, address, tax_id, receipt_header, phone, tax_office, receipt_footer FROM businesses WHERE id = ?`,
+    ).get(req.businessId);
+    res.json({ business: b, message: 'İşletme bilgileri kaydedildi' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Display (JSON in settings) ──
+router.get('/display-settings', (req, res) => {
+  const defaults = { theme: 'dark', language: 'tr', density: 'comfortable' };
+  const stored = getJsonSetting(req.businessId, 'app.display', {});
+  res.json({ display: { ...defaults, ...stored } });
+});
+
+router.patch('/display-settings', (req, res) => {
+  try {
+    const { theme, language, density } = req.body;
+    const allowedTheme = ['dark', 'light', 'system'];
+    const allowedLang = ['tr', 'en'];
+    const allowedDensity = ['comfortable', 'compact'];
+    const t = allowedTheme.includes(theme) ? theme : 'dark';
+    const l = allowedLang.includes(language) ? language : 'tr';
+    const d = allowedDensity.includes(density) ? density : 'comfortable';
+    const next = { theme: t, language: l, density: d };
+    upsertSetting(req.businessId, 'app.display', next);
+    auditLog(req.businessId, req.user.id, 'update_display', 'settings', 'app.display');
+    res.json({ display: next, message: 'Ekran ayarları kaydedildi' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Printer list + config ──
+router.get('/printer-settings', (req, res) => {
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active, created_at, print_options
+         FROM printers WHERE business_id = ? ORDER BY name`,
+      )
+      .all(req.businessId);
+    const printers = rows.map((r) => mapPrinterRow(r));
+    const defaults = {
+      defaultPrinterId: printers[0]?.id || null,
+      usageKitchenId: null,
+      usagePaymentId: null,
+      usageBeverageLabelId: null,
+    };
+    const stored = getJsonSetting(req.businessId, 'printer.config', {});
+    const config = { ...defaults, ...stored };
+    res.json({ printers, config });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.patch('/printer-settings', (req, res) => {
+  try {
+    const printerRows = db.prepare(`SELECT id FROM printers WHERE business_id = ?`).all(req.businessId);
+    const ids = new Set(printerRows.map((p) => p.id));
+    const pick = (v) => (v && ids.has(v) ? v : null);
+    const baseDefaults = {
+      defaultPrinterId: printerRows[0]?.id || null,
+      usageKitchenId: null,
+      usagePaymentId: null,
+      usageBeverageLabelId: null,
+    };
+    const stored = getJsonSetting(req.businessId, 'printer.config', {});
+    const prev = { ...baseDefaults, ...stored };
+    const body = req.body || {};
+    const config = {
+      defaultPrinterId: Object.prototype.hasOwnProperty.call(body, 'defaultPrinterId')
+        ? pick(body.defaultPrinterId)
+        : pick(prev.defaultPrinterId),
+      usageKitchenId: Object.prototype.hasOwnProperty.call(body, 'usageKitchenId')
+        ? pick(body.usageKitchenId)
+        : pick(prev.usageKitchenId),
+      usagePaymentId: Object.prototype.hasOwnProperty.call(body, 'usagePaymentId')
+        ? pick(body.usagePaymentId)
+        : pick(prev.usagePaymentId),
+      usageBeverageLabelId: Object.prototype.hasOwnProperty.call(body, 'usageBeverageLabelId')
+        ? pick(body.usageBeverageLabelId)
+        : pick(prev.usageBeverageLabelId),
+    };
+    upsertSetting(req.businessId, 'printer.config', config);
+    auditLog(req.businessId, req.user.id, 'update_printer_settings', 'settings', 'printer.config');
+    res.json({ config, message: 'Yazıcı ayarları kaydedildi' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/printers', (req, res) => {
+  try {
+    const { name, type, connection_type, ip_address, port, is_active, print_options } = req.body;
+    const n = (name ?? '').trim();
+    if (!n) return res.status(400).json({ error: 'Yazıcı adı zorunludur' });
+    const t = PRINTER_TYPES.has(type) ? type : 'receipt';
+    const conn = ['network', 'usb'].includes(connection_type) ? connection_type : 'network';
+    const portNum = port != null && port !== '' ? parseInt(port, 10) : 9100;
+    if (Number.isNaN(portNum) || portNum < 1 || portNum > 65535) {
+      return res.status(400).json({ error: 'Geçerli bir port girin' });
+    }
+    const branch = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId);
+    const branchId = branch?.id || null;
+    const id = genId();
+    const mergedPo = mergePrintOptionsPatch(null, print_options, t);
+    const active = is_active === false || is_active === 0 ? 0 : 1;
+    db.prepare(
+      `INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active, print_options)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      req.businessId,
+      branchId,
+      n,
+      t,
+      conn,
+      (ip_address ?? '').trim() || null,
+      portNum,
+      active,
+      JSON.stringify(mergedPo),
+    );
+    auditLog(req.businessId, req.user.id, 'create_printer', 'printer', id);
+    const row = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(id, req.businessId);
+    res.status(201).json({ printer: mapPrinterRow(row), message: 'Yazıcı oluşturuldu' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.get('/printers/:id/delete-eligibility', (req, res) => {
+  try {
+    const el = getPrinterDeleteEligibility(req.businessId, req.params.id);
+    if (!el) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+    res.json(el);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.get('/printers/:id', (req, res) => {
+  try {
+    const row = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
+    if (!row) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+    res.json({ printer: mapPrinterRow(row) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.patch('/printers/:id', (req, res) => {
+  try {
+    const existing = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
+    if (!existing) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+
+    const { name, type, connection_type, ip_address, port, is_active, print_options } = req.body;
+    let nextName = existing.name;
+    if (name !== undefined) {
+      const n = String(name).trim();
+      if (!n) return res.status(400).json({ error: 'Yazıcı adı boş olamaz' });
+      nextName = n;
+    }
+    let nextType = existing.type;
+    if (type !== undefined) {
+      if (!PRINTER_TYPES.has(type)) return res.status(400).json({ error: 'Geçersiz yazıcı türü' });
+      nextType = type;
+    }
+    let nextConn = existing.connection_type || 'network';
+    if (connection_type !== undefined) {
+      nextConn = ['network', 'usb'].includes(connection_type) ? connection_type : 'network';
+    }
+    let nextIp = existing.ip_address;
+    if (ip_address !== undefined) nextIp = String(ip_address).trim() || null;
+    let nextPort = existing.port ?? 9100;
+    if (port !== undefined && port !== null && port !== '') {
+      const portNum = parseInt(port, 10);
+      if (Number.isNaN(portNum) || portNum < 1 || portNum > 65535) {
+        return res.status(400).json({ error: 'Geçerli bir port girin' });
+      }
+      nextPort = portNum;
+    }
+    let nextActive = existing.is_active === 1 || existing.is_active === true ? 1 : 0;
+    if (is_active !== undefined) {
+      nextActive = is_active === false || is_active === 0 ? 0 : 1;
+    }
+
+    let poJson = existing.print_options;
+    if (print_options !== undefined && print_options !== null && typeof print_options === 'object') {
+      poJson = JSON.stringify(mergePrintOptionsPatch(existing.print_options, print_options, nextType));
+    } else if (nextType !== existing.type) {
+      poJson = JSON.stringify(mergePrintOptions(existing.print_options, nextType));
+    }
+
+    db.prepare(
+      `UPDATE printers SET name = ?, type = ?, connection_type = ?, ip_address = ?, port = ?, is_active = ?, print_options = ?
+       WHERE id = ? AND business_id = ?`,
+    ).run(nextName, nextType, nextConn, nextIp, nextPort, nextActive, poJson, req.params.id, req.businessId);
+
+    let responseMessage = 'Yazıcı güncellendi';
+    const wasActive = existing.is_active === 1 || existing.is_active === true;
+    if (nextActive === 0) {
+      const cfg = getJsonSetting(req.businessId, 'printer.config', {});
+      const hadDefault = cfg.defaultPrinterId === req.params.id;
+      const routingDel = db
+        .prepare(`DELETE FROM printer_routing WHERE business_id = ? AND printer_id = ?`)
+        .run(req.businessId, req.params.id);
+      if (hadDefault) {
+        upsertSetting(req.businessId, 'printer.config', { ...cfg, defaultPrinterId: null });
+      }
+      if (wasActive) {
+        responseMessage = 'Yazıcı pasifleştirildi.';
+        if (hadDefault) responseMessage += ' Varsayılan yazıcı ayarı kaldırıldı.';
+        if (routingDel.changes > 0) {
+          responseMessage += ` ${routingDel.changes} kategori yönlendirmesi kaldırıldı.`;
+        }
+      }
+    }
+
+    auditLog(req.businessId, req.user.id, 'update_printer', 'printer', req.params.id);
+    const row = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
+    res.json({ printer: mapPrinterRow(row), message: responseMessage });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.delete('/printers/:id', (req, res) => {
+  try {
+    const el = getPrinterDeleteEligibility(req.businessId, req.params.id);
+    if (!el) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+    if (!el.canHardDelete) {
+      return res.status(400).json({
+        error: 'Bu yazıcı şu an kalıcı olarak silinemez.',
+        blockers: el.blockers,
+        usage: el.usage,
+      });
+    }
+
+    db.transaction(() => {
+      db.prepare(`DELETE FROM printer_routing WHERE business_id = ? AND printer_id = ?`).run(req.businessId, req.params.id);
+      db.prepare(`UPDATE print_jobs SET printer_id = NULL WHERE business_id = ? AND printer_id = ?`).run(
+        req.businessId,
+        req.params.id,
+      );
+      const cfg = getJsonSetting(req.businessId, 'printer.config', {});
+      if (cfg.defaultPrinterId === req.params.id) {
+        upsertSetting(req.businessId, 'printer.config', { ...cfg, defaultPrinterId: null });
+      }
+      const del = db.prepare(`DELETE FROM printers WHERE id = ? AND business_id = ?`).run(req.params.id, req.businessId);
+      if (del.changes === 0) throw new Error('Yazıcı silinemedi');
+    })();
+
+    auditLog(req.businessId, req.user.id, 'delete_printer', 'printer', req.params.id);
+    res.json({ message: 'Yazıcı kalıcı olarak silindi' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+router.get('/print-jobs', (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '30', 10) || 30, 1), 100);
+    const jobs = db
+      .prepare(
+        `SELECT id, order_id, printer_id, job_type, status, error_message, idempotency_key, created_at, printed_at, payload
+         FROM print_jobs WHERE business_id = ? ORDER BY datetime(created_at) DESC LIMIT ?`,
+      )
+      .all(req.businessId, limit);
+    res.json({ jobs });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Kategori → yazıcı (printer_routing) ──
+router.get('/printer-routing', (req, res) => {
+  try {
+    const categories = db
+      .prepare(
+        `SELECT id, name, sort_order, printer_target, is_active FROM categories WHERE business_id = ? AND is_active = 1 ORDER BY sort_order, name`,
+      )
+      .all(req.businessId);
+
+    const printerRows = db
+      .prepare(
+        `SELECT id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active, created_at, print_options
+         FROM printers WHERE business_id = ? AND is_active = 1 ORDER BY name`,
+      )
+      .all(req.businessId);
+    const printers = printerRows.map((r) => mapPrinterRow(r));
+
+    const routingRows = db.prepare(`SELECT id, category_id, printer_id FROM printer_routing WHERE business_id = ?`).all(req.businessId);
+    const assignments = routingRows.map((r) => ({ category_id: r.category_id, printer_id: r.printer_id }));
+
+    res.json({ categories, printers, assignments });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.patch('/printer-routing', (req, res) => {
+  try {
+    const { assignments } = req.body;
+    if (!Array.isArray(assignments)) {
+      return res.status(400).json({ error: 'assignments dizisi gerekli' });
+    }
+
+    const run = db.transaction(() => {
+      for (const a of assignments) {
+        const categoryId = a.category_id;
+        const printerId = a.printer_id;
+
+        if (!categoryId) {
+          const err = new Error('category_id gerekli');
+          err.status = 400;
+          throw err;
+        }
+
+        const cat = db.prepare(`SELECT id FROM categories WHERE id = ? AND business_id = ?`).get(categoryId, req.businessId);
+        if (!cat) {
+          const err = new Error('Kategori bulunamadı');
+          err.status = 400;
+          throw err;
+        }
+
+        db.prepare(`DELETE FROM printer_routing WHERE business_id = ? AND category_id = ?`).run(req.businessId, categoryId);
+
+        if (printerId != null && printerId !== '') {
+          const pr = db
+            .prepare(`SELECT id FROM printers WHERE id = ? AND business_id = ? AND is_active = 1`)
+            .get(printerId, req.businessId);
+          if (!pr) {
+            const err = new Error('Yazıcı bulunamadı veya pasif');
+            err.status = 400;
+            throw err;
+          }
+          const rid = genId();
+          db.prepare(
+            `INSERT INTO printer_routing (id, business_id, category_id, printer_id, created_at) VALUES (?, ?, ?, ?, datetime('now'))`,
+          ).run(rid, req.businessId, categoryId, printerId);
+        }
+      }
+    });
+
+    run();
+    auditLog(req.businessId, req.user.id, 'update_printer_routing', 'settings', 'printer_routing');
+
+    const routingRows = db.prepare(`SELECT id, category_id, printer_id FROM printer_routing WHERE business_id = ?`).all(req.businessId);
+    const assignmentsOut = routingRows.map((r) => ({ category_id: r.category_id, printer_id: r.printer_id }));
+    res.json({ assignments: assignmentsOut, message: 'Yazıcı yönlendirmesi kaydedildi' });
+  } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/printers/test', (req, res) => {
+  try {
+    const { printer_id } = req.body;
+    if (!printer_id) return res.status(400).json({ error: 'Yazıcı seçin' });
+    const p = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(printer_id, req.businessId);
+    if (!p) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+    const testPayload = {
+      lines: [
+        '=== Restoran POS — Test çıktısı ===',
+        `Yazıcı: ${p.name}`,
+        `Adres: ${p.ip_address || '-'}:${p.port || 9100}`,
+        new Date().toLocaleString('tr-TR'),
+        'Bu bir mock çıktıdır; gerçek yazıcıya gönderilmedi.',
+      ],
+    };
+    console.log('🖨️ [MOCK TEST]', testPayload.lines.join('\n'));
+    auditLog(req.businessId, req.user.id, 'printer_test', 'printer', printer_id);
+    res.json({
+      success: true,
+      mock: true,
+      message: `Test çıktısı simüle edildi: ${p.name} (ağ yazıcısına gerçek gönderim bu ortamda yok)`,
+      testPayload,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Roles (for user form) ──
+router.get('/roles', (req, res) => {
+  const roles = db
+    .prepare(`SELECT id, name, slug FROM roles WHERE business_id = ? ORDER BY name`)
+    .all(req.businessId);
+  res.json({ roles });
+});
+
+// ── Users ──
+const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+router.get('/users', (req, res) => {
+  try {
+    const users = db
+      .prepare(
+        `SELECT u.id, u.email, u.full_name, u.is_active, u.created_at,
+                r.id as role_id, r.name as role_name, r.slug as role_slug
+         FROM users u
+         JOIN roles r ON u.role_id = r.id
+         WHERE u.business_id = ?
+         ORDER BY u.full_name`,
+      )
+      .all(req.businessId);
+    res.json({ users });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/users', (req, res) => {
+  try {
+    const { full_name, email, password, role_slug, is_active } = req.body;
+    const fn = (full_name ?? '').trim();
+    if (!fn) return res.status(400).json({ error: 'Ad soyad zorunludur' });
+    const em = (email ?? '').toLowerCase().trim();
+    if (!emailRe.test(em)) return res.status(400).json({ error: 'Geçerli bir e-posta girin' });
+    const pw = password ?? '';
+    if (!pw || pw.length < 4) return res.status(400).json({ error: 'Şifre en az 4 karakter olmalıdır' });
+    const role = db
+      .prepare(`SELECT id FROM roles WHERE business_id = ? AND slug = ?`)
+      .get(req.businessId, role_slug || 'waiter');
+    if (!role) return res.status(400).json({ error: 'Geçersiz rol' });
+    const dup = db.prepare(`SELECT id FROM users WHERE business_id = ? AND lower(email) = ?`).get(req.businessId, em);
+    if (dup) return res.status(400).json({ error: 'Bu e-posta bu işletmede zaten kayıtlı' });
+    const id = genId();
+    const hash = bcryptjs.hashSync(pw, 10);
+    const active = is_active === false ? 0 : 1;
+    let branchId = req.branchId || null;
+    if (!branchId) {
+      const b = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId);
+      branchId = b?.id || null;
+    }
+    db.prepare(
+      `INSERT INTO users (id, business_id, branch_id, role_id, email, password_hash, full_name, is_active, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    ).run(id, req.businessId, branchId, role.id, em, hash, fn, active);
+    auditLog(req.businessId, req.user.id, 'create_user', 'user', id);
+    const u = db
+      .prepare(
+        `SELECT u.id, u.email, u.full_name, u.is_active, r.name as role_name, r.slug as role_slug
+         FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
+      )
+      .get(id);
+    res.status(201).json({ user: u, message: 'Kullanıcı oluşturuldu' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.patch('/users/:id', (req, res) => {
+  try {
+    const userId = req.params.id;
+    const row = db.prepare(`SELECT * FROM users WHERE id = ? AND business_id = ?`).get(userId, req.businessId);
+    if (!row) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    const { full_name, email, password, role_slug, is_active } = req.body;
+    const fn = full_name !== undefined ? (full_name ?? '').trim() : row.full_name;
+    if (!fn) return res.status(400).json({ error: 'Ad soyad zorunludur' });
+    let em = row.email;
+    if (email !== undefined) {
+      em = (email ?? '').toLowerCase().trim();
+      if (!emailRe.test(em)) return res.status(400).json({ error: 'Geçerli bir e-posta girin' });
+      const dup = db
+        .prepare(`SELECT id FROM users WHERE business_id = ? AND lower(email) = ? AND id != ?`)
+        .get(req.businessId, em, userId);
+      if (dup) return res.status(400).json({ error: 'Bu e-posta başka kullanıcıda kayıtlı' });
+    }
+    let roleId = row.role_id;
+    if (role_slug !== undefined) {
+      const role = db.prepare(`SELECT id, slug FROM roles WHERE business_id = ? AND slug = ?`).get(req.businessId, role_slug);
+      if (!role) return res.status(400).json({ error: 'Geçersiz rol' });
+      const wasAdmin = getUserRoleSlug(userId) === 'admin';
+      const willBeAdmin = role.slug === 'admin';
+      if (wasAdmin && !willBeAdmin && countActiveAdmins(req.businessId) <= 1) {
+        return res.status(400).json({ error: 'Son yönetici rolünü kaldıramazsınız' });
+      }
+      roleId = role.id;
+    }
+    let nextActive = row.is_active;
+    if (is_active !== undefined) nextActive = is_active ? 1 : 0;
+    const slug = db.prepare(`SELECT slug FROM roles WHERE id = ?`).get(roleId)?.slug;
+    if (slug === 'admin' && !nextActive && countActiveAdmins(req.businessId) <= 1 && getUserRoleSlug(userId) === 'admin') {
+      return res.status(400).json({ error: 'Son aktif yöneticiyi pasifleştiremezsiniz' });
+    }
+    if (userId === req.user.id && !nextActive) {
+      return res.status(400).json({ error: 'Kendi hesabınızı pasifleştiremezsiniz' });
+    }
+    const hash = password && String(password).length > 0 ? bcryptjs.hashSync(password, 10) : null;
+    if (hash) {
+      db.prepare(
+        `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, password_hash = ?, updated_at = datetime('now')
+         WHERE id = ? AND business_id = ?`,
+      ).run(fn, em, roleId, nextActive, hash, userId, req.businessId);
+    } else {
+      db.prepare(
+        `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, updated_at = datetime('now')
+         WHERE id = ? AND business_id = ?`,
+      ).run(fn, em, roleId, nextActive, userId, req.businessId);
+    }
+    auditLog(req.businessId, req.user.id, 'update_user', 'user', userId);
+    const u = db
+      .prepare(
+        `SELECT u.id, u.email, u.full_name, u.is_active, r.name as role_name, r.slug as role_slug
+         FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
+      )
+      .get(userId);
+    res.json({ user: u, message: 'Kullanıcı güncellendi' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.delete('/users/:id', (req, res) => {
+  try {
+    const userId = req.params.id;
+    if (userId === req.user.id) return res.status(400).json({ error: 'Kendi hesabınızı silemezsiniz' });
+    const row = db.prepare(`SELECT * FROM users WHERE id = ? AND business_id = ?`).get(userId, req.businessId);
+    if (!row) return res.status(404).json({ error: 'Kullanıcı bulunamadı' });
+    if (!row.is_active) return res.status(400).json({ error: 'Kullanıcı zaten pasif' });
+    if (getUserRoleSlug(userId) === 'admin' && countActiveAdmins(req.businessId) <= 1) {
+      return res.status(400).json({ error: 'Son yönetici kaldırılamaz' });
+    }
+    db.prepare(`UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?`).run(
+      userId,
+      req.businessId,
+    );
+    auditLog(req.businessId, req.user.id, 'deactivate_user', 'user', userId);
+    res.json({ message: 'Kullanıcı pasifleştirildi' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Yemek bölgeleri + masa sayısı senkronu (POStoran benzeri) ──
+router.get('/dining-areas', (req, res) => {
+  try {
+    const areas = db
+      .prepare(
+        `SELECT da.*,
+          (SELECT COUNT(*) FROM tables t WHERE t.dining_area_id = da.id AND t.business_id = da.business_id AND t.is_active = 1) AS active_table_count
+         FROM dining_areas da
+         WHERE da.business_id = ? AND da.is_active = 1
+         ORDER BY da.sort_order, da.name`,
+      )
+      .all(req.businessId);
+    res.json({ areas });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
+  try {
+    const { target_table_count: rawTarget } = req.body;
+    const target = Math.max(0, Math.floor(Number(rawTarget)));
+    if (!Number.isFinite(target)) {
+      return res.status(400).json({ error: 'Geçerli masa sayısı girin' });
+    }
+
+    const area = db
+      .prepare(`SELECT * FROM dining_areas WHERE id = ? AND business_id = ?`)
+      .get(req.params.areaId, req.businessId);
+    if (!area) return res.status(404).json({ error: 'Bölge bulunamadı' });
+
+    let branchId = req.branchId || null;
+    if (!branchId) {
+      branchId = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId)?.id || null;
+    }
+
+    const activeTables = db
+      .prepare(
+        `SELECT * FROM tables WHERE dining_area_id = ? AND business_id = ? AND is_active = 1 ORDER BY sort_order, name`,
+      )
+      .all(area.id, req.businessId);
+
+    const current = activeTables.length;
+
+    let toDeactivate = [];
+    if (target < current) {
+      const need = current - target;
+      toDeactivate = db
+        .prepare(
+          `SELECT id FROM tables WHERE dining_area_id = ? AND business_id = ? AND is_active = 1
+           AND status = 'empty' AND (current_order_id IS NULL OR current_order_id = '')
+           ORDER BY sort_order DESC, name DESC LIMIT ?`,
+        )
+        .all(area.id, req.businessId, need);
+      if (toDeactivate.length < need) {
+        return res.status(400).json({
+          error: 'Dolu masalar veya açık adisyon varken masa sayısı güvenli şekilde düşürülemedi',
+        });
+      }
+    }
+
+    const txn = db.transaction(() => {
+      if (target > current) {
+        let prefix = 'M';
+        let maxSuffix = 0;
+        if (activeTables.length === 0) {
+          const base = String(area.name || 'M')
+            .replace(/[^a-zA-ZĞğÜüŞşİıÖöÇç0-9]/g, '')
+            .slice(0, 2)
+            .toUpperCase();
+          prefix = base || 'M';
+        } else {
+          const first = String(activeTables[0].name || '').match(/^(.+?)(\d+)$/);
+          if (first) prefix = first[1];
+          for (const t of activeTables) {
+            const m = String(t.name || '').match(/^(.+?)(\d+)$/);
+            if (m) maxSuffix = Math.max(maxSuffix, parseInt(m[2], 10));
+          }
+        }
+        const maxSort =
+          db
+            .prepare(`SELECT COALESCE(MAX(sort_order), 0) as m FROM tables WHERE dining_area_id = ? AND business_id = ?`)
+            .get(area.id, req.businessId).m || 0;
+
+        for (let k = 0; k < target - current; k += 1) {
+          maxSuffix += 1;
+          const id = genId();
+          const name = `${prefix}${maxSuffix}`;
+          const sort = maxSort + k + 1;
+          db.prepare(
+            `INSERT INTO tables (id, business_id, branch_id, dining_area_id, name, capacity, sort_order, status, is_active, updated_at)
+             VALUES (?, ?, ?, ?, ?, 4, ?, 'empty', 1, datetime('now'))`,
+          ).run(id, req.businessId, branchId, area.id, name, sort);
+        }
+      } else if (target < current) {
+        for (const row of toDeactivate) {
+          db.prepare(`UPDATE tables SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run(row.id);
+        }
+      }
+
+      db.prepare(`UPDATE dining_areas SET target_table_count = ? WHERE id = ? AND business_id = ?`).run(
+        target,
+        area.id,
+        req.businessId,
+      );
+    });
+
+    txn();
+
+    auditLog(req.businessId, req.user.id, 'dining_area_sync_tables', 'dining_area', area.id, { target });
+    const activeCount = db
+      .prepare(
+        `SELECT COUNT(*) as c FROM tables WHERE dining_area_id = ? AND business_id = ? AND is_active = 1`,
+      )
+      .get(area.id, req.businessId).c;
+    res.json({ success: true, target_table_count: target, active_table_count: activeCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
+export default router;

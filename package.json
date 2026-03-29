@@ -1,0 +1,18 @@
+{
+  "name": "restoran-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern Restoran POS Sistemi",
+  "scripts": {
+    "server": "cd server && node index.js",
+    "client": "cd client && npx vite --host",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "db:migrate": "cd server && node migrations/run.js",
+    "db:seed": "cd server && node seeds/run.js",
+    "setup": "npm install && cd server && npm install && cd ../client && npm install && cd .. && npm run db:seed",
+    "bridge": "node ./store-bridge/index.js"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

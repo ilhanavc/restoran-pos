@@ -1,0 +1,14 @@
+node_modules/
+client/node_modules/
+server/node_modules/
+store-bridge/node_modules/
+
+postorancursor/
+client/dist/
+
+server/.env
+server/data/pos.db
+server/data/*.db-shm
+server/data/*.db-wal
+
+.env
