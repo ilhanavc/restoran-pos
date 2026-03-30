@@ -14,6 +14,9 @@
  *   CID812_PHONE_REGEX=... (varsa parse denenecek; tipik olarak tek capture grubu = numara)
  *   CID812_DEBOUNCE_MS=3500
  *   CID812_LOG_HEX=0|1
+ *   CID812_TRACE_MODE=0|1
+ *   CID812_TRACE_OFFSETS=18-21,29-31,51-53,63
+ *   CID812_TRACE_SAMPLE_WINDOW=10
  *
  * Not: serialport ile ilgili env’ler geriye dönük uyumluluk için okunur ama HID provider kullanılacaktır.
  */
@@ -48,6 +51,12 @@ export function loadConfig() {
   const cid812DebounceMs = Math.max(500, parseInt(req('CID812_DEBOUNCE_MS', '3500'), 10) || 3500);
   const cid812PhoneRegex = req('CID812_PHONE_REGEX', '');
   const cid812LogHex = req('CID812_LOG_HEX') === '1' || req('CID812_LOG_HEX') === 'true';
+  const cid812TraceMode = req('CID812_TRACE_MODE') === '1' || req('CID812_TRACE_MODE') === 'true';
+  const cid812TraceOffsets = req('CID812_TRACE_OFFSETS', '18-21,29-31,51-53,63');
+  const cid812TraceSampleWindow = Math.max(
+    1,
+    parseInt(req('CID812_TRACE_SAMPLE_WINDOW', '10'), 10) || 10,
+  );
 
   // Legacy/compat (şimdilik HID provider kullanacak)
   const cid812Port = req('CID812_PORT', '');
@@ -72,6 +81,9 @@ export function loadConfig() {
     cid812DebounceMs,
     cid812PhoneRegex,
     cid812LogHex,
+    cid812TraceMode,
+    cid812TraceOffsets,
+    cid812TraceSampleWindow,
 
     // Legacy/compat
     cid812Port,

@@ -38,6 +38,31 @@ function bytesToAsciiSafe(buf) {
   }
 }
 
+function parseTraceRanges(raw) {
+  const src = String(raw || '').trim();
+  if (!src) return [];
+  const out = [];
+  for (const tokenRaw of src.split(',')) {
+    const token = tokenRaw.trim();
+    if (!token) continue;
+    const m = token.match(/^(\d+)(?:-(\d+))?$/);
+    if (!m) continue;
+    const a = Number(m[1]);
+    const b = m[2] != null ? Number(m[2]) : a;
+    if (!Number.isInteger(a) || !Number.isInteger(b) || a < 0 || b < 0) continue;
+    out.push([Math.min(a, b), Math.max(a, b)]);
+  }
+  return out;
+}
+
+function formatRangeBytes(buf, start, end) {
+  const slice = Array.from(buf.subarray(start, end + 1));
+  const hex = slice.map((v) => v.toString(16).padStart(2, '0')).join(' ');
+  const dec = slice.join(' ');
+  const ascii = bytesToAsciiSafe(Buffer.from(slice));
+  return { hex, dec, ascii };
+}
+
 export class Cid812Provider {
   /**
    * @param {{ api: { postCallerIdIncoming?: (b: object) => Promise<unknown> }, cfg: Record<string, unknown>, log?: Console }} options
@@ -55,9 +80,14 @@ export class Cid812Provider {
 
     this._debounce = { key: '', at: 0 };
     this._phoneRegex = null;
+    this._frameCount = 0;
+    this._traceSample = [];
 
     // Parse gated: ilk sürümde varsayılan kapalı.
     this._shouldParse = Boolean(this.cfg.cid812EnableParse) || Boolean(String(this.cfg.cid812PhoneRegex || '').trim());
+    this._traceMode = Boolean(this.cfg.cid812TraceMode);
+    this._traceRanges = parseTraceRanges(this.cfg.cid812TraceOffsets);
+    this._traceWindow = this.cfg.cid812TraceSampleWindow ?? 10;
     const reStr = String(this.cfg.cid812PhoneRegex || '');
     if (this._shouldParse && reStr.trim()) {
       try {
@@ -159,6 +189,7 @@ export class Cid812Provider {
   }
 
   _handleReport(buf) {
+    this._frameCount += 1;
     const ts = new Date().toISOString();
     const hex = buf.toString('hex');
     const ascii = bytesToAsciiSafe(buf);
@@ -172,6 +203,9 @@ export class Cid812Provider {
     );
     if (this.cfg.cid812LogHex) {
       this.log.log?.(`[cid812][ascii] ${ascii}`);
+    }
+    if (this._traceMode) {
+      this._emitTrace(ts, buf, info);
     }
 
     // Parse kapalıyken POST etmiyoruz.
@@ -205,6 +239,45 @@ export class Cid812Provider {
     this._postIncoming(phone, rawPayload).catch((e) => {
       this.log.error?.('[cid812][hid] API POST hatası:', e?.message || e);
     });
+  }
+
+  _emitTrace(ts, buf, info) {
+    if (!this._traceRanges.length) return;
+    const max = buf.length - 1;
+    if (max < 0) return;
+
+    const normalized = this._traceRanges
+      .map(([s, e]) => [Math.min(s, max), Math.min(e, max)])
+      .filter(([s, e]) => s <= e);
+    if (!normalized.length) return;
+
+    const chunks = [];
+    const signatureParts = [];
+    for (const [s, e] of normalized) {
+      const f = formatRangeBytes(buf, s, e);
+      chunks.push(`${s}-${e} hex=[${f.hex}] dec=[${f.dec}] ascii=[${f.ascii}]`);
+      signatureParts.push(`${s}-${e}:${f.hex}`);
+    }
+    const signature = signatureParts.join('|');
+    const prev = this._traceSample.length ? this._traceSample[this._traceSample.length - 1] : null;
+    const changed = prev ? prev.signature !== signature : true;
+
+    this.log.log?.(
+      `[cid812][trace] ${ts} frame=${this._frameCount} vid=${info.vendorId ?? '?'} pid=${info.productId ?? '?'} serial=${info.serialNumber ?? '-'} changed=${changed ? '1' : '0'} ${chunks.join(' | ')}`,
+    );
+
+    this._traceSample.push({ signature });
+    if (this._traceSample.length > this._traceWindow) {
+      this._traceSample.shift();
+    }
+
+    // Özet: pencere içinde kaç farklı imza var (idle/event geçişini fark etmeyi kolaylaştırır)
+    if (this._frameCount % this._traceWindow === 0) {
+      const uniq = new Set(this._traceSample.map((x) => x.signature)).size;
+      this.log.log?.(
+        `[cid812][trace-summary] frames=${this._traceSample.length} window=${this._traceWindow} unique_signatures=${uniq}`,
+      );
+    }
   }
 
   async _postIncoming(phone, rawPayload) {
