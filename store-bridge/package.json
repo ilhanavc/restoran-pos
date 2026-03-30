@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Yerel yazıcı köprüsü — print_jobs polling + opsiyonel CID812",
   "dependencies": {
-    "serialport": "^12.0.0"
+    "serialport": "^12.0.0",
+    "node-hid": "^2.1.0"
   }
 }

@@ -26,7 +26,7 @@ async function main() {
   process.on('SIGTERM', shutdown);
 
   console.log(
-    `[store-bridge] çalışıyor poll=${cfg.pollIntervalMs}ms dryRun=${cfg.dryRun} api=${cfg.apiBase} cid812=${cfg.cid812Enabled ? `on port=${cfg.cid812Port}` : 'off'}`,
+    `[store-bridge] çalışıyor poll=${cfg.pollIntervalMs}ms dryRun=${cfg.dryRun} api=${cfg.apiBase} cid812=${cfg.cid812Enabled ? `on hid vid=${cfg.cid812HidVid} pid=${cfg.cid812HidPid}` : 'off'}`,
   );
 }
 

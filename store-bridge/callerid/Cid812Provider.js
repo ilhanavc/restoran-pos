@@ -1,17 +1,41 @@
 /**
- * CID 812 / USB-serial caller ID — StoreBridge süreci içinde çalışır.
- * Protokol net değilse yalnızca ham satır loglanır; POST yalnızca CID812_PHONE_REGEX ile
- * üretici formatı tanımlandığında veya manuel test çağrısında yapılır.
+ * CID 812 / HID caller ID — StoreBridge süreci içinde çalışır.
+ *
+ * HID protokolü net değilse "parse kapalı" modunda ham report loglar.
+ * Parse ancak CID812_ENABLE_PARSE=1 veya CID812_PHONE_REGEX dolu ise "gated" olarak denenir.
+ *
+ * Bu dosya backend ve frontend çağrı akışını bozmaz:
+ *  - numara çıkarılırsa: POST ${API_BASE}/api/bridge/caller-id/incoming
+ *  - parse yoksa: sadece raw log
  */
-
-function parityOption(p) {
-  const x = String(p || 'none').toLowerCase();
-  if (x === 'even' || x === 'odd' || x === 'none') return x;
-  return 'none';
-}
 
 function digitsKey(s) {
   return String(s || '').replace(/\D/g, '');
+}
+
+function normalizeHexString(v) {
+  return String(v || '').trim().replace(/^0x/i, '').toUpperCase();
+}
+
+function parseHexCsvToIntList(str) {
+  const raw = String(str || '').trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((x) => normalizeHexString(x))
+    .filter(Boolean)
+    .map((x) => parseInt(x, 16))
+    .filter((n) => Number.isFinite(n));
+}
+
+function bytesToAsciiSafe(buf) {
+  try {
+    const ascii = Buffer.from(buf).toString('ascii');
+    // Sadece yazdırılabilirleri bırak, kontrol karakterleri noktaya çevir.
+    return ascii.replace(/[^\x20-\x7E]/g, '.');
+  } catch {
+    return '';
+  }
 }
 
 export class Cid812Provider {
@@ -22,13 +46,28 @@ export class Cid812Provider {
     this.api = options.api;
     this.cfg = options.cfg || {};
     this.log = options.log || console;
+
     this._started = false;
     this._stopped = false;
-    this._port = null;
-    this._buf = Buffer.alloc(0);
+
+    this._device = null;
+    this._deviceInfo = null;
+
     this._debounce = { key: '', at: 0 };
-    /** @type {RegExp | null} */
     this._phoneRegex = null;
+
+    // Parse gated: ilk sürümde varsayılan kapalı.
+    this._shouldParse = Boolean(this.cfg.cid812EnableParse) || Boolean(String(this.cfg.cid812PhoneRegex || '').trim());
+    const reStr = String(this.cfg.cid812PhoneRegex || '');
+    if (this._shouldParse && reStr.trim()) {
+      try {
+        this._phoneRegex = new RegExp(reStr.trim());
+      } catch (e) {
+        this.log.error?.('[cid812][hid] CID812_PHONE_REGEX geçersiz; parse kapatıldı:', e?.message || e);
+        this._shouldParse = false;
+        this._phoneRegex = null;
+      }
+    }
   }
 
   start() {
@@ -37,108 +76,112 @@ export class Cid812Provider {
     this._stopped = false;
 
     if (!this.cfg.cid812Enabled) {
-      this.log.log?.('[cid812] devre dışı (CID812_ENABLED=0 veya false)');
+      this.log.log?.('[cid812][hid] devre dışı (CID812_ENABLED=0 veya false)');
       return;
     }
 
-    if (!this.cfg.cid812Port) {
-      this.log.warn?.('[cid812] CID812_PORT boş — seri port açılmadı');
-      return;
-    }
-
-    const reStr = this.cfg.cid812PhoneRegex;
-    if (reStr && String(reStr).trim()) {
-      try {
-        this._phoneRegex = new RegExp(String(reStr).trim());
-      } catch (e) {
-        this.log.error?.('[cid812] CID812_PHONE_REGEX geçersiz — sadece ham log modu:', e?.message || e);
-        this._phoneRegex = null;
-      }
-    }
-
-    this._openSerial().catch((e) => {
-      this.log.error?.('[cid812] seri port açılamadı:', e?.message || e);
+    this._openHid().catch((e) => {
+      this.log.error?.('[cid812][hid] start: HID açılamadı:', e?.message || e);
     });
   }
 
-  async _openSerial() {
-    let SerialPort;
+  async _openHid() {
+    let HID;
     try {
-      ({ SerialPort } = await import('serialport'));
+      const mod = await import('node-hid');
+      HID = mod.default || mod;
     } catch (e) {
-      this.log.error?.('[cid812] serialport paketi yok veya yüklenemedi:', e?.message || e);
+      this.log.error?.('[cid812][hid] node-hid paketi yok veya yüklenemedi:', e?.message || e);
       return;
     }
 
-    if (this._stopped) return;
+    const hidVids = parseHexCsvToIntList(this.cfg.cid812HidVid);
+    const hidPids = parseHexCsvToIntList(this.cfg.cid812HidPid);
+    const hidSerial = String(this.cfg.cid812HidSerial || '').trim().toUpperCase();
 
-    const path = this.cfg.cid812Port;
-    const baudRate = this.cfg.cid812BaudRate ?? 9600;
-    const dataBits = this.cfg.cid812DataBits ?? 8;
-    const stopBits = this.cfg.cid812StopBits ?? 1;
-    const parity = parityOption(this.cfg.cid812Parity);
+    const devices = HID.devices ? HID.devices() : [];
+    if (!Array.isArray(devices) || devices.length === 0) {
+      this.log.warn?.('[cid812][hid] HID cihaz listesi boş');
+      return;
+    }
 
-    this.log.log?.(`[cid812] port açılıyor path=${path} baud=${baudRate} ${dataBits}${parity[0].toUpperCase()}${stopBits}`);
-
-    this._port = new SerialPort({
-      path,
-      baudRate,
-      dataBits,
-      stopBits,
-      parity,
-      autoOpen: true,
+    const matches = devices.filter((d) => {
+      const vidOk = hidVids.length ? hidVids.includes(d.vendorId) : true;
+      const pidOk = hidPids.length ? hidPids.includes(d.productId) : true;
+      const serialOk = hidSerial ? String(d.serialNumber || '').trim().toUpperCase() === hidSerial : true;
+      return vidOk && pidOk && serialOk;
     });
 
-    this._port.on('open', () => {
-      this.log.log?.('[cid812] port açık — ham satırlar loglanacak; POST için CID812_PHONE_REGEX veya API testi kullanın');
-    });
+    if (!matches.length) {
+      this.log.warn?.(
+        '[cid812][hid] eşleşen cihaz bulunamadı. vid/pid/serial filtresi: ',
+        { hidVids, hidPids, hidSerial, devicesCount: devices.length },
+      );
+      return;
+    }
 
-    this._port.on('error', (err) => {
-      if (!this._stopped) this.log.error?.('[cid812] port hatası:', err?.message || err);
-    });
+    // İlk eşleşeni aç.
+    const selected = matches[0];
+    this._deviceInfo = {
+      path: selected.path,
+      vendorId: selected.vendorId,
+      productId: selected.productId,
+      serialNumber: selected.serialNumber,
+    };
 
-    this._port.on('data', (chunk) => {
+    const openPath = selected.path || '';
+    this.log.log?.('[cid812][hid] cihaz açılıyor:', this._deviceInfo);
+
+    // node-hid genelde path ile açılabiliyor; path yoksa vid/pid denenecek.
+    try {
+      if (openPath) this._device = new HID.HID(openPath);
+      else this._device = new HID.HID(selected.vendorId, selected.productId);
+    } catch (e) {
+      this.log.error?.('[cid812][hid] cihaz açma hatası:', e?.message || e);
+      return;
+    }
+
+    this._device.on?.('data', (data) => {
       if (this._stopped) return;
-      if (this.cfg.cid812LogHex) {
-        this.log.log?.(`[cid812][hex] ${Buffer.from(chunk).toString('hex')}`);
-      }
-      this._appendChunk(chunk);
+      const buf = Buffer.from(data || []);
+      this._handleReport(buf);
     });
+
+    this._device.on?.('error', (err) => {
+      if (!this._stopped) this.log.error?.('[cid812][hid] device error:', err?.message || err);
+    });
+
+    this._device.on?.('close', () => {
+      if (!this._stopped) this.log.warn?.('[cid812][hid] device close');
+    });
+
+    this.log.log?.('[cid812][hid] parse:', this._shouldParse ? 'AÇIK(gated)' : 'KAPALI');
   }
 
-  /**
-   * @param {Buffer} chunk
-   */
-  _appendChunk(chunk) {
-    this._buf = Buffer.concat([this._buf, chunk]);
-    const max = 65536;
-    if (this._buf.length > max) {
-      this._buf = this._buf.subarray(this._buf.length - max);
+  _handleReport(buf) {
+    const ts = new Date().toISOString();
+    const hex = buf.toString('hex');
+    const ascii = bytesToAsciiSafe(buf);
+    const info = this._deviceInfo || {};
+
+    // Ham log (ilk sürüm)
+    const maybeTrunc = hex.length > 2000 ? `${hex.slice(0, 2000)}…` : hex;
+    const asciiSnippet = ascii.length > 300 ? `${ascii.slice(0, 300)}…` : ascii;
+    this.log.log?.(
+      `[cid812][raw] ${ts} vid=${info.vendorId ?? '?'} pid=${info.productId ?? '?'} serial=${info.serialNumber ?? '-'} len=${buf.length} hex=${maybeTrunc} ascii=${asciiSnippet}`,
+    );
+    if (this.cfg.cid812LogHex) {
+      this.log.log?.(`[cid812][ascii] ${ascii}`);
     }
 
-    let nl;
-    while ((nl = this._buf.indexOf(0x0a)) >= 0) {
-      const lineBuf = this._buf.subarray(0, nl);
-      this._buf = this._buf.subarray(nl + 1);
-      let line = lineBuf.toString('utf8');
-      if (line.endsWith('\r')) line = line.slice(0, -1);
-      this._handleLine(line);
-    }
-  }
+    // Parse kapalıyken POST etmiyoruz.
+    if (!this._shouldParse || !this._phoneRegex || !this.api?.postCallerIdIncoming) return;
 
-  /**
-   * @param {string} line
-   */
-  _handleLine(line) {
-    const safe = line.length > 2000 ? `${line.slice(0, 2000)}…` : line;
-    this.log.log?.(`[cid812][raw] ${JSON.stringify(safe)}`);
+    const m = ascii.match(this._phoneRegex);
+    if (!m) return;
 
-    if (!this._phoneRegex || !this.api?.postCallerIdIncoming) return;
-
-    const m = line.match(this._phoneRegex);
-    if (!m || m[1] == null) return;
-
-    const phone = String(m[1]).trim();
+    const capture = m[1] != null ? m[1] : m[0];
+    const phone = String(capture || '').trim();
     if (!phone) return;
 
     const key = digitsKey(phone);
@@ -147,57 +190,46 @@ export class Cid812Provider {
     const debounceMs = this.cfg.cid812DebounceMs ?? 3500;
     const now = Date.now();
     if (key === this._debounce.key && now - this._debounce.at < debounceMs) {
-      this.log.log?.('[cid812] debounce — aynı numara kısa sürede tekrarlandı, atlandı');
+      this.log.log?.('[cid812][hid] debounce — aynı numara kısa sürede tekrarlandı, atlandı');
       return;
     }
     this._debounce = { key, at: now };
 
-    this._postIncoming(phone, line).catch((e) => {
-      this.log.error?.('[cid812] API POST hatası:', e?.message || e);
+    const rawPayload = {
+      ascii,
+      hex,
+      report_length: buf.length,
+      device: { ...info },
+    };
+
+    this._postIncoming(phone, rawPayload).catch((e) => {
+      this.log.error?.('[cid812][hid] API POST hatası:', e?.message || e);
     });
   }
 
-  /**
-   * @param {string} phone
-   * @param {string} rawLine
-   */
-  async _postIncoming(phone, rawLine) {
+  async _postIncoming(phone, rawPayload) {
     await this.api.postCallerIdIncoming({
       phone,
-      raw_payload: { line: rawLine, source: 'cid812' },
+      raw_payload: rawPayload,
       source_type: 'cid812',
     });
-    this.log.log?.(`[cid812] gönderildi: ${phone}`);
-  }
-
-  /**
-   * Manuel test: doğrudan backend’e numara gönder (cihaz olmadan).
-   * @param {string} phone
-   */
-  async submitTestPhone(phone) {
-    if (!this.api?.postCallerIdIncoming) throw new Error('api yok');
-    await this.api.postCallerIdIncoming({
-      phone: String(phone),
-      raw_payload: { test: true },
-      source_type: 'cid812_test',
-    });
+    this.log.log?.(`[cid812][hid] gönderildi: ${phone}`);
   }
 
   stop() {
     this._stopped = true;
     try {
-      if (this._port) {
-        if (this._port.isOpen) {
-          this._port.close((err) => {
-            if (err) this.log.error?.('[cid812] kapanırken:', err?.message || err);
-          });
+      if (this._device) {
+        try {
+          this._device.close();
+        } catch {
+          // ignore
         }
-        this._port = null;
+        this._device = null;
       }
     } catch (e) {
-      this.log.error?.('[cid812] stop:', e?.message || e);
+      this.log.error?.('[cid812][hid] stop:', e?.message || e);
     }
-    this._buf = Buffer.alloc(0);
   }
 
   get started() {
