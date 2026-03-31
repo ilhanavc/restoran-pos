@@ -153,6 +153,7 @@ restoran-pos/
 ### Caller ID
 - `POST /api/callerid/incoming` — Gelen arama simülasyonu
 - `GET /api/callerid/history` — Arama geçmişi
+- `POST /api/bridge/caller-id/incoming` — StoreBridge/harici dinleyici ile gelen arama (X-Bridge-Token gerekir)
 
 ### Raporlar
 - `GET /api/reports/daily` — Günlük rapor
@@ -161,6 +162,55 @@ restoran-pos/
 ### Yazıcı
 - `POST /api/print/receipt` — Müşteri fişi
 - `POST /api/print/kitchen` — Mutfak fişi
+
+## Caller ID (Clipboard Akışı - Önerilen)
+
+CID 812 için repo içindeki aktif ve düşük riskli akış clipboard dinleme yaklaşımıdır:
+
+- CIDSHOW benzeri uygulama cihazdan numarayı alır ve clipboard'a yazar.
+- PowerShell izleyici scripti clipboard'daki yeni 10-11 haneli numarayı yakalar.
+- Script numarayı `POST /api/bridge/caller-id/incoming` endpoint'ine `X-Bridge-Token` ile gönderir.
+- Backend `processIncomingCall` zinciri ile `call_logs` kaydı üretir; frontend popup/polling otomatik çalışır.
+
+### Hızlı Kurulum
+
+```powershell
+# 1) Gerekli env'ler
+$env:BRIDGE_TOKEN="YOUR_BRIDGE_TOKEN"
+$env:API_BASE="http://127.0.0.1:3001/api"
+
+# 2) Dinleyiciyi çalıştır (önerilen yeni script)
+powershell -ExecutionPolicy Bypass -File .\scripts\callerid-clipboard-listener.ps1
+```
+
+### StoreBridge Notu
+
+- `store-bridge` içinde `CID812_MODE=clipboard` varsayılandır.
+- `CID812_MODE=hid-experimental` yalnızca legacy analiz amaçlıdır (önerilmez).
+
+### Çalıştırma Sırası (Önerilen)
+
+1. POS backend ve frontend'i başlat (`npm run dev`).
+2. StoreBridge'i başlat (print polling aktif, CID HID yolu varsayılan pasif).
+3. CIDSHOW TEST içinde cihaz okuma + panoya kopyala özelliğini aktif et.
+4. Clipboard listener scriptini başlat.
+5. Test araması yap; popup ve paket sipariş yönlendirme akışını doğrula.
+
+### Listener Parametreleri
+
+`scripts/callerid-clipboard-listener.ps1` şu parametre/env değerlerini destekler:
+
+- `ApiBase` veya `API_BASE` (default: `http://127.0.0.1:3001/api`)
+- `BridgeToken` veya `BRIDGE_TOKEN` (zorunlu)
+- `SourceType` veya `CALLERID_SOURCE_TYPE` (default: `callerid_clipboard`)
+- `PollMs` veya `CALLERID_POLL_MS` (default: `300`)
+- `DebounceMs` veya `CALLERID_DEBOUNCE_MS` (default: `4000`)
+
+Script yalnızca 10-11 haneli numaraları gönderir, aynı numarada debounce uygular ve hata durumunda döngüyü kapatmaz.
+
+### Opsiyonel Windows Kısayolu
+
+`.\\scripts\\start-callerid-clipboard.bat` dosyası listener'ı hızlı başlatmak için eklenmiştir.
 
 ## Sonraki Geliştirmeler (Roadmap)
 

@@ -1,12 +1,8 @@
 /**
- * CID 812 / HID caller ID — StoreBridge süreci içinde çalışır.
+ * CID 812 / HID caller ID (deprecated experimental path).
  *
- * HID protokolü net değilse "parse kapalı" modunda ham report loglar.
- * Parse ancak CID812_ENABLE_PARSE=1 veya CID812_PHONE_REGEX dolu ise "gated" olarak denenir.
- *
- * Bu dosya backend ve frontend çağrı akışını bozmaz:
- *  - numara çıkarılırsa: POST ${API_BASE}/api/bridge/caller-id/incoming
- *  - parse yoksa: sadece raw log
+ * Aktif ve önerilen üretim akışı clipboard script + bridge endpoint'tir.
+ * Bu provider yalnızca CID812_MODE=hid-experimental ise çalıştırılır.
  */
 
 function digitsKey(s) {
@@ -63,6 +59,18 @@ function formatRangeBytes(buf, start, end) {
   return { hex, dec, ascii };
 }
 
+function byteToAscii(v) {
+  if (v >= 0x20 && v <= 0x7e) return String.fromCharCode(v);
+  return '.';
+}
+
+function avgAt(frames, idx) {
+  if (!frames.length) return 0;
+  let sum = 0;
+  for (const f of frames) sum += f.bytes[idx];
+  return sum / frames.length;
+}
+
 export class Cid812Provider {
   /**
    * @param {{ api: { postCallerIdIncoming?: (b: object) => Promise<unknown> }, cfg: Record<string, unknown>, log?: Console }} options
@@ -82,12 +90,29 @@ export class Cid812Provider {
     this._phoneRegex = null;
     this._frameCount = 0;
     this._traceSample = [];
+    this._frames = [];
+    this._pendingTransitions = [];
+    this._lastTransitionAtMs = 0;
+    this._lastFrameBytes = null;
+    this._idleScoreEma = null;
+    this._currentMode = 'idleLike';
 
     // Parse gated: ilk sürümde varsayılan kapalı.
     this._shouldParse = Boolean(this.cfg.cid812EnableParse) || Boolean(String(this.cfg.cid812PhoneRegex || '').trim());
     this._traceMode = Boolean(this.cfg.cid812TraceMode);
     this._traceRanges = parseTraceRanges(this.cfg.cid812TraceOffsets);
     this._traceWindow = this.cfg.cid812TraceSampleWindow ?? 10;
+    this._transitionMode = Boolean(this.cfg.cid812TransitionMode);
+    this._transitionWindow = this.cfg.cid812TransitionWindow ?? 10;
+    this._transitionMinGapMs = this.cfg.cid812TransitionMinGapMs ?? 1500;
+    this._transitionTopN = this.cfg.cid812TransitionTopN ?? 12;
+    this._transitionVerboseTable = Boolean(this.cfg.cid812TransitionVerboseTable);
+    this._candidateMode = Boolean(this.cfg.cid812CandidateMode);
+    this._candidateSummaryEvery = this.cfg.cid812CandidateSummaryEvery ?? 5;
+    this._candidateTopN = this.cfg.cid812CandidateTopN ?? 8;
+    this._candidateCounts = new Array(64).fill(0);
+    this._candidateDeltaSums = new Array(64).fill(0);
+    this._transitionReportCount = 0;
     const reStr = String(this.cfg.cid812PhoneRegex || '');
     if (this._shouldParse && reStr.trim()) {
       try {
@@ -109,6 +134,13 @@ export class Cid812Provider {
       this.log.log?.('[cid812][hid] devre dışı (CID812_ENABLED=0 veya false)');
       return;
     }
+    if (String(this.cfg.cid812Mode || 'clipboard') !== 'hid-experimental') {
+      this.log.log?.(
+        '[cid812] mode=clipboard: HID provider pasif. Numarayı clipboard watcher script ile /api/bridge/caller-id/incoming endpointine gönderin.',
+      );
+      return;
+    }
+    this.log.warn?.('[cid812][hid] DEPRECATED: hid-experimental mod sadece analiz amaçlıdır.');
 
     this._openHid().catch((e) => {
       this.log.error?.('[cid812][hid] start: HID açılamadı:', e?.message || e);
@@ -186,6 +218,16 @@ export class Cid812Provider {
     });
 
     this.log.log?.('[cid812][hid] parse:', this._shouldParse ? 'AÇIK(gated)' : 'KAPALI');
+    if (this._transitionMode) {
+      this.log.log?.(
+        `[cid812][transition] mode=ON window=${this._transitionWindow} minGapMs=${this._transitionMinGapMs} topN=${this._transitionTopN} verbose=${this._transitionVerboseTable ? 1 : 0}`,
+      );
+      if (this._candidateMode) {
+        this.log.log?.(
+          `[cid812][candidate] mode=ON summaryEvery=${this._candidateSummaryEvery} topN=${this._candidateTopN}`,
+        );
+      }
+    }
   }
 
   _handleReport(buf) {
@@ -206,6 +248,9 @@ export class Cid812Provider {
     }
     if (this._traceMode) {
       this._emitTrace(ts, buf, info);
+    }
+    if (this._transitionMode) {
+      this._captureFrameAndAnalyze(ts, buf, info);
     }
 
     // Parse kapalıyken POST etmiyoruz.
@@ -239,6 +284,160 @@ export class Cid812Provider {
     this._postIncoming(phone, rawPayload).catch((e) => {
       this.log.error?.('[cid812][hid] API POST hatası:', e?.message || e);
     });
+  }
+
+  _captureFrameAndAnalyze(ts, buf, info) {
+    const bytes = Array.from(buf.subarray(0, 64));
+    if (bytes.length < 64) {
+      while (bytes.length < 64) bytes.push(0);
+    }
+
+    let score = 0;
+    if (this._lastFrameBytes) {
+      let sum = 0;
+      for (let i = 0; i < 64; i += 1) {
+        sum += Math.abs(bytes[i] - this._lastFrameBytes[i]);
+      }
+      score = sum / 64;
+    }
+    this._lastFrameBytes = bytes;
+
+    // Basit mode detector: idle score ema'nın üstüne çıkarsa event-like
+    if (this._idleScoreEma == null) this._idleScoreEma = score;
+    const isEvent = score > Math.max(22, this._idleScoreEma * 2.2);
+    const nextMode = isEvent ? 'eventLike' : 'idleLike';
+    if (!isEvent) {
+      this._idleScoreEma = this._idleScoreEma * 0.9 + score * 0.1;
+    }
+
+    const frame = {
+      idx: this._frameCount,
+      ts,
+      mode: nextMode,
+      score,
+      bytes,
+      info: { ...info },
+    };
+    this._frames.push(frame);
+    const keep = Math.max(64, this._transitionWindow * 6);
+    if (this._frames.length > keep) {
+      this._frames.splice(0, this._frames.length - keep);
+    }
+
+    // Önce pending transition'ları tamamlamayı dene.
+    this._flushPendingTransitions();
+
+    if (nextMode !== this._currentMode) {
+      const now = Date.now();
+      if (now - this._lastTransitionAtMs >= this._transitionMinGapMs) {
+        const before = this._frames.slice(-this._transitionWindow - 1, -1).map((f) => ({ ...f, bytes: [...f.bytes] }));
+        if (before.length >= this._transitionWindow) {
+          this._pendingTransitions.push({
+            atFrameIdx: frame.idx,
+            atTs: ts,
+            fromMode: this._currentMode,
+            toMode: nextMode,
+            beforeFrames: before,
+            expectedAfter: this._transitionWindow,
+          });
+          this._lastTransitionAtMs = now;
+          this.log.log?.(
+            `[cid812][transition] detected ${this._currentMode} -> ${nextMode} at frame=${frame.idx} score=${score.toFixed(2)}`,
+          );
+        }
+      }
+      this._currentMode = nextMode;
+    }
+  }
+
+  _flushPendingTransitions() {
+    if (!this._pendingTransitions.length) return;
+    const remaining = [];
+    for (const t of this._pendingTransitions) {
+      const after = this._frames
+        .filter((f) => f.idx > t.atFrameIdx)
+        .slice(0, t.expectedAfter)
+        .map((f) => ({ ...f, bytes: [...f.bytes] }));
+      if (after.length < t.expectedAfter) {
+        remaining.push(t);
+        continue;
+      }
+      this._emitTransitionReport(t, after);
+    }
+    this._pendingTransitions = remaining;
+  }
+
+  _emitTransitionReport(t, afterFrames) {
+    const rows = [];
+    for (let i = 0; i < 64; i += 1) {
+      const beforeAvg = avgAt(t.beforeFrames, i);
+      const afterAvg = avgAt(afterFrames, i);
+      const delta = afterAvg - beforeAvg;
+      const b = Math.max(0, Math.min(255, Math.round(beforeAvg)));
+      const a = Math.max(0, Math.min(255, Math.round(afterAvg)));
+      rows.push({
+        index: i,
+        beforeAvg,
+        afterAvg,
+        delta,
+        absDelta: Math.abs(delta),
+        asciiBefore: byteToAscii(b),
+        asciiAfter: byteToAscii(a),
+      });
+    }
+
+    const topRows = [...rows].sort((x, y) => y.absDelta - x.absDelta).slice(0, this._transitionTopN);
+    this.log.log?.(
+      `[cid812][transition] snapshot at=${t.atTs} from=${t.fromMode} to=${t.toMode} before=${t.beforeFrames.length} after=${afterFrames.length}`,
+    );
+    for (const r of topRows) {
+      this.log.log?.(
+        `[cid812][transition][top] idx=${String(r.index).padStart(2, '0')} before=${r.beforeAvg.toFixed(2)} after=${r.afterAvg.toFixed(2)} delta=${r.delta.toFixed(2)} ascii=${r.asciiBefore}->${r.asciiAfter}`,
+      );
+    }
+
+    if (this._transitionVerboseTable) {
+      for (const r of rows) {
+        this.log.log?.(
+          `[cid812][transition][row] idx=${String(r.index).padStart(2, '0')} before=${r.beforeAvg.toFixed(2)} after=${r.afterAvg.toFixed(2)} delta=${r.delta.toFixed(2)} ascii=${r.asciiBefore}->${r.asciiAfter}`,
+        );
+      }
+    }
+
+    if (this._candidateMode) {
+      this._updateCandidateStats(topRows);
+    }
+  }
+
+  _updateCandidateStats(topRows) {
+    this._transitionReportCount += 1;
+    for (const r of topRows) {
+      this._candidateCounts[r.index] += 1;
+      this._candidateDeltaSums[r.index] += r.absDelta;
+    }
+    if (this._transitionReportCount % this._candidateSummaryEvery !== 0) return;
+
+    const scored = [];
+    for (let i = 0; i < 64; i += 1) {
+      const c = this._candidateCounts[i];
+      if (!c) continue;
+      scored.push({
+        index: i,
+        hits: c,
+        avgAbsDelta: this._candidateDeltaSums[i] / c,
+      });
+    }
+    scored.sort((a, b) => {
+      if (b.hits !== a.hits) return b.hits - a.hits;
+      return b.avgAbsDelta - a.avgAbsDelta;
+    });
+    const top = scored.slice(0, this._candidateTopN);
+    const compact = top
+      .map((x) => `${String(x.index).padStart(2, '0')}(hits=${x.hits},avg=${x.avgAbsDelta.toFixed(2)})`)
+      .join(', ');
+    this.log.log?.(
+      `[cid812][candidate] transitions=${this._transitionReportCount} top=${compact || '-'}`,
+    );
   }
 
   _emitTrace(ts, buf, info) {
@@ -303,6 +502,11 @@ export class Cid812Provider {
     } catch (e) {
       this.log.error?.('[cid812][hid] stop:', e?.message || e);
     }
+    this._pendingTransitions = [];
+    this._frames = [];
+    this._traceSample = [];
+    this._lastFrameBytes = null;
+    this._idleScoreEma = null;
   }
 
   get started() {

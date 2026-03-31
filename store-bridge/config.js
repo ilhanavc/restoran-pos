@@ -5,8 +5,13 @@
  * store-bridge için:
  *   POLL_INTERVAL_MS, BRIDGE_DRY_RUN=1 (yazıcıya göndermeden printed işaretle)
  *
- * CID812 (opsiyonel, HID tabanlı):
+ * CID812:
  *   CID812_ENABLED=0|1
+ *   CID812_MODE=clipboard|hid-experimental (varsayılan: clipboard)
+ *     - clipboard: cihaz okuma dış araç/script ile yapılır; bridge sadece print poller gibi çalışır
+ *     - hid-experimental: legacy deneysel node-hid provider açılır
+ *
+ * HID deneysel mod için ek env'ler:
  *   CID812_HID_VID=C0F4 (veya "C0F4,1A86" gibi CSV)
  *   CID812_HID_PID=01F5 (veya CSV)
  *   CID812_HID_SERIAL=4C27A9624
@@ -17,8 +22,16 @@
  *   CID812_TRACE_MODE=0|1
  *   CID812_TRACE_OFFSETS=18-21,29-31,51-53,63
  *   CID812_TRACE_SAMPLE_WINDOW=10
+ *   CID812_TRANSITION_MODE=0|1
+ *   CID812_TRANSITION_WINDOW=10
+ *   CID812_TRANSITION_MIN_GAP_MS=1500
+ *   CID812_TRANSITION_TOPN=12
+ *   CID812_TRANSITION_VERBOSE_TABLE=0|1
+ *   CID812_CANDIDATE_MODE=0|1
+ *   CID812_CANDIDATE_SUMMARY_EVERY=5
+ *   CID812_CANDIDATE_TOPN=8
  *
- * Not: serialport ile ilgili env’ler geriye dönük uyumluluk için okunur ama HID provider kullanılacaktır.
+ * Not: serialport ile ilgili env'ler geriye dönük uyumluluk için okunur.
  */
 
 function req(name, fallback = '') {
@@ -43,6 +56,7 @@ export function loadConfig() {
   }
 
   const cid812Enabled = req('CID812_ENABLED') === '1' || req('CID812_ENABLED') === 'true';
+  const cid812Mode = req('CID812_MODE', 'clipboard').toLowerCase();
   const cid812HidVid = req('CID812_HID_VID', 'C0F4');
   const cid812HidPid = req('CID812_HID_PID', '01F5');
   const cid812HidSerial = req('CID812_HID_SERIAL', '4C27A9624');
@@ -57,8 +71,32 @@ export function loadConfig() {
     1,
     parseInt(req('CID812_TRACE_SAMPLE_WINDOW', '10'), 10) || 10,
   );
+  const cid812TransitionMode = req('CID812_TRANSITION_MODE') === '1' || req('CID812_TRANSITION_MODE') === 'true';
+  const cid812TransitionWindow = Math.max(
+    2,
+    parseInt(req('CID812_TRANSITION_WINDOW', '10'), 10) || 10,
+  );
+  const cid812TransitionMinGapMs = Math.max(
+    0,
+    parseInt(req('CID812_TRANSITION_MIN_GAP_MS', '1500'), 10) || 1500,
+  );
+  const cid812TransitionTopN = Math.max(
+    1,
+    parseInt(req('CID812_TRANSITION_TOPN', '12'), 10) || 12,
+  );
+  const cid812TransitionVerboseTable =
+    req('CID812_TRANSITION_VERBOSE_TABLE') === '1' || req('CID812_TRANSITION_VERBOSE_TABLE') === 'true';
+  const cid812CandidateMode = req('CID812_CANDIDATE_MODE') === '1' || req('CID812_CANDIDATE_MODE') === 'true';
+  const cid812CandidateSummaryEvery = Math.max(
+    1,
+    parseInt(req('CID812_CANDIDATE_SUMMARY_EVERY', '5'), 10) || 5,
+  );
+  const cid812CandidateTopN = Math.max(
+    1,
+    parseInt(req('CID812_CANDIDATE_TOPN', '8'), 10) || 8,
+  );
 
-  // Legacy/compat (şimdilik HID provider kullanacak)
+  // Legacy/compat (hid-experimental dışında kullanılmaz)
   const cid812Port = req('CID812_PORT', '');
   const cid812BaudRate = Math.max(300, parseInt(req('CID812_BAUDRATE', '9600'), 10) || 9600);
   const cid812DataBits = Math.min(8, Math.max(5, parseInt(req('CID812_DATABITS', '8'), 10) || 8));
@@ -74,6 +112,7 @@ export function loadConfig() {
     claimId,
     socketTimeoutMs,
     cid812Enabled,
+    cid812Mode,
     cid812HidVid,
     cid812HidPid,
     cid812HidSerial,
@@ -84,6 +123,14 @@ export function loadConfig() {
     cid812TraceMode,
     cid812TraceOffsets,
     cid812TraceSampleWindow,
+    cid812TransitionMode,
+    cid812TransitionWindow,
+    cid812TransitionMinGapMs,
+    cid812TransitionTopN,
+    cid812TransitionVerboseTable,
+    cid812CandidateMode,
+    cid812CandidateSummaryEvery,
+    cid812CandidateTopN,
 
     // Legacy/compat
     cid812Port,
