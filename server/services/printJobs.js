@@ -231,6 +231,8 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
       product_name: i.product_name,
       quantity: i.quantity,
       unit_price: i.unit_price,
+      modifiers: i.modifiers,
+      note: i.note,
       status: i.status,
     })),
     payments: payments.map((p) => ({

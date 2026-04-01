@@ -4,7 +4,9 @@
  */
 
 /** @type {number} 80 mm termal için tipik karakter genişliği (12 cpi civarı) */
-const LINE_WIDTH = 42;
+const DEFAULT_LINE_WIDTH = 42;
+const MIN_LINE_WIDTH = 32;
+const MAX_LINE_WIDTH = 64;
 
 function concat(buffers) {
   return Buffer.concat(buffers.filter(Boolean));
@@ -23,12 +25,37 @@ function feedAndCut() {
   return Buffer.from([0x1d, 0x56, 0x00]);
 }
 
-function separator(width = LINE_WIDTH) {
-  return '-'.repeat(Math.max(8, width));
+function resolveLineWidth(p) {
+  const fromPayload = Number(p?.line_width);
+  if (Number.isFinite(fromPayload)) {
+    return Math.min(MAX_LINE_WIDTH, Math.max(MIN_LINE_WIDTH, Math.trunc(fromPayload)));
+  }
+  const fromEnv = Number(process.env.BRIDGE_PRINT_LINE_WIDTH);
+  if (Number.isFinite(fromEnv)) {
+    return Math.min(MAX_LINE_WIDTH, Math.max(MIN_LINE_WIDTH, Math.trunc(fromEnv)));
+  }
+  return DEFAULT_LINE_WIDTH;
+}
+
+function separator(width = DEFAULT_LINE_WIDTH, ch = '-') {
+  const c = String(ch || '-').slice(0, 1);
+  return c.repeat(Math.max(8, width));
+}
+
+function strongSeparator(width = DEFAULT_LINE_WIDTH) {
+  return separator(width, '=');
+}
+
+function separatorSpaced(width = DEFAULT_LINE_WIDTH, ch = '-') {
+  return ` ${separator(width - 2, ch)} `;
+}
+
+function separatorStrongSpaced(width = DEFAULT_LINE_WIDTH) {
+  return ` ${strongSeparator(width - 2)} `;
 }
 
 /** @param {string} s */
-function centerLine(s, width = LINE_WIDTH) {
+function centerLine(s, width = DEFAULT_LINE_WIDTH) {
   const t = String(s ?? '').trim();
   if (!t) return '';
   if (t.length >= width) return t.slice(0, width);
@@ -42,7 +69,7 @@ function centerLine(s, width = LINE_WIDTH) {
  * @param {string} right
  * @param {number} width
  */
-function alignLeftRight(left, right, width = LINE_WIDTH) {
+function alignLeftRight(left, right, width = DEFAULT_LINE_WIDTH) {
   const L = String(left ?? '').trimEnd();
   const R = String(right ?? '').trim();
   if (!R) return L.slice(0, width);
@@ -93,7 +120,7 @@ function wrapText(text, maxWidth) {
  * @param {number} width
  * @returns {string[]}
  */
-function linesProductQty(productName, qtyLabel, width = LINE_WIDTH) {
+function linesProductQty(productName, qtyLabel, width = DEFAULT_LINE_WIDTH) {
   const right = String(qtyLabel ?? '').trim() || '';
   const name = String(productName ?? '').trim() || '-';
   if (!right) return wrapText(name, width);
@@ -182,10 +209,27 @@ function paymentLabel(type) {
   return PAY_LABELS[String(type || '').toLowerCase()] || type || '-';
 }
 
+function parseModifiers(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function itemUnitAndTotal(item) {
+  const qty = Number(item?.quantity) || 0;
+  const unit = Number(item?.unit_price);
+  if (!Number.isFinite(unit)) return { unit: null, total: null };
+  return { unit, total: unit * qty };
+}
+
 function buildKitchenLines(p) {
-  const w = LINE_WIDTH;
+  const w = resolveLineWidth(p);
   const out = [];
-  const sep = separator(w);
+  const sep = separatorSpaced(w);
 
   if (p.error) {
     out.push(sep, centerLine('MUTFAK', w), sep, `Hata: ${p.error}`, '');
@@ -205,7 +249,7 @@ function buildKitchenLines(p) {
 
   out.push(sep);
   out.push(centerLine(title, w));
-  out.push(centerLine(station, w));
+  out.push(centerLine(`[${station}]`, w));
   out.push(sep);
   out.push(alignLeftRight(fmtDateTime(p.created_at), `No: ${p.order_no ?? ''}`, w));
   out.push(tableOrPackageLine(p));
@@ -234,9 +278,9 @@ function buildKitchenLines(p) {
 }
 
 function buildReceiptLines(p) {
-  const w = LINE_WIDTH;
+  const w = resolveLineWidth(p);
   const out = [];
-  const sep = separator(w);
+  const sep = separatorSpaced(w);
 
   const title = orderTypeTitle(p.order_type);
   out.push(sep);
@@ -263,13 +307,37 @@ function buildReceiptLines(p) {
     for (const row of linesProductQty(name, qty, w)) {
       out.push(row);
     }
+    const { unit, total } = itemUnitAndTotal(it);
+    if (unit != null || total != null) {
+      const left = `  ${fmtMoney(unit)} x ${Number(it.quantity) || 0}`;
+      out.push(alignLeftRight(left, fmtMoney(total), w));
+    }
+    const mods = parseModifiers(it.modifiers);
+    for (const m of mods) {
+      const modName = String(m?.name || '').trim();
+      if (!modName) continue;
+      const delta = Number(m?.price_delta);
+      const modPrice = Number.isFinite(delta) && delta !== 0 ? ` (+${fmtMoney(delta)})` : '';
+      for (const line of wrapText(`-> ${modName}${modPrice}`, w - 2)) {
+        out.push(`  ${line}`);
+      }
+    }
+    if (it.note) {
+      for (const line of wrapText(`Not: ${it.note}`, w - 4)) {
+        out.push(`    ${line}`);
+      }
+    }
   }
 
   out.push(sep);
   if (p.subtotal != null) out.push(alignLeftRight('Ara toplam', fmtMoney(p.subtotal), w));
   const disc = Number(p.discount_amount);
   if (disc > 0) out.push(alignLeftRight('İndirim', `-${fmtMoney(disc)}`, w));
-  if (p.grand_total != null) out.push(alignLeftRight('TOPLAM', fmtMoney(p.grand_total), w));
+  if (p.grand_total != null) {
+    out.push(separatorStrongSpaced(w));
+    out.push(alignLeftRight('TOPLAM', fmtMoney(p.grand_total), w));
+    out.push(separatorStrongSpaced(w));
+  }
 
   if (pays.length) {
     out.push(sep);
@@ -294,6 +362,7 @@ function buildReceiptLines(p) {
  */
 export function payloadToEscPosBuffer(job) {
   const p = job.payload || {};
+  const width = resolveLineWidth(p);
   const parts = [escInit()];
 
   if (p.kind === 'kitchen') {
@@ -305,9 +374,9 @@ export function payloadToEscPosBuffer(job) {
       parts.push(textLine(line));
     }
   } else {
-    parts.push(textLine(separator(LINE_WIDTH)));
+    parts.push(textLine(separator(width)));
     parts.push(textLine(`İş: ${job.job_type || '?'}`));
-    parts.push(textLine(String(JSON.stringify(p)).slice(0, LINE_WIDTH * 2)));
+    parts.push(textLine(String(JSON.stringify(p)).slice(0, width * 2)));
   }
 
   parts.push(textLine(''), feedAndCut());
