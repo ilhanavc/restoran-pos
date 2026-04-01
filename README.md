@@ -212,6 +212,40 @@ Script yalnızca 10-11 haneli numaraları gönderir, aynı numarada debounce uyg
 
 `.\\scripts\\start-callerid-clipboard.bat` dosyası listener'ı hızlı başlatmak için eklenmiştir.
 
+## Caller ID (SDK Helper - Primary Aday)
+
+Vendor `cid.dll` örnekleri baz alınarak izole bir C# helper eklendi:
+
+- Proje: `tools/callerid-sdk-helper`
+- Model: `SetEvents` callback (vendor örneklerine sadık)
+- Varsayılan mod: log-only (POST kapalı)
+- Opsiyonel mod: backend bridge endpoint'ine POST
+
+### Neden izole helper?
+
+- Node tarafına native ffi/callback riski sokmadan SDK denenebilir.
+- x86/x64 DLL yükleme sorunları ayrı süreçte izole edilir.
+- Mevcut backend/frontend/store-bridge akışları değişmeden kalır.
+
+### Build ve Çalıştırma
+
+```powershell
+dotnet build .\tools\callerid-sdk-helper\CallerIdSdkHelper.csproj -c Release
+
+# İlk test: log-only
+dotnet run --project .\tools\callerid-sdk-helper\CallerIdSdkHelper.csproj -- --api-base http://127.0.0.1:3001/api
+
+# POST modu (bridge token gerekli)
+$env:BRIDGE_TOKEN="YOUR_BRIDGE_TOKEN"
+dotnet run --project .\tools\callerid-sdk-helper\CallerIdSdkHelper.csproj -- --api-base http://127.0.0.1:3001/api --post-enabled true --source-type callerid_sdk_helper --bridge-token $env:BRIDGE_TOKEN
+```
+
+### Primary / Fallback
+
+- Primary aday: SDK helper (`callerid_sdk_helper`)
+- Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`)
+- Bridge endpoint ve `processIncomingCall` zinciri ortaktır: `POST /api/bridge/caller-id/incoming`
+
 ## Sonraki Geliştirmeler (Roadmap)
 
 ### Kısa Vadeli

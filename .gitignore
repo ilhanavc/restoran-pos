@@ -12,3 +12,6 @@ server/data/*.db-shm
 server/data/*.db-wal
 
 .env
+
+tools/**/bin/
+tools/**/obj/
