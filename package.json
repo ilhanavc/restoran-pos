@@ -10,7 +10,11 @@
     "db:migrate": "cd server && node migrations/run.js",
     "db:seed": "cd server && node seeds/run.js",
     "setup": "npm install && cd server && npm install && cd ../client && npm install && cd .. && npm run db:seed",
-    "bridge": "node ./store-bridge/index.js"
+    "bridge": "node ./store-bridge/index.js",
+    "app:start": "npm run dev",
+    "bridge:start": "npm run bridge",
+    "callerid:start": "dotnet run --project ./tools/callerid-sdk-helper/CallerIdSdkHelper.csproj -- --post-enabled true",
+    "all:start": "scripts\\start-all.bat"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"

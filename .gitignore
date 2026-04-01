@@ -1,17 +1,70 @@
 node_modules/
+
 client/node_modules/
+
 server/node_modules/
+
 store-bridge/node_modules/
 
+
+
 postorancursor/
+
 client/dist/
 
+
+
 server/.env
+
 server/data/pos.db
+
 server/data/*.db-shm
+
 server/data/*.db-wal
+
+
 
 .env
 
+
+
+scripts/local-env.bat
+
+
+
+# .NET build output (tools, local helpers)
+
 tools/**/bin/
+
 tools/**/obj/
+
+
+
+# Vendor Caller ID SDK: archives + extracted samples (runtime = tools/callerid-sdk-helper + manual cid.dll)
+
+caller_id/
+
+
+
+# Visual Studio / MSBuild
+
+*.suo
+
+*.user
+
+
+
+# Vendor cid.dll — copy locally next to helper output; not committed
+
+tools/callerid-sdk-helper/cidshow_x64/
+
+tools/callerid-sdk-helper/cidshow_x86/
+
+
+
+# Local scratch / demo
+
+fisornek.txt
+
+server/data/
+server/data/

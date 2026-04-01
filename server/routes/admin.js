@@ -38,12 +38,79 @@ function upsertSetting(businessId, key, valueObj) {
 
 const PRINTER_TYPES = new Set(['receipt', 'kitchen', 'bar']);
 
-function defaultPrintOptions() {
+function defaultLayoutReceipt() {
   return {
+    fontFamily: 'Courier New',
+    fontSizeHeader: 18,
+    fontSizeSubheader: 13,
+    fontSizeItems: 13,
+    fontSizeTotal: 16,
+    fontSizeFooter: 12,
+    marginLeft: 8,
+    marginRight: 8,
+    footerLine1: 'Afiyet olsun',
+    footerLine2: '',
+  };
+}
+
+function defaultLayoutKitchen() {
+  return {
+    fontFamily: 'Courier New',
+    fontSizeTitle: 15,
+    fontSizeItems: 14,
+    marginLeft: 6,
+    marginRight: 6,
+    footerLine1: '',
+    footerLine2: '',
+  };
+}
+
+function defaultLayoutForType(type) {
+  if (type === 'kitchen') return defaultLayoutKitchen();
+  if (type === 'bar') return { ...defaultLayoutKitchen(), fontSizeTitle: 14, fontSizeItems: 13 };
+  return defaultLayoutReceipt();
+}
+
+function defaultOutputForType(type) {
+  if (type === 'receipt') {
+    return {
+      showPrices: true,
+      showOrderTotal: true,
+      showOrderNumber: true,
+      showVat: false,
+      footerNote: '',
+    };
+  }
+  return {
+    showPrices: false,
+    showOrderTotal: false,
+    showOrderNumber: true,
+    showVat: false,
+    footerNote: '',
+  };
+}
+
+function defaultCopies() {
+  return {
+    dine_in: 1,
+    takeaway: 1,
+    delivery: 1,
+    after_payment: 1,
+  };
+}
+
+function defaultPrintOptionsForType(type) {
+  const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
+  return {
+    device: { physicalName: null, source: 'manual' },
+    layout: defaultLayoutForType(type),
+    copies: defaultCopies(),
+    printOnSave: false,
+    printOnIntegrationApprove: false,
     roles: {
-      receipt: false,
-      kitchen: false,
-      bar: false,
+      receipt: pk === 'receipt',
+      kitchen: pk === 'kitchen',
+      bar: pk === 'bar',
       courier: false,
       server: false,
     },
@@ -52,18 +119,12 @@ function defaultPrintOptions() {
       IZGARA: false,
       ICECEKLER: false,
     },
-    output: {
-      showPrices: false,
-      showOrderTotal: false,
-      showOrderNumber: true,
-      showVat: false,
-      footerNote: '',
-    },
+    output: defaultOutputForType(type),
   };
 }
 
 function mergePrintOptions(rawJson, type) {
-  const base = defaultPrintOptions();
+  const base = defaultPrintOptionsForType(type);
   let parsed = {};
   if (rawJson) {
     try {
@@ -72,7 +133,19 @@ function mergePrintOptions(rawJson, type) {
       parsed = {};
     }
   }
+  const layoutLegacy = {};
+  if (!parsed.layout?.footerLine1 && parsed.output?.footerNote) {
+    layoutLegacy.footerLine1 = parsed.output.footerNote;
+  }
   const merged = {
+    device: { ...base.device, ...(parsed.device || {}) },
+    layout: { ...base.layout, ...layoutLegacy, ...(parsed.layout || {}) },
+    copies: { ...base.copies, ...(parsed.copies || {}) },
+    printOnSave: typeof parsed.printOnSave === 'boolean' ? parsed.printOnSave : base.printOnSave,
+    printOnIntegrationApprove:
+      typeof parsed.printOnIntegrationApprove === 'boolean'
+        ? parsed.printOnIntegrationApprove
+        : base.printOnIntegrationApprove,
     roles: { ...base.roles, ...(parsed.roles || {}) },
     kitchenGroups: { ...base.kitchenGroups, ...(parsed.kitchenGroups || {}) },
     output: { ...base.output, ...(parsed.output || {}) },
@@ -86,6 +159,15 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
   const base = mergePrintOptions(existingRaw, type);
   if (!incomingObj || typeof incomingObj !== 'object') return base;
   const out = {
+    device: { ...base.device, ...(incomingObj.device || {}) },
+    layout: { ...base.layout, ...(incomingObj.layout || {}) },
+    copies: { ...base.copies, ...(incomingObj.copies || {}) },
+    printOnSave:
+      typeof incomingObj.printOnSave === 'boolean' ? incomingObj.printOnSave : base.printOnSave,
+    printOnIntegrationApprove:
+      typeof incomingObj.printOnIntegrationApprove === 'boolean'
+        ? incomingObj.printOnIntegrationApprove
+        : base.printOnIntegrationApprove,
     roles: { ...base.roles, ...(incomingObj.roles || {}) },
     kitchenGroups: { ...base.kitchenGroups, ...(incomingObj.kitchenGroups || {}) },
     output: { ...base.output, ...(incomingObj.output || {}) },

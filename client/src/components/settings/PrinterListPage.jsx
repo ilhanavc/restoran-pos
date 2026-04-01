@@ -5,7 +5,7 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import PrinterDeleteModal from './PrinterDeleteModal.jsx';
-import { formatRoleTags, connectionSummary, primaryTypeLabel } from './printerDefaults.js';
+import { connectionSummary, listTypeLabel } from './printerDefaults.js';
 
 function statusLabel(p) {
   if (!p.is_active) return { text: 'Pasif', tone: 'warning' };
@@ -160,8 +160,8 @@ export default function PrinterListPage() {
                     }}
                   >
                     <span style={{ fontWeight: 600 }}>{p.name}</span>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: 13 }} title={formatRoleTags(p.type, p.print_options)}>
-                      {formatRoleTags(p.type, p.print_options)}
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 13 }} title={listTypeLabel(p.type)}>
+                      #{listTypeLabel(p.type)}
                     </span>
                     <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{connectionSummary(p)}</span>
                     <span>

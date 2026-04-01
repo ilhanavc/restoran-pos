@@ -60,6 +60,32 @@ npm run dev
 - **Frontend:** http://localhost:5173
 - **Backend API:** http://localhost:3001
 
+### Windows: tek tık / kolay başlatma
+
+Kısa kullanıcı özeti: [BASLATMA.md](BASLATMA.md)
+
+Dükkan bilgisayarında az komut kullanmak için `scripts` klasöründeki `.bat` dosyaları kullanılabilir. Ortak ayarlar için `scripts/local-env.example.bat` dosyasını `scripts/local-env.bat` olarak kopyalayın; `BRIDGE_TOKEN`, `BRIDGE_BUSINESS_ID` ve gerekirse diğer değişkenleri doldurun (`local-env.bat` git’e eklenmez).
+
+| Dosya | Ne yapar |
+|--------|-----------|
+| `scripts/start-all.bat` | **Tek tıkla tüm sistem:** ayrı pencerelerde POS (frontend+backend), Store Bridge ve (varsayılan olarak) Caller ID SDK helper’ı sırayla başlatır (~8 sn backend bekleme, bridge/caller id için kısa gecikme). Caller ID’yi bu akışta açmak istemezseniz `local-env.bat` içinde `START_ALL_CALLERID=0` kullanın. |
+| `scripts/start-pos-dev.bat` | Sadece `npm run dev` (Vite + API), `load-env` ile ortam. |
+| `scripts/start-bridge.bat` | `npm run bridge`; `BRIDGE_TOKEN` ve `BRIDGE_BUSINESS_ID` zorunlu. |
+| `scripts/start-callerid-helper.bat` | .NET Caller ID helper; varsayılan POST açık (`CALLERID_HELPER_POST_ENABLED` ile kapatılabilir). `BRIDGE_TOKEN` POST açıkken zorunlu. |
+| `scripts/start-callerid-sdk-helper.bat` | `start-callerid-helper.bat` ile aynı (eski kısayollar için). |
+
+**npm (kök dizinde):** `npm run app:start`, `npm run bridge:start`, `npm run callerid:start`, `npm run all:start` — mevcut script isimleri değişmedi; bunlar ek kolaylık komutlarıdır. `callerid:start` için `BRIDGE_TOKEN` ve `API_BASE` ortamda tanımlı olmalıdır. `all:start` Windows’ta `start-all.bat` çağırır.
+
+**Manuel fallback (değişmedi):**
+
+- POS: `npm run dev`
+- Bridge: `npm run bridge` (gerekli env ile)
+- Caller ID helper: `dotnet run --project .\tools\callerid-sdk-helper\CallerIdSdkHelper.csproj -- --api-base http://127.0.0.1:3001/api --post-enabled true --bridge-token <token>` (veya `tools/callerid-sdk-helper/README.md`)
+
+**`BRIDGE_BUSINESS_ID`:** `npm run db:seed` her çalıştığında yeni bir işletme UUID’si üretir; bridge ile eşleşmesi için veritabanındaki `businesses.id` ile aynı değeri `local-env.bat` içinde kullanın (ör. SQLite’ta `SELECT id FROM businesses LIMIT 1;`).
+
+**Caller ID helper gereksinimleri:** [.NET SDK](https://dotnet.microsoft.com/download), vendor `cid.dll` dosyasının `tools/callerid-sdk-helper/cidshow_x64/` veya `cidshow_x86/` altında olması (veya `CID_DLL_X64_PATH` / `CID_DLL_X86_PATH`). Ayrıntılar: `tools/callerid-sdk-helper/README.md`.
+
 ### Demo Giriş Bilgileri
 
 | Rol | E-posta | Şifre |
