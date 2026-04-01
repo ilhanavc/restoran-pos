@@ -1,0 +1,12 @@
+
+********  Soft Test  ********
+
+Cihaz kullanmadan deneme yapýlabilir.
+
+Uygulama klasöründe
+"softTest.txt"  varsa, sürekli periyodik çaðrýlar  algýlanýr.
+
+Cihaz baðlantýsý varsa fiziksel hat üzerinden geçen çaðrýlar algýlanýr.
+
+SoftTest iptali için uygulamayý deðiþtirmeden 
+dosyayý silmek veya isim deðiþikliði yeterlidir.

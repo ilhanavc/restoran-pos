@@ -30,6 +30,7 @@ internal static class Program
 
     private static readonly HttpClient Http = new();
     private static readonly object Gate = new();
+    private static readonly Dictionary<string, DateTime> LastSeenByKey = new();
 
     // Keep delegate references rooted to prevent GC.
     private static CallerIdCallback? _callerIdHandler;
@@ -41,9 +42,8 @@ internal static class Program
     private static string _bridgeToken = string.Empty;
     private static string _sourceType = "callerid_sdk_helper";
     private static bool _postEnabled;
-    private static int _debounceMs = 4000;
-    private static string _lastDigits = string.Empty;
-    private static DateTime _lastSentAt = DateTime.MinValue;
+    private static int _debounceMs = 1800;
+    private static int _debounceStateTtlMs = 5 * 60 * 1000;
 
     private static int Main(string[] args)
     {
@@ -225,7 +225,7 @@ internal static class Program
                 return;
             }
 
-            var isDebounced = IsDebounced(digits);
+            var isDebounced = IsDebounced(digits, line);
             Console.WriteLine($"[callerid-sdk-helper][event] debounce={(isDebounced ? "ignored" : "accepted")} debounce_ms={_debounceMs}");
             if (isDebounced)
             {
@@ -254,18 +254,51 @@ internal static class Program
             $"[callerid-sdk-helper][signal] model={deviceModel} serial={deviceSerial} levels={signal1}/{signal2}/{signal3}/{signal4}");
     }
 
-    private static bool IsDebounced(string digits)
+    private static bool IsDebounced(string digits, string line)
     {
         lock (Gate)
         {
             var now = DateTime.UtcNow;
-            if (digits == _lastDigits && (now - _lastSentAt).TotalMilliseconds < _debounceMs)
+            CleanupDebounceState(now);
+
+            var key = BuildDebounceKey(digits, line);
+            if (LastSeenByKey.TryGetValue(key, out var lastSeenAt) &&
+                (now - lastSeenAt).TotalMilliseconds < _debounceMs)
             {
                 return true;
             }
-            _lastDigits = digits;
-            _lastSentAt = now;
+            LastSeenByKey[key] = now;
             return false;
+        }
+    }
+
+    private static string BuildDebounceKey(string digits, string line)
+    {
+        var normDigits = NormalizeDigits(digits);
+        var normLine = string.IsNullOrWhiteSpace(line) ? "-" : line.Trim().ToLowerInvariant();
+        return $"{normDigits}|{normLine}";
+    }
+
+    private static void CleanupDebounceState(DateTime now)
+    {
+        if (LastSeenByKey.Count == 0)
+        {
+            return;
+        }
+
+        var cutoff = now.AddMilliseconds(-_debounceStateTtlMs);
+        var staleKeys = new List<string>();
+        foreach (var kv in LastSeenByKey)
+        {
+            if (kv.Value < cutoff)
+            {
+                staleKeys.Add(kv.Key);
+            }
+        }
+
+        foreach (var key in staleKeys)
+        {
+            LastSeenByKey.Remove(key);
         }
     }
 
