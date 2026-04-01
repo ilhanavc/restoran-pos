@@ -1,5 +1,5 @@
 /**
- * print_jobs.payload JSON → ESC/POS byte buffer (UTF-8).
+ * print_jobs.payload JSON → ESC/POS byte buffer.
  * 80 mm termal: sabit satır genişliği, hizalı metin; init + kesim korunur.
  */
 
@@ -7,6 +7,20 @@
 const DEFAULT_LINE_WIDTH = 42;
 const MIN_LINE_WIDTH = 32;
 const MAX_LINE_WIDTH = 64;
+const DEFAULT_ESC_T = 28; // WPC1254 (Turkish) - Epson compatible table index
+
+/**
+ * CP1254 için Türkçe karakter eşlemeleri.
+ * Not: Yazıcı modeli farklı tablo istiyorsa BRIDGE_PRINT_ESC_T ile override edilebilir.
+ */
+const CP1254_TR_MAP = new Map([
+  ['Ğ', 0xd0],
+  ['ğ', 0xf0],
+  ['İ', 0xdd],
+  ['ı', 0xfd],
+  ['Ş', 0xde],
+  ['ş', 0xfe],
+]);
 
 function concat(buffers) {
   return Buffer.concat(buffers.filter(Boolean));
@@ -16,9 +30,54 @@ function escInit() {
   return Buffer.from([0x1b, 0x40]);
 }
 
+function escSelectCodePage(n) {
+  return Buffer.from([0x1b, 0x74, n & 0xff]);
+}
+
+function resolveEscT() {
+  const raw = Number(process.env.BRIDGE_PRINT_ESC_T);
+  if (Number.isFinite(raw)) {
+    return Math.max(0, Math.min(255, Math.trunc(raw)));
+  }
+  return DEFAULT_ESC_T;
+}
+
+function resolveEncoding() {
+  const enc = String(process.env.BRIDGE_PRINT_ENCODING || 'cp1254').trim().toLowerCase();
+  if (enc === 'utf8' || enc === 'utf-8') return 'utf8';
+  return 'cp1254';
+}
+
+function encodeCp1254(text) {
+  const src = String(text ?? '');
+  const bytes = [];
+  for (const ch of src) {
+    if (CP1254_TR_MAP.has(ch)) {
+      bytes.push(CP1254_TR_MAP.get(ch));
+      continue;
+    }
+    const cp = ch.codePointAt(0);
+    if (cp == null) continue;
+    if (cp <= 0x7f) {
+      bytes.push(cp);
+      continue;
+    }
+    if (cp >= 0xa0 && cp <= 0xff) {
+      bytes.push(cp);
+      continue;
+    }
+    bytes.push(0x3f); // '?'
+  }
+  return Buffer.from(bytes);
+}
+
 function textLine(s) {
   const line = s == null ? '' : String(s);
-  return Buffer.from(`${line}\n`, 'utf8');
+  const enc = resolveEncoding();
+  if (enc === 'utf8') {
+    return Buffer.from(`${line}\n`, 'utf8');
+  }
+  return Buffer.concat([encodeCp1254(line), Buffer.from([0x0a])]);
 }
 
 function feedAndCut() {
@@ -255,6 +314,8 @@ function buildKitchenLines(p) {
   out.push(tableOrPackageLine(p));
   if (p.user_name) out.push(`Personel: ${p.user_name}`);
   out.push(sep);
+  out.push(alignLeftRight('ÜRÜN', 'ADET', w));
+  out.push(sep);
 
   const lines = Array.isArray(p.lines) ? p.lines : [];
   for (const ln of lines) {
@@ -298,6 +359,8 @@ function buildReceiptLines(p) {
     const summary = pays.map((x) => paymentLabel(x.payment_type)).join(' + ');
     out.push(`Ödeme: ${summary}`);
   }
+  out.push(sep);
+  out.push(alignLeftRight('ÜRÜN', 'ADET', w));
   out.push(sep);
 
   const items = Array.isArray(p.items) ? p.items : [];
@@ -363,7 +426,7 @@ function buildReceiptLines(p) {
 export function payloadToEscPosBuffer(job) {
   const p = job.payload || {};
   const width = resolveLineWidth(p);
-  const parts = [escInit()];
+  const parts = [escInit(), escSelectCodePage(resolveEscT())];
 
   if (p.kind === 'kitchen') {
     for (const line of buildKitchenLines(p)) {
