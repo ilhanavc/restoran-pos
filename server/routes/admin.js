@@ -801,22 +801,34 @@ router.post('/printers/test', (req, res) => {
       .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
       .get(printer_id, req.businessId);
     if (!p) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+
+    const nowIso = new Date().toISOString();
     const testPayload = {
+      kind: 'test',
+      printer_name: p.name,
+      created_at: nowIso,
+      order_no: `TEST-${Date.now().toString().slice(-6)}`,
       lines: [
-        '=== Restoran POS — Test çıktısı ===',
+        'Restoran POS fiziksel yazıcı testi',
         `Yazıcı: ${p.name}`,
+        `Bağlantı: ${p.connection_type || 'network'}`,
         `Adres: ${p.ip_address || '-'}:${p.port || 9100}`,
-        new Date().toLocaleString('tr-TR'),
-        'Bu bir mock çıktıdır; gerçek yazıcıya gönderilmedi.',
+        'Bu çıktı StoreBridge print_jobs zinciriyle gönderilmiştir.',
       ],
     };
-    console.log('🖨️ [MOCK TEST]', testPayload.lines.join('\n'));
+    const jobId = genId();
+    const idempotencyKey = `test|${req.businessId}|${printer_id}|${jobId}`;
+    db.prepare(
+      `INSERT INTO print_jobs (id, business_id, order_id, printer_id, job_type, payload, status, error_message, idempotency_key, created_at, printed_at)
+       VALUES (?, ?, NULL, ?, ?, ?, 'pending', NULL, ?, datetime('now'), NULL)`,
+    ).run(jobId, req.businessId, printer_id, 'test', JSON.stringify(testPayload), idempotencyKey);
+
     auditLog(req.businessId, req.user.id, 'printer_test', 'printer', printer_id);
     res.json({
       success: true,
-      mock: true,
-      message: `Test çıktısı simüle edildi: ${p.name} (ağ yazıcısına gerçek gönderim bu ortamda yok)`,
-      testPayload,
+      queued: true,
+      jobId,
+      message: `Test çıktısı kuyruğa alındı: ${p.name}`,
     });
   } catch (err) {
     console.error(err);

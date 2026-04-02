@@ -51,7 +51,7 @@ export default function PrinterListPage() {
     setTestingId(printerId);
     try {
       const res = await api.postPrinterTest({ printer_id: printerId });
-      success(res.message || 'Test tamamlandı');
+      success(res.message || 'Test çıktısı kuyruğa alındı');
     } catch (e) {
       error(e.message || 'Test başarısız');
     } finally {

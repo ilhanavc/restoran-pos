@@ -420,6 +420,26 @@ function buildReceiptLines(p) {
   return out;
 }
 
+function buildTestLines(p) {
+  const w = resolveLineWidth(p);
+  const out = [];
+  const sep = separatorSpaced(w);
+  out.push(sep);
+  out.push(centerLine('YAZICI TESTI', w));
+  out.push(sep);
+  out.push(alignLeftRight(fmtDateTime(p.created_at), `No: ${p.order_no || '-'}`, w));
+  out.push(sep);
+  const lines = Array.isArray(p.lines) ? p.lines : [];
+  for (const line of lines) {
+    for (const wrapped of wrapText(String(line || ''), w)) {
+      out.push(wrapped);
+    }
+  }
+  out.push(sep);
+  if (p.printer_name) out.push(centerLine(String(p.printer_name), w));
+  return out;
+}
+
 /**
  * @param {{ job_type: string, payload: object }} job
  */
@@ -434,6 +454,10 @@ export function payloadToEscPosBuffer(job) {
     }
   } else if (p.kind === 'receipt') {
     for (const line of buildReceiptLines(p)) {
+      parts.push(textLine(line));
+    }
+  } else if (p.kind === 'test') {
+    for (const line of buildTestLines(p)) {
       parts.push(textLine(line));
     }
   } else {
