@@ -48,6 +48,19 @@ function NumField({ label, value, onChange, min = 0, max = 72 }) {
   );
 }
 
+function TypePill({ active, onClick, label }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={active ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
+      style={{ minWidth: 108 }}
+    >
+      {label}
+    </button>
+  );
+}
+
 /** 80mm termal hissi; layout/output state ile canlı */
 function LivePrinterPreview({ type, printOptions }) {
   const layout = printOptions?.layout || {};
@@ -72,9 +85,9 @@ function LivePrinterPreview({ type, printOptions }) {
     paddingBottom: 12,
     paddingLeft: 12 + pl,
     paddingRight: 12 + pr,
-    minHeight: 280,
+    minHeight: 480,
     maxWidth: '100%',
-    width: 'min(100%, 340px)',
+    width: '100%',
     lineHeight: 1.4,
     boxSizing: 'border-box',
   };
@@ -179,6 +192,10 @@ export default function PrinterDetailPage() {
   const [connectionType, setConnectionType] = useState('network');
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('9100');
+  const [discoveryLoading, setDiscoveryLoading] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState('');
+  const [discoveryUpdatedAt, setDiscoveryUpdatedAt] = useState('');
+  const [discoveredPrinters, setDiscoveredPrinters] = useState([]);
   const [isActive, setIsActive] = useState(true);
   const [isDefault, setIsDefault] = useState(false);
   const [printOptions, setPrintOptions] = useState(() => normalizePrintOptions({}, 'receipt'));
@@ -223,9 +240,27 @@ export default function PrinterDetailPage() {
     setLoadedSig(sig);
   }, []);
 
+  const loadDiscoveredPrinters = useCallback(async () => {
+    setDiscoveryLoading(true);
+    setDiscoveryError('');
+    try {
+      const data = await api.getDiscoveredPrinters();
+      const list = Array.isArray(data.printers) ? data.printers : [];
+      setDiscoveredPrinters(list);
+      setDiscoveryUpdatedAt(data.updatedAt || '');
+      if (!list.length) setDiscoveryError(data.message || 'Aktif yazıcı bulunamadı');
+    } catch (e) {
+      setDiscoveredPrinters([]);
+      setDiscoveryUpdatedAt('');
+      setDiscoveryError(e.message || 'Yazıcı listesi alınamadı');
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  }, []);
+
   const load = useCallback(async () => {
     if (isNew) {
-      const data = await api.getPrinterSettings();
+      const [data] = await Promise.all([api.getPrinterSettings(), loadDiscoveredPrinters()]);
       setConfig(data.config || {});
       const po = normalizePrintOptions({}, 'receipt');
       setName('');
@@ -253,7 +288,7 @@ export default function PrinterDetailPage() {
     }
     setLoading(true);
     try {
-      const [prRes, settings] = await Promise.all([api.getAdminPrinter(id), api.getPrinterSettings()]);
+      const [prRes, settings] = await Promise.all([api.getAdminPrinter(id), api.getPrinterSettings(), loadDiscoveredPrinters()]);
       setConfig(settings.config || {});
       snapshotState(prRes.printer, settings.config);
     } catch (e) {
@@ -262,7 +297,7 @@ export default function PrinterDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [error, id, isNew, navigate, snapshotState]);
+  }, [error, id, isNew, navigate, snapshotState, loadDiscoveredPrinters]);
 
   useEffect(() => {
     load();
@@ -331,10 +366,14 @@ export default function PrinterDetailPage() {
       error('En az bir rol gerekli');
       return;
     }
+    const selectedPhysical = (printOptions.device?.physicalName || '').trim();
+    if (!selectedPhysical) {
+      error('Taranan yazıcılar listesinden bir yazıcı seçin');
+      return;
+    }
     let portNum = parseInt(port, 10);
     if (Number.isNaN(portNum) || portNum < 1 || portNum > 65535) {
-      error('Geçerli bir port girin');
-      return;
+      portNum = 9100;
     }
 
     const poToSave = {
@@ -431,6 +470,12 @@ export default function PrinterDetailPage() {
   }, [type]);
 
   const physicalName = printOptions.device?.physicalName ?? '';
+  const typeBehaviorText =
+    type === 'kitchen'
+      ? 'Mutfak modu aktif: operasyonel ve sade çıktı ayarları öne çıkar.'
+      : type === 'bar'
+        ? 'Legacy Bar modu: mevcut kayıtlar için uyumluluk modunda düzenleme.'
+        : 'Adisyon modu aktif: fiş görünümü ve ödeme çıktısı ayarları öne çıkar.';
 
   return (
     <div className="page-container">
@@ -471,11 +516,11 @@ export default function PrinterDetailPage() {
               borderColor: 'var(--border)',
             }}
           >
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 640, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 700, lineHeight: 1.55 }}>
               {isNew ? (
                 <>
-                  <strong style={{ color: 'var(--text-primary)' }}>Önerilen varsayılanlar yüklendi.</strong> Çıktı sütunundaki
-                  değerler bu yazıcı tipi için başlangıç önerileridir; kaydetmeden önce özelleştirebilirsiniz.
+                  <strong style={{ color: 'var(--text-primary)' }}>Önerilen başlangıç ayarları yüklendi.</strong> Bu tip için
+                  önerilen değerlerle başlayıp kaydetmeden önce özelleştirebilirsiniz.
                 </>
               ) : (
                 <>
@@ -491,14 +536,14 @@ export default function PrinterDetailPage() {
               onClick={resetToRecommendedDefaults}
               disabled={loading}
             >
-              Varsayılanlara dön
+              Bu tip için önerilen ayarları uygula
             </button>
           </div>
 
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.15fr) minmax(300px, 380px)',
+              gridTemplateColumns: 'minmax(300px, 0.95fr) minmax(420px, 1.2fr) minmax(420px, 1.35fr)',
               gap: 16,
               alignItems: 'start',
             }}
@@ -510,13 +555,14 @@ export default function PrinterDetailPage() {
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Yazıcı adı</span>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Yazıcı tipi</span>
-              <select className="input" value={type} onChange={(e) => setType(e.target.value)} style={{ cursor: 'pointer' }}>
-                <option value="receipt">Adisyon</option>
-                <option value="kitchen">Mutfak</option>
-                {!isNew && showLegacyBar ? <option value="bar">Bar (legacy)</option> : null}
-              </select>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Yazıcı tipi (davranışı belirler)</span>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <TypePill active={type === 'receipt'} onClick={() => setType('receipt')} label="Adisyon" />
+                <TypePill active={type === 'kitchen'} onClick={() => setType('kitchen')} label="Mutfak" />
+                {!isNew && showLegacyBar ? <TypePill active={type === 'bar'} onClick={() => setType('bar')} label="Bar (legacy)" /> : null}
+              </div>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{typeBehaviorText}</span>
               {!isNew && showLegacyBar ? (
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                   Legacy kayıt. Yeni yazıcı oluştururken yalnızca Adisyon ve Mutfak seçilir.
@@ -540,16 +586,6 @@ export default function PrinterDetailPage() {
                 <option value="usb">USB</option>
               </select>
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 100px', gap: 10, marginBottom: 14 }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>IP adresi</span>
-                <input className="input" value={ip} onChange={(e) => setIp(e.target.value)} placeholder="192.168.1.100" />
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Port</span>
-                <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
-              </label>
-            </div>
             <ToggleRow label="Aktif" checked={isActive} onChange={setIsActive} />
             <ToggleRow label="Varsayılan yazıcı" checked={isDefault} onChange={setIsDefault} />
 
@@ -565,29 +601,52 @@ export default function PrinterDetailPage() {
                 <strong style={{ color: 'var(--text-primary)' }}>Bu yazıcı hangi cihaza yazdıracak?</strong> POS bu profille
                 yazdırdığında, Windows tarafında hedef olarak hangi yazıcının kullanılacağını buradan belirlersiniz.
               </p>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Eşleştirme yöntemi</span>
-                <select className="input" value="manual" disabled style={{ cursor: 'not-allowed', opacity: 0.85 }}>
-                  <option value="manual">Manuel giriş (Windows yazıcı adı)</option>
-                </select>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  İleride listeden seçim eklendiğinde bu alan genişletilecektir.
-                </span>
-              </label>
+              <div style={{ marginBottom: 12, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Eşleştirme yöntemi</div>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>StoreBridge tarama listesi (Windows yazıcıları)</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                  Kullanıcı bu yazıcı profilini, bilgisayardaki aktif yazıcı listesinden seçer.
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={loadDiscoveredPrinters} disabled={discoveryLoading}>
+                  {discoveryLoading ? 'Taranıyor…' : 'Yazıcıları Yenile'}
+                </button>
+                {discoveryUpdatedAt ? (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Son tarama: {new Date(discoveryUpdatedAt).toLocaleString('tr-TR')}
+                  </span>
+                ) : null}
+              </div>
               <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 0 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                  Windows&apos;ta görünen yazıcı adı
+                  Taranan aktif yazıcılar
                 </span>
-                <input
+                <select
                   className="input"
                   value={physicalName}
                   onChange={(e) => setDevicePhysical(e.target.value)}
-                  placeholder="Örn: EPSON TM-T20 veya Ayarlar &gt; Yazıcılar listesindeki ad"
-                  autoComplete="off"
-                />
+                  disabled={discoveryLoading}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <option value="">Yazıcı seçin</option>
+                  {physicalName && !discoveredPrinters.some((p) => p.name === physicalName) ? (
+                    <option value={physicalName}>{physicalName} (kayıtlı)</option>
+                  ) : null}
+                  {discoveredPrinters.map((p) => (
+                    <option key={p.name} value={p.name}>
+                      {p.name}
+                      {p.isDefault ? ' (Varsayılan)' : ''}
+                      {p.isOnline === false ? ' (Pasif)' : ''}
+                    </option>
+                  ))}
+                </select>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                  Denetim Masası veya Ayarlar → <strong>Yazıcılar ve tarayıcılar</strong> ekranındaki adla birebir aynı olmalıdır.
-                  Bu isim, yazdırma sırasında işletim sisteminin hangi fiziksel cihaza göndereceğini ayırt etmek için kullanılır.
+                  Liste, StoreBridge tarafından Windows&apos;taki Yazıcılar ve Tarayıcılar ekranından alınır.
+                </span>
+                {discoveryError ? <span style={{ fontSize: 11, color: 'var(--danger, #dc2626)' }}>{discoveryError}</span> : null}
+                <span style={{ fontSize: 11, color: physicalName.trim() ? 'var(--success, #16a34a)' : 'var(--text-muted)' }}>
+                  {physicalName.trim() ? 'Durum: Fiziksel yazıcı eşleşti' : 'Durum: Henüz fiziksel yazıcı eşleşmedi'}
                 </span>
               </label>
             </div>
@@ -612,8 +671,21 @@ export default function PrinterDetailPage() {
             style={{ minWidth: 0, maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}
           >
             <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Çıktı / kağıt ayarları</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
               {type === 'receipt' ? 'Adisyon çıktısı' : type === 'kitchen' ? 'Mutfak çıktısı' : 'Bar (legacy)'}
+            </div>
+            <div
+              style={{
+                marginBottom: 14,
+                padding: '10px 12px',
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-subtle)',
+                fontSize: 12,
+                color: 'var(--text-secondary)',
+              }}
+            >
+              {typeBehaviorText}
             </div>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
@@ -728,23 +800,25 @@ export default function PrinterDetailPage() {
             className="printer-detail-preview-sticky"
             style={{
               position: 'sticky',
-              top: 72,
+              top: 60,
               alignSelf: 'start',
-              minWidth: 300,
+              minWidth: 380,
               width: '100%',
               maxHeight: 'calc(100vh - 88px)',
               overflowY: 'auto',
             }}
           >
-            <div className="card card-padded">
-              <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Çıktı önizlemesi</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+            <div className="card card-padded" style={{ padding: 18 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8, fontSize: 16 }}>Canlı çıktı önizlemesi</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
                 Tür: <strong>{primaryTypeLabel(type)}</strong>
                 <span style={{ display: 'block', marginTop: 4 }}>
                   Gerçek yazdırma ile birebir olmayabilir; boyut ve boşluklar yaklaşık gösterilir.
                 </span>
               </div>
-              <LivePrinterPreview type={type} printOptions={printOptions} />
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 8px' }}>
+                <LivePrinterPreview type={type} printOptions={printOptions} />
+              </div>
             </div>
           </div>
         </div>

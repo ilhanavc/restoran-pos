@@ -355,6 +355,36 @@ router.get('/printer-settings', (req, res) => {
   }
 });
 
+router.get('/printers/discovered', (req, res) => {
+  try {
+    const cached = getJsonSetting(req.businessId, 'bridge.discovered_printers', null);
+    const printers = Array.isArray(cached?.printers)
+      ? cached.printers
+          .map((p) => {
+            const name = String(p?.name || '').trim();
+            if (!name) return null;
+            return {
+              name,
+              isDefault: p?.isDefault === true,
+              isOnline: p?.isOnline !== false,
+              source: 'windows',
+            };
+          })
+          .filter(Boolean)
+      : [];
+    res.json({
+      available: printers.length > 0,
+      printers,
+      updatedAt: cached?.updatedAt || null,
+      source: 'storebridge',
+      message: printers.length ? null : 'StoreBridge yazıcı taraması henüz alınmadı',
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
 router.patch('/printer-settings', (req, res) => {
   try {
     const printerRows = db.prepare(`SELECT id FROM printers WHERE business_id = ?`).all(req.businessId);

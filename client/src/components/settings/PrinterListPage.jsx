@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Pencil, Printer, Route, TestTube2, Trash2, UserMinus } from 'lucide-react';
+import { Pencil, Printer, TestTube2, Trash2, UserMinus } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
@@ -13,6 +13,12 @@ function statusLabel(p) {
   return online
     ? { text: 'Çevrimiçi', tone: 'success' }
     : { text: 'Yapılandırılmadı', tone: 'muted' };
+}
+
+function mappingStatusLabel(p) {
+  const physical = p?.print_options?.device?.physicalName;
+  if (physical && String(physical).trim()) return { text: 'Eşleşti', tone: 'success' };
+  return { text: 'Eşleşmedi', tone: 'muted' };
 }
 
 export default function PrinterListPage() {
@@ -68,8 +74,9 @@ export default function PrinterListPage() {
     <div className="page-container">
       <SettingsDetailHeader title="Yazıcı Ayarları" onBack={handleBack} />
 
-      <p style={{ margin: '0 0 18px', color: 'var(--text-secondary)', fontSize: 14, maxWidth: 720 }}>
-        Yazıcıları tanımlayın, rollerini ve çıktı seçeneklerini düzenleyin. Test çıktısı her yazıcının detay sayfasından, ilgili kayıt için çalıştırılır.
+      <p style={{ margin: '0 0 18px', color: 'var(--text-secondary)', fontSize: 14, maxWidth: 760, lineHeight: 1.55 }}>
+        Yazıcı envanterini yönetin, durumunu izleyin ve satır bazlı aksiyonlarla operasyonu yönetin. Test yazdırma ilgili
+        yazıcı kaydı üzerinden çalıştırılır.
       </p>
 
       <div
@@ -82,10 +89,6 @@ export default function PrinterListPage() {
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14, alignItems: 'center' }}>
-            <Link to="routing" className="btn btn-ghost btn-sm" title="Kategori bazlı yazıcı eşlemesi">
-              <Route size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-              Kategori → Yazıcı Yönlendirme
-            </Link>
             <Link to="new" className="btn btn-primary btn-sm">
               Yeni Yazıcı Ekle
             </Link>
@@ -95,7 +98,7 @@ export default function PrinterListPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'minmax(120px,1fr) minmax(100px,1.2fr) minmax(100px,1fr) 100px 240px',
+                gridTemplateColumns: 'minmax(120px,1fr) minmax(110px,1.1fr) minmax(150px,1.15fr) 110px 300px',
                 gap: 10,
                 padding: '12px 16px',
                 borderBottom: '1px solid var(--border)',
@@ -130,7 +133,7 @@ export default function PrinterListPage() {
                     onClick={() => navigate(`/settings/printers/${p.id}`)}
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'minmax(120px,1fr) minmax(100px,1.2fr) minmax(100px,1fr) 100px 240px',
+                      gridTemplateColumns: 'minmax(120px,1fr) minmax(110px,1.1fr) minmax(150px,1.15fr) 110px 300px',
                       gap: 10,
                       padding: '14px 16px',
                       borderBottom: '1px solid var(--border)',
@@ -143,7 +146,12 @@ export default function PrinterListPage() {
                     <span style={{ color: 'var(--text-secondary)', fontSize: 13 }} title={listTypeLabel(p.type)}>
                       #{listTypeLabel(p.type)}
                     </span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{connectionSummary(p)}</span>
+                    <div style={{ color: 'var(--text-muted)', fontSize: 13, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span>{connectionSummary(p)}</span>
+                      <span style={{ fontSize: 12 }}>
+                        Fiziksel: <strong style={{ color: 'var(--text-secondary)' }}>{mappingStatusLabel(p).text}</strong>
+                      </span>
+                    </div>
                     <span>
                       <span
                         className={`badge ${
@@ -161,8 +169,15 @@ export default function PrinterListPage() {
                       style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <Link to={`./${p.id}`} className="btn btn-ghost btn-sm" title="Düzenle" onClick={(e) => e.stopPropagation()}>
-                        <Pencil size={16} />
+                      <Link
+                        to={`./${p.id}`}
+                        className="btn btn-primary btn-sm"
+                        title="Düzenle"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ minWidth: 92 }}
+                      >
+                        <Pencil size={15} style={{ marginRight: 4 }} />
+                        Düzenle
                       </Link>
                       <button
                         type="button"
@@ -171,11 +186,13 @@ export default function PrinterListPage() {
                         disabled={testingId === p.id}
                         onClick={() => testOne(p.id)}
                       >
-                        <TestTube2 size={16} />
+                        <TestTube2 size={15} style={{ marginRight: 4 }} />
+                        Test
                       </button>
                       {p.is_active ? (
                         <button type="button" className="btn btn-ghost btn-sm" title="Pasif yap" onClick={() => deactivate(p)}>
-                          <UserMinus size={16} />
+                          <UserMinus size={15} style={{ marginRight: 4 }} />
+                          Pasif
                         </button>
                       ) : null}
                       <button
@@ -187,7 +204,8 @@ export default function PrinterListPage() {
                           setDeleteTarget({ id: p.id, name: p.name });
                         }}
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={15} style={{ marginRight: 4 }} />
+                        Sil
                       </button>
                     </div>
                   </div>
@@ -213,15 +231,18 @@ export default function PrinterListPage() {
               <Printer size={22} color="var(--accent, #f97316)" />
             </div>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>Kurulum ipuçları</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Hızlı başlangıç</div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>Keşfet</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Kurulum ve sonraki adımlar</div>
             </div>
           </div>
-          <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
-            <li>Yazıcıyı önce tanımlayın; ardından rollerini ve (mutfak tipinde) mutfak gruplarını seçin.</li>
-            <li>Ağ yazıcılarında IP ve port (genelde 9100) doğru olmalıdır.</li>
-            <li>Test çıktısı için satırdaki deney tüpüne veya yazıcı detayındaki «Test çıktısı» düğmesine gidin.</li>
-          </ul>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--text-primary)' }}>1) Kurulum</strong>
+            <div>Önce yazıcıyı ekleyin, sonra tipine göre ayarlarını tamamlayın.</div>
+            <strong style={{ color: 'var(--text-primary)', display: 'block', marginTop: 10 }}>2) Doğrulama</strong>
+            <div>IP/Port ve fiziksel eşleştirme adını kontrol edin, satırdan Test çalıştırın.</div>
+            <strong style={{ color: 'var(--text-primary)', display: 'block', marginTop: 10 }}>3) Operasyon</strong>
+            <div>Adisyon ve Mutfak yazıcılarını ayrı rollerle yönetin.</div>
+          </div>
           <div
             style={{
               marginTop: 16,
@@ -234,8 +255,8 @@ export default function PrinterListPage() {
           >
             <strong style={{ color: 'var(--text-secondary)' }}>StoreBridge (yakında)</strong>
             <br />
-            Bulut köprü uygulaması bağlandığında bu alanda bağlantı durumu gösterilecektir. Şimdilik yalnızca yerel ayarlar
-            kullanılır.
+            Bulut köprü bağlandığında bu kartta cihaz keşfi ve bağlantı durumu görünecek. Bu aşamada bilinçli olarak manuel
+            eşleştirme kullanılır.
           </div>
         </aside>
       </div>

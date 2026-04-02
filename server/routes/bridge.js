@@ -57,9 +57,96 @@ function mapPrinterRow(row) {
   };
 }
 
+function sanitizeDiscoveredPrinters(rawList) {
+  if (!Array.isArray(rawList)) return [];
+  return rawList
+    .map((p) => {
+      const name = String(p?.name || '').trim();
+      if (!name) return null;
+      return {
+        name,
+        isDefault: p?.isDefault === true,
+        isOnline: p?.isOnline !== false,
+        source: 'windows',
+      };
+    })
+    .filter(Boolean);
+}
+
 /** GET /api/bridge/health — token doğrulama */
 router.get('/health', (req, res) => {
   res.json({ ok: true, business_id: req.businessId, time: new Date().toISOString() });
+});
+
+/**
+ * Bridge agent discovered printer cache:
+ * - POST: bridge bilgisayardaki yazıcı listesini gönderir
+ * - GET: admin UI için son bilinen listeyi döner
+ */
+router.post('/printers/discovered', (req, res) => {
+  try {
+    const printers = sanitizeDiscoveredPrinters(req.body?.printers);
+    const payload = {
+      available: printers.length > 0,
+      printers,
+      updatedAt: new Date().toISOString(),
+      source: 'storebridge',
+    };
+    const key = 'bridge.discovered_printers';
+    const existing = db.prepare('SELECT id FROM settings WHERE business_id = ? AND key = ?').get(req.businessId, key);
+    if (existing) {
+      db.prepare(`UPDATE settings SET value = ?, updated_at = datetime('now') WHERE business_id = ? AND key = ?`).run(
+        JSON.stringify(payload),
+        req.businessId,
+        key,
+      );
+    } else {
+      db.prepare(`INSERT INTO settings (id, business_id, key, value, updated_at) VALUES (hex(randomblob(16)), ?, ?, ?, datetime('now'))`).run(
+        req.businessId,
+        key,
+        JSON.stringify(payload),
+      );
+    }
+    res.json({ ok: true, printers: payload.printers, updatedAt: payload.updatedAt });
+  } catch (err) {
+    console.error('[bridge] printers/discovered POST', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.get('/printers/discovered', (req, res) => {
+  try {
+    const row = db.prepare('SELECT value FROM settings WHERE business_id = ? AND key = ?').get(
+      req.businessId,
+      'bridge.discovered_printers',
+    );
+    if (!row?.value) {
+      return res.json({
+        available: false,
+        printers: [],
+        updatedAt: null,
+        source: 'storebridge',
+        message: 'Henüz yazıcı taraması alınmadı',
+      });
+    }
+    let parsed = {};
+    try {
+      parsed = JSON.parse(row.value);
+    } catch {
+      parsed = {};
+    }
+    const printers = sanitizeDiscoveredPrinters(parsed.printers);
+    res.json({
+      available: printers.length > 0,
+      printers,
+      updatedAt: parsed.updatedAt || null,
+      source: 'storebridge',
+      message: printers.length ? null : 'Aktif yazıcı bulunamadı',
+    });
+  } catch (err) {
+    console.error('[bridge] printers/discovered GET', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
 });
 
 /**
