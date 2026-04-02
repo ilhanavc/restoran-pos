@@ -3,6 +3,61 @@ import { loadConfig } from './config.js';
 import { createApiClient } from './apiClient.js';
 import { startJobPoller } from './jobs/poller.js';
 import { Cid812Provider } from './callerid/Cid812Provider.js';
+import { discoverWindowsPrinters } from './printers/windowsDiscovery.js';
+
+function startDiscoveryLoop({ api, log }) {
+  let closed = false;
+  let lastRequestId = null;
+
+  async function scanAndPublish(requestId = null) {
+    try {
+      const printers = await discoverWindowsPrinters();
+      await api.postDiscoveredPrinters({
+        printers,
+        requestId,
+        scanState: printers.length ? 'success' : 'empty',
+      });
+      log.info?.(`[store-bridge] discovery updated printers=${printers.length}`);
+    } catch (err) {
+      log.error?.('[store-bridge] discovery failed', err?.message || err);
+      try {
+        await api.postDiscoveredPrinters({
+          printers: [],
+          requestId,
+          scanState: 'bridge_unreachable',
+          lastErrorCode: 'powershell_scan_failed',
+        });
+      } catch (reportErr) {
+        log.error?.('[store-bridge] discovery error report failed', reportErr?.message || reportErr);
+      }
+    }
+  }
+
+  async function tick() {
+    if (closed) return;
+    try {
+      const task = await api.getDiscoveryRefreshRequest();
+      const reqState = task?.request;
+      if (reqState?.status === 'requested' && reqState?.requestId && reqState.requestId !== lastRequestId) {
+        lastRequestId = reqState.requestId;
+        await scanAndPublish(reqState.requestId);
+        return;
+      }
+    } catch (err) {
+      log.error?.('[store-bridge] discovery request poll failed', err?.message || err);
+    }
+  }
+
+  scanAndPublish().catch(() => {});
+  const timer = setInterval(() => {
+    tick().catch(() => {});
+  }, 2000);
+
+  return () => {
+    closed = true;
+    clearInterval(timer);
+  };
+}
 
 async function main() {
   const cfg = loadConfig();
@@ -15,11 +70,13 @@ async function main() {
   cid.start();
 
   const stopPoller = startJobPoller({ api, cfg, log: console });
+  const stopDiscoveryLoop = startDiscoveryLoop({ api, log: console });
 
   const shutdown = () => {
     console.log('[store-bridge] kapanıyor...');
     cid.stop();
     stopPoller();
+    stopDiscoveryLoop();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

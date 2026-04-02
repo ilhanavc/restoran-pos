@@ -60,5 +60,8 @@ export function createApiClient(cfg) {
     claimJob: (jobId) => post(`/bridge/print-jobs/${encodeURIComponent(jobId)}/claim`, { claim_id: cfg.claimId }),
     updateJob: (jobId, body) => patch(`/bridge/print-jobs/${encodeURIComponent(jobId)}`, body),
     getPrinter: (printerId) => get(`/bridge/printers/${encodeURIComponent(printerId)}`),
+    postDiscoveredPrinters: (payload) => post('/bridge/printers/discovered', payload),
+    requestDiscoveryRefresh: () => post('/bridge/printers/discovered/refresh', {}),
+    getDiscoveryRefreshRequest: () => get('/bridge/printers/discovered/refresh-request'),
   };
 }

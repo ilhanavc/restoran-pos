@@ -152,6 +152,7 @@ class ApiService {
   getPrinterSettings() { return this.get('/admin/printer-settings'); }
   patchPrinterSettings(body) { return this.patch('/admin/printer-settings', body); }
   getDiscoveredPrinters() { return this.get('/admin/printers/discovered'); }
+  refreshDiscoveredPrinters() { return this.post('/admin/printers/discovered/refresh', {}); }
   getAdminPrinter(id) { return this.get(`/admin/printers/${encodeURIComponent(id)}`); }
   getAdminPrinterDeleteEligibility(id) {
     return this.get(`/admin/printers/${encodeURIComponent(id)}/delete-eligibility`);

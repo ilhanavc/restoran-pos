@@ -1,11 +1,29 @@
 import { Router } from 'express';
 import bcryptjs from 'bcryptjs';
 import db from '../config/database.js';
+import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
 
 const router = Router();
 router.use(authenticate, businessScope, authorize('admin'));
+const DISCOVERY_CACHE_KEY = 'bridge.discovered_printers';
+
+function resolveDiscoveryState(payload, printers) {
+  const known = new Set(['never_scanned', 'scanning', 'success', 'empty', 'bridge_unreachable', 'auth_error']);
+  if (known.has(payload?.scanState)) return payload.scanState;
+  if (!payload) return 'never_scanned';
+  return printers.length > 0 ? 'success' : 'empty';
+}
+
+function discoveryMessageForState(state) {
+  if (state === 'never_scanned') return 'StoreBridge yazıcı taraması henüz alınmadı';
+  if (state === 'scanning') return 'Windows yazıcıları taranıyor';
+  if (state === 'empty') return 'Aktif yazıcı bulunamadı';
+  if (state === 'bridge_unreachable') return 'StoreBridge servisine ulaşılamadı';
+  if (state === 'auth_error') return 'StoreBridge kimlik doğrulama hatası';
+  return null;
+}
 
 function getJsonSetting(businessId, key, defaultValue) {
   const row = db.prepare('SELECT value FROM settings WHERE business_id = ? AND key = ?').get(businessId, key);
@@ -357,7 +375,7 @@ router.get('/printer-settings', (req, res) => {
 
 router.get('/printers/discovered', (req, res) => {
   try {
-    const cached = getJsonSetting(req.businessId, 'bridge.discovered_printers', null);
+    const cached = getJsonSetting(req.businessId, DISCOVERY_CACHE_KEY, null);
     const printers = Array.isArray(cached?.printers)
       ? cached.printers
           .map((p) => {
@@ -372,16 +390,86 @@ router.get('/printers/discovered', (req, res) => {
           })
           .filter(Boolean)
       : [];
+    const scanState = resolveDiscoveryState(cached, printers);
     res.json({
       available: printers.length > 0,
       printers,
+      scanState,
+      lastErrorCode: cached?.lastErrorCode || null,
       updatedAt: cached?.updatedAt || null,
       source: 'storebridge',
-      message: printers.length ? null : 'StoreBridge yazıcı taraması henüz alınmadı',
+      message: discoveryMessageForState(scanState),
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/printers/discovered/refresh', async (req, res) => {
+  const host = req.get('host') || `127.0.0.1:${config.port}`;
+  const baseUrl = `${req.protocol}://${host}/api/bridge/printers/discovered/refresh`;
+  try {
+    if (!config.bridge?.token || !config.bridge?.businessId) {
+      const fallback = getJsonSetting(req.businessId, DISCOVERY_CACHE_KEY, {});
+      upsertSetting(req.businessId, DISCOVERY_CACHE_KEY, {
+        ...fallback,
+        scanState: 'bridge_unreachable',
+        lastErrorCode: 'bridge_not_configured',
+        updatedAt: new Date().toISOString(),
+        source: 'storebridge',
+      });
+      return res.status(503).json({ error: 'Bridge yapılandırması eksik', scanState: 'bridge_unreachable' });
+    }
+
+    const bridgeRes = await fetch(baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Bridge-Token': config.bridge.token,
+      },
+      body: '{}',
+    });
+
+    let data = {};
+    try {
+      data = await bridgeRes.json();
+    } catch {
+      data = {};
+    }
+
+    if (!bridgeRes.ok) {
+      const fallback = getJsonSetting(req.businessId, DISCOVERY_CACHE_KEY, {});
+      const scanState = bridgeRes.status === 401 ? 'auth_error' : 'bridge_unreachable';
+      upsertSetting(req.businessId, DISCOVERY_CACHE_KEY, {
+        ...fallback,
+        scanState,
+        lastErrorCode: bridgeRes.status === 401 ? 'auth_error' : 'bridge_unreachable',
+        updatedAt: new Date().toISOString(),
+        source: 'storebridge',
+      });
+      return res.status(bridgeRes.status).json({
+        error: data.error || 'Bridge refresh çağrısı başarısız',
+        scanState,
+      });
+    }
+
+    res.json({
+      ok: true,
+      scanState: data.scanState || 'scanning',
+      requestId: data.requestId || null,
+      requestedAt: data.requestedAt || new Date().toISOString(),
+    });
+  } catch (err) {
+    const fallback = getJsonSetting(req.businessId, DISCOVERY_CACHE_KEY, {});
+    upsertSetting(req.businessId, DISCOVERY_CACHE_KEY, {
+      ...fallback,
+      scanState: 'bridge_unreachable',
+      lastErrorCode: 'bridge_unreachable',
+      updatedAt: new Date().toISOString(),
+      source: 'storebridge',
+    });
+    res.status(503).json({ error: 'StoreBridge servisine ulaşılamadı', scanState: 'bridge_unreachable' });
   }
 });
 

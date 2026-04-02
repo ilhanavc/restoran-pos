@@ -193,7 +193,8 @@ export default function PrinterDetailPage() {
   const [ip, setIp] = useState('');
   const [port, setPort] = useState('9100');
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
-  const [discoveryError, setDiscoveryError] = useState('');
+  const [discoveryState, setDiscoveryState] = useState('never_scanned');
+  const [discoveryMessage, setDiscoveryMessage] = useState('');
   const [discoveryUpdatedAt, setDiscoveryUpdatedAt] = useState('');
   const [discoveredPrinters, setDiscoveredPrinters] = useState([]);
   const [isActive, setIsActive] = useState(true);
@@ -240,27 +241,52 @@ export default function PrinterDetailPage() {
     setLoadedSig(sig);
   }, []);
 
-  const loadDiscoveredPrinters = useCallback(async () => {
-    setDiscoveryLoading(true);
-    setDiscoveryError('');
-    try {
-      const data = await api.getDiscoveredPrinters();
-      const list = Array.isArray(data.printers) ? data.printers : [];
-      setDiscoveredPrinters(list);
-      setDiscoveryUpdatedAt(data.updatedAt || '');
-      if (!list.length) setDiscoveryError(data.message || 'Aktif yazıcı bulunamadı');
-    } catch (e) {
-      setDiscoveredPrinters([]);
-      setDiscoveryUpdatedAt('');
-      setDiscoveryError(e.message || 'Yazıcı listesi alınamadı');
-    } finally {
-      setDiscoveryLoading(false);
-    }
+  const fetchDiscoveredPrinters = useCallback(async () => {
+    const data = await api.getDiscoveredPrinters();
+    const list = Array.isArray(data.printers) ? data.printers : [];
+    setDiscoveredPrinters(list);
+    setDiscoveryUpdatedAt(data.updatedAt || '');
+    setDiscoveryState(data.scanState || 'never_scanned');
+    setDiscoveryMessage(data.message || '');
+    return data;
   }, []);
+
+  const loadDiscoveredPrinters = useCallback(
+    async (opts = { triggerRefresh: false }) => {
+      const triggerRefresh = !!opts?.triggerRefresh;
+      setDiscoveryLoading(true);
+      try {
+        if (triggerRefresh) {
+          const refreshRes = await api.refreshDiscoveredPrinters();
+          setDiscoveryState(refreshRes.scanState || 'scanning');
+          setDiscoveryMessage('Windows yazıcıları taranıyor');
+        }
+        let data = await fetchDiscoveredPrinters();
+        if (triggerRefresh) {
+          const terminalStates = new Set(['never_scanned', 'success', 'empty', 'bridge_unreachable', 'auth_error']);
+          let attempts = 0;
+          while (!terminalStates.has(data.scanState) || data.scanState === 'never_scanned') {
+            if (attempts >= 12) break;
+            attempts += 1;
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            data = await fetchDiscoveredPrinters();
+          }
+        }
+      } catch (e) {
+        setDiscoveredPrinters([]);
+        setDiscoveryUpdatedAt('');
+        setDiscoveryState('bridge_unreachable');
+        setDiscoveryMessage(e.message || 'StoreBridge servisine ulaşılamadı');
+      } finally {
+        setDiscoveryLoading(false);
+      }
+    },
+    [fetchDiscoveredPrinters],
+  );
 
   const load = useCallback(async () => {
     if (isNew) {
-      const [data] = await Promise.all([api.getPrinterSettings(), loadDiscoveredPrinters()]);
+      const [data] = await Promise.all([api.getPrinterSettings(), loadDiscoveredPrinters({ triggerRefresh: false })]);
       setConfig(data.config || {});
       const po = normalizePrintOptions({}, 'receipt');
       setName('');
@@ -288,7 +314,11 @@ export default function PrinterDetailPage() {
     }
     setLoading(true);
     try {
-      const [prRes, settings] = await Promise.all([api.getAdminPrinter(id), api.getPrinterSettings(), loadDiscoveredPrinters()]);
+      const [prRes, settings] = await Promise.all([
+        api.getAdminPrinter(id),
+        api.getPrinterSettings(),
+        loadDiscoveredPrinters({ triggerRefresh: false }),
+      ]);
       setConfig(settings.config || {});
       snapshotState(prRes.printer, settings.config);
     } catch (e) {
@@ -609,7 +639,12 @@ export default function PrinterDetailPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={loadDiscoveredPrinters} disabled={discoveryLoading}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => loadDiscoveredPrinters({ triggerRefresh: true })}
+                  disabled={discoveryLoading}
+                >
                   {discoveryLoading ? 'Taranıyor…' : 'Yazıcıları Yenile'}
                 </button>
                 {discoveryUpdatedAt ? (
@@ -644,7 +679,21 @@ export default function PrinterDetailPage() {
                 <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
                   Liste, StoreBridge tarafından Windows&apos;taki Yazıcılar ve Tarayıcılar ekranından alınır.
                 </span>
-                {discoveryError ? <span style={{ fontSize: 11, color: 'var(--danger, #dc2626)' }}>{discoveryError}</span> : null}
+                {discoveryMessage ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color:
+                        discoveryState === 'bridge_unreachable' || discoveryState === 'auth_error'
+                          ? 'var(--danger, #dc2626)'
+                          : discoveryState === 'success'
+                            ? 'var(--success, #16a34a)'
+                            : 'var(--text-muted)',
+                    }}
+                  >
+                    {discoveryMessage}
+                  </span>
+                ) : null}
                 <span style={{ fontSize: 11, color: physicalName.trim() ? 'var(--success, #16a34a)' : 'var(--text-muted)' }}>
                   {physicalName.trim() ? 'Durum: Fiziksel yazıcı eşleşti' : 'Durum: Henüz fiziksel yazıcı eşleşmedi'}
                 </span>

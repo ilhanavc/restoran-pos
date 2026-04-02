@@ -5,6 +5,16 @@ import { processIncomingCall } from '../services/callerIdService.js';
 
 const router = Router();
 router.use(bridgeAuth);
+const DISCOVERY_CACHE_KEY = 'bridge.discovered_printers';
+const DISCOVERY_REFRESH_REQUEST_KEY = 'bridge.discovery_refresh_request';
+const DISCOVERY_STATES = new Set([
+  'never_scanned',
+  'scanning',
+  'success',
+  'empty',
+  'bridge_unreachable',
+  'auth_error',
+]);
 
 function parsePayload(raw) {
   if (!raw) return null;
@@ -73,6 +83,34 @@ function sanitizeDiscoveredPrinters(rawList) {
     .filter(Boolean);
 }
 
+function upsertSettingByBusiness(businessId, key, valueObj) {
+  const serialized = JSON.stringify(valueObj);
+  const existing = db.prepare('SELECT id FROM settings WHERE business_id = ? AND key = ?').get(businessId, key);
+  if (existing) {
+    db.prepare(`UPDATE settings SET value = ?, updated_at = datetime('now') WHERE business_id = ? AND key = ?`).run(
+      serialized,
+      businessId,
+      key,
+    );
+    return;
+  }
+  db.prepare(`INSERT INTO settings (id, business_id, key, value, updated_at) VALUES (hex(randomblob(16)), ?, ?, ?, datetime('now'))`).run(
+    businessId,
+    key,
+    serialized,
+  );
+}
+
+function getJsonSettingByBusiness(businessId, key, fallback = null) {
+  const row = db.prepare('SELECT value FROM settings WHERE business_id = ? AND key = ?').get(businessId, key);
+  if (!row?.value) return fallback;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return fallback;
+  }
+}
+
 /** GET /api/bridge/health — token doğrulama */
 router.get('/health', (req, res) => {
   res.json({ ok: true, business_id: req.businessId, time: new Date().toISOString() });
@@ -86,26 +124,30 @@ router.get('/health', (req, res) => {
 router.post('/printers/discovered', (req, res) => {
   try {
     const printers = sanitizeDiscoveredPrinters(req.body?.printers);
+    const requestedState = String(req.body?.scanState || '').trim();
+    const scanState = DISCOVERY_STATES.has(requestedState)
+      ? requestedState
+      : printers.length > 0
+        ? 'success'
+        : 'empty';
     const payload = {
       available: printers.length > 0,
       printers,
+      scanState,
+      lastErrorCode: req.body?.lastErrorCode ? String(req.body.lastErrorCode) : null,
       updatedAt: new Date().toISOString(),
       source: 'storebridge',
     };
-    const key = 'bridge.discovered_printers';
-    const existing = db.prepare('SELECT id FROM settings WHERE business_id = ? AND key = ?').get(req.businessId, key);
-    if (existing) {
-      db.prepare(`UPDATE settings SET value = ?, updated_at = datetime('now') WHERE business_id = ? AND key = ?`).run(
-        JSON.stringify(payload),
-        req.businessId,
-        key,
-      );
-    } else {
-      db.prepare(`INSERT INTO settings (id, business_id, key, value, updated_at) VALUES (hex(randomblob(16)), ?, ?, ?, datetime('now'))`).run(
-        req.businessId,
-        key,
-        JSON.stringify(payload),
-      );
+    upsertSettingByBusiness(req.businessId, DISCOVERY_CACHE_KEY, payload);
+    if (req.body?.requestId) {
+      const currentReq = getJsonSettingByBusiness(req.businessId, DISCOVERY_REFRESH_REQUEST_KEY, {});
+      if (currentReq?.requestId && currentReq.requestId === req.body.requestId) {
+        upsertSettingByBusiness(req.businessId, DISCOVERY_REFRESH_REQUEST_KEY, {
+          ...currentReq,
+          status: 'completed',
+          completedAt: new Date().toISOString(),
+        });
+      }
     }
     res.json({ ok: true, printers: payload.printers, updatedAt: payload.updatedAt });
   } catch (err) {
@@ -116,35 +158,74 @@ router.post('/printers/discovered', (req, res) => {
 
 router.get('/printers/discovered', (req, res) => {
   try {
-    const row = db.prepare('SELECT value FROM settings WHERE business_id = ? AND key = ?').get(
-      req.businessId,
-      'bridge.discovered_printers',
-    );
-    if (!row?.value) {
+    const parsed = getJsonSettingByBusiness(req.businessId, DISCOVERY_CACHE_KEY, null);
+    if (!parsed) {
       return res.json({
         available: false,
         printers: [],
+        scanState: 'never_scanned',
+        lastErrorCode: null,
         updatedAt: null,
         source: 'storebridge',
         message: 'Henüz yazıcı taraması alınmadı',
       });
     }
-    let parsed = {};
-    try {
-      parsed = JSON.parse(row.value);
-    } catch {
-      parsed = {};
-    }
     const printers = sanitizeDiscoveredPrinters(parsed.printers);
+    const scanState = DISCOVERY_STATES.has(parsed.scanState)
+      ? parsed.scanState
+      : printers.length > 0
+        ? 'success'
+        : 'empty';
     res.json({
       available: printers.length > 0,
       printers,
+      scanState,
+      lastErrorCode: parsed.lastErrorCode || null,
       updatedAt: parsed.updatedAt || null,
       source: 'storebridge',
       message: printers.length ? null : 'Aktif yazıcı bulunamadı',
     });
   } catch (err) {
     console.error('[bridge] printers/discovered GET', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/printers/discovered/refresh', (req, res) => {
+  try {
+    const requestId = `scan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const requestedAt = new Date().toISOString();
+    upsertSettingByBusiness(req.businessId, DISCOVERY_REFRESH_REQUEST_KEY, {
+      requestId,
+      requestedAt,
+      status: 'requested',
+      source: 'admin',
+    });
+    const currentCache = getJsonSettingByBusiness(req.businessId, DISCOVERY_CACHE_KEY, {});
+    upsertSettingByBusiness(req.businessId, DISCOVERY_CACHE_KEY, {
+      ...currentCache,
+      scanState: 'scanning',
+      available: false,
+      updatedAt: currentCache?.updatedAt || null,
+      source: 'storebridge',
+      lastErrorCode: null,
+    });
+    res.json({ ok: true, requestId, scanState: 'scanning', requestedAt });
+  } catch (err) {
+    console.error('[bridge] printers/discovered/refresh POST', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.get('/printers/discovered/refresh-request', (req, res) => {
+  try {
+    const reqState = getJsonSettingByBusiness(req.businessId, DISCOVERY_REFRESH_REQUEST_KEY, null);
+    res.json({
+      request: reqState || null,
+      hasPending: !!reqState && reqState.status === 'requested',
+    });
+  } catch (err) {
+    console.error('[bridge] printers/discovered/refresh-request GET', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
