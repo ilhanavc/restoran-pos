@@ -6,6 +6,7 @@ import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import PrinterDeleteModal from './PrinterDeleteModal.jsx';
 import {
   normalizePrintOptions,
+  resetPrintOptionsForType,
   primaryTypeLabel,
   ROLE_LABELS,
   FONT_FAMILY_OPTIONS,
@@ -401,6 +402,18 @@ export default function PrinterDetailPage() {
     }
   };
 
+  const resetToRecommendedDefaults = () => {
+    if (
+      !window.confirm(
+        'Çıktı ayarları (yazı tipi, boşluklar, toggles, mutfak grupları vb.) bu yazıcı tipi için önerilen varsayılanlara sıfırlanacak. Devam edilsin mi?',
+      )
+    ) {
+      return;
+    }
+    setPrintOptions(resetPrintOptionsForType(type));
+    success('Önerilen varsayılanlar uygulandı');
+  };
+
   const deactivate = async () => {
     if (isNew) return;
     if (!window.confirm('Bu yazıcı pasifleştirilsin mi?')) return;
@@ -427,7 +440,7 @@ export default function PrinterDetailPage() {
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={loading || saving || !dirty}>
           Kaydet
         </button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={testPrint} disabled={loading || testing || isNew}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={testPrint} disabled={loading || testing || isNew} title="Bu kayıtlı yazıcı için test">
           {testing ? 'Test…' : 'Test çıktısı'}
         </button>
         {!isNew && (
@@ -445,34 +458,57 @@ export default function PrinterDetailPage() {
       {loading ? (
         <div style={{ color: 'var(--text-muted)' }}>Yükleniyor…</div>
       ) : (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, minmax(280px, 1fr))',
-            gap: 16,
-            alignItems: 'start',
-          }}
-          className="printer-detail-grid"
-        >
-          <div className="card card-padded">
+        <>
+          <div
+            className="card card-padded"
+            style={{
+              marginBottom: 16,
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 12,
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              borderColor: 'var(--border)',
+            }}
+          >
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 640, lineHeight: 1.5 }}>
+              {isNew ? (
+                <>
+                  <strong style={{ color: 'var(--text-primary)' }}>Önerilen varsayılanlar yüklendi.</strong> Çıktı sütunundaki
+                  değerler bu yazıcı tipi için başlangıç önerileridir; kaydetmeden önce özelleştirebilirsiniz.
+                </>
+              ) : (
+                <>
+                  Çıktı ayarları bu yazıcı için kayıtlıdır. İsterseniz aynı tip için{' '}
+                  <strong style={{ color: 'var(--text-primary)' }}>önerilen varsayılanlara</strong> dönebilirsiniz (aşağıdaki
+                  düğme).
+                </>
+              )}
+            </div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={resetToRecommendedDefaults}
+              disabled={loading}
+            >
+              Varsayılanlara dön
+            </button>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1.15fr) minmax(300px, 380px)',
+              gap: 16,
+              alignItems: 'start',
+            }}
+            className="printer-detail-grid"
+          >
+          <div className="card card-padded" style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 700, marginBottom: 14, fontSize: 14 }}>Yazıcı bilgileri</div>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Yazıcı adı</span>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                Sistem / fiziksel yazıcı
-              </span>
-              <input
-                className="input"
-                value={physicalName}
-                onChange={(e) => setDevicePhysical(e.target.value)}
-                placeholder="Örn: FIRIN2025 veya Windows yazıcı adı"
-              />
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                Bilgisayarda tanımlı yazıcı adını girin; ileride listeden seçim eklenebilir.
-              </span>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Yazıcı tipi</span>
@@ -516,9 +552,65 @@ export default function PrinterDetailPage() {
             </div>
             <ToggleRow label="Aktif" checked={isActive} onChange={setIsActive} />
             <ToggleRow label="Varsayılan yazıcı" checked={isDefault} onChange={setIsDefault} />
+
+            <div
+              style={{
+                marginTop: 18,
+                paddingTop: 16,
+                borderTop: '1px solid var(--border)',
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 14 }}>Fiziksel yazıcı eşleştirmesi</div>
+              <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                <strong style={{ color: 'var(--text-primary)' }}>Bu yazıcı hangi cihaza yazdıracak?</strong> POS bu profille
+                yazdırdığında, Windows tarafında hedef olarak hangi yazıcının kullanılacağını buradan belirlersiniz.
+              </p>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Eşleştirme yöntemi</span>
+                <select className="input" value="manual" disabled style={{ cursor: 'not-allowed', opacity: 0.85 }}>
+                  <option value="manual">Manuel giriş (Windows yazıcı adı)</option>
+                </select>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  İleride listeden seçim eklendiğinde bu alan genişletilecektir.
+                </span>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                  Windows&apos;ta görünen yazıcı adı
+                </span>
+                <input
+                  className="input"
+                  value={physicalName}
+                  onChange={(e) => setDevicePhysical(e.target.value)}
+                  placeholder="Örn: EPSON TM-T20 veya Ayarlar &gt; Yazıcılar listesindeki ad"
+                  autoComplete="off"
+                />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  Denetim Masası veya Ayarlar → <strong>Yazıcılar ve tarayıcılar</strong> ekranındaki adla birebir aynı olmalıdır.
+                  Bu isim, yazdırma sırasında işletim sisteminin hangi fiziksel cihaza göndereceğini ayırt etmek için kullanılır.
+                </span>
+              </label>
+            </div>
+
+            {type === 'kitchen' ? (
+              <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>Mutfak grubu</div>
+                {Object.keys(printOptions.kitchenGroups || {}).map((key) => (
+                  <ToggleRow
+                    key={key}
+                    label={key === 'ICECEKLER' ? 'İÇECEKLER' : key}
+                    checked={!!printOptions.kitchenGroups[key]}
+                    onChange={(v) => setKitchenGroup(key, v)}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
 
-          <div className="card card-padded">
+          <div
+            className="card card-padded printer-detail-output-col"
+            style={{ minWidth: 0, maxHeight: 'calc(100vh - 220px)', overflowY: 'auto' }}
+          >
             <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Çıktı / kağıt ayarları</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
               {type === 'receipt' ? 'Adisyon çıktısı' : type === 'kitchen' ? 'Mutfak çıktısı' : 'Bar (legacy)'}
@@ -591,15 +683,6 @@ export default function PrinterDetailPage() {
                 <ToggleRow label="Ürün fiyatları" checked={!!printOptions.output.showPrices} onChange={(v) => setOutput('showPrices', v)} />
                 <ToggleRow label="Sipariş toplamları" checked={!!printOptions.output.showOrderTotal} onChange={(v) => setOutput('showOrderTotal', v)} />
                 <ToggleRow label="Sipariş numarası" checked={printOptions.output.showOrderNumber !== false} onChange={(v) => setOutput('showOrderNumber', v)} />
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '14px 0 10px' }}>Mutfak grubu</div>
-                {Object.keys(printOptions.kitchenGroups || {}).map((key) => (
-                  <ToggleRow
-                    key={key}
-                    label={key === 'ICECEKLER' ? 'İÇECEKLER' : key}
-                    checked={!!printOptions.kitchenGroups[key]}
-                    onChange={(v) => setKitchenGroup(key, v)}
-                  />
-                ))}
               </>
             )}
 
@@ -641,15 +724,31 @@ export default function PrinterDetailPage() {
             )}
           </div>
 
-          <div className="card card-padded">
-            <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Çıktı önizlemesi</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-              Tür: <strong>{primaryTypeLabel(type)}</strong>
-              <span style={{ display: 'block', marginTop: 4 }}>Gerçek yazdırma ile birebir olmayabilir; boyut ve boşluklar yaklaşık gösterilir.</span>
+          <div
+            className="printer-detail-preview-sticky"
+            style={{
+              position: 'sticky',
+              top: 72,
+              alignSelf: 'start',
+              minWidth: 300,
+              width: '100%',
+              maxHeight: 'calc(100vh - 88px)',
+              overflowY: 'auto',
+            }}
+          >
+            <div className="card card-padded">
+              <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Çıktı önizlemesi</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                Tür: <strong>{primaryTypeLabel(type)}</strong>
+                <span style={{ display: 'block', marginTop: 4 }}>
+                  Gerçek yazdırma ile birebir olmayabilir; boyut ve boşluklar yaklaşık gösterilir.
+                </span>
+              </div>
+              <LivePrinterPreview type={type} printOptions={printOptions} />
             </div>
-            <LivePrinterPreview type={type} printOptions={printOptions} />
           </div>
         </div>
+        </>
       )}
 
       <PrinterDeleteModal
@@ -661,9 +760,18 @@ export default function PrinterDetailPage() {
         onAfterDelete={() => navigate('/settings/printers')}
       />
       <style>{`
-        @media (max-width: 1100px) {
+        @media (max-width: 768px) {
           .printer-detail-grid {
             grid-template-columns: 1fr !important;
+          }
+          .printer-detail-preview-sticky {
+            position: static !important;
+            max-height: none !important;
+            min-width: 0 !important;
+            overflow: visible !important;
+          }
+          .printer-detail-output-col {
+            max-height: none !important;
           }
         }
       `}</style>

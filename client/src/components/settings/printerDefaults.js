@@ -150,6 +150,11 @@ export function normalizePrintOptions(po, type) {
   return out;
 }
 
+/** Bu tip için önerilen varsayılanlarla tam print_options (UI «Varsayılanlara dön»). */
+export function resetPrintOptionsForType(type) {
+  return normalizePrintOptions({}, type);
+}
+
 export const primaryTypeLabel = (t) =>
   ({ receipt: 'Adisyon', kitchen: 'Mutfak', bar: 'Bar' }[t] || t);
 

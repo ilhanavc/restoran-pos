@@ -69,7 +69,7 @@ export default function PrinterListPage() {
       <SettingsDetailHeader title="Yazıcı Ayarları" onBack={handleBack} />
 
       <p style={{ margin: '0 0 18px', color: 'var(--text-secondary)', fontSize: 14, maxWidth: 720 }}>
-        Yazıcıları tanımlayın, rollerini ve çıktı seçeneklerini düzenleyin. Varsayılan yazıcı ve test çıktısı tek bir yerden yönetilir.
+        Yazıcıları tanımlayın, rollerini ve çıktı seçeneklerini düzenleyin. Test çıktısı her yazıcının detay sayfasından, ilgili kayıt için çalıştırılır.
       </p>
 
       <div
@@ -89,26 +89,6 @@ export default function PrinterListPage() {
             <Link to="new" className="btn btn-primary btn-sm">
               Yeni Yazıcı Ekle
             </Link>
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={loading || printers.length === 0 || testingId === '__all'}
-              onClick={async () => {
-                const pid = printers[0]?.id;
-                if (!pid) return;
-                setTestingId('__all');
-                try {
-                  const res = await api.postPrinterTest({ printer_id: pid });
-                  success(res.message || 'Test tamamlandı');
-                } catch (e) {
-                  error(e.message || 'Test başarısız');
-                } finally {
-                  setTestingId(null);
-                }
-              }}
-            >
-              {testingId === '__all' ? 'Test…' : 'Test yazdırma (ilk yazıcı)'}
-            </button>
           </div>
 
           <div className="card" style={{ overflow: 'hidden' }}>
@@ -238,9 +218,9 @@ export default function PrinterListPage() {
             </div>
           </div>
           <ul style={{ margin: 0, paddingLeft: 18, color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
-            <li>Yazıcıyı önce tanımlayın; ardından rollerini ve mutfak gruplarını seçin.</li>
+            <li>Yazıcıyı önce tanımlayın; ardından rollerini ve (mutfak tipinde) mutfak gruplarını seçin.</li>
             <li>Ağ yazıcılarında IP ve port (genelde 9100) doğru olmalıdır.</li>
-            <li>Test çıktısı gerçek cihaza gönderilmez; yalnızca simülasyondur.</li>
+            <li>Test çıktısı için satırdaki deney tüpüne veya yazıcı detayındaki «Test çıktısı» düğmesine gidin.</li>
           </ul>
           <div
             style={{
