@@ -2,13 +2,13 @@ import { useState, useCallback, useEffect } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
+import HomeScreen from './components/home/HomeScreen.jsx';
 import LoginScreen from './components/auth/LoginScreen.jsx';
 import TablesScreen from './components/tables/TablesScreen.jsx';
 import OrderScreen from './components/orders/OrderScreen.jsx';
 import PaymentScreen from './components/payments/PaymentScreen.jsx';
 import KitchenScreen from './components/kitchen/KitchenScreen.jsx';
 import TakeawayScreen from './components/takeaway/TakeawayScreen.jsx';
-import CallerIdScreen from './components/callerid/CallerIdScreen.jsx';
 import CustomersScreen from './components/customers/CustomersScreen.jsx';
 import ReportsScreen from './components/reports/ReportsScreen.jsx';
 import api from './services/api.js';
@@ -40,8 +40,17 @@ function ProtectedRoute({ children, requiredRoles }) {
 
 export default function App() {
   const { user, loading, hasRole } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const isTablesPage = location.pathname.startsWith('/tables');
+  const canSeeTakeawayQuickButton = hasRole('admin', 'cashier');
+  const defaultPath = hasRole('admin', 'cashier')
+    ? '/home'
+    : user?.role === 'kitchen'
+      ? '/kitchen'
+      : '/tables';
 
   useEffect(() => {
     if (!user || user.role !== 'admin') return;
@@ -103,10 +112,21 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar />
+      <Sidebar
+        isOpen={sidebarOpen}
+        onToggle={() => setSidebarOpen((prev) => !prev)}
+        onNavigate={() => setSidebarOpen(false)}
+        showTakeawayQuickButton={isTablesPage && canSeeTakeawayQuickButton}
+        onTakeawayQuickClick={() => navigate('/takeaway')}
+      />
       <main className="app-content">
         <Routes>
-          <Route path="/" element={<Navigate to={user.role === 'kitchen' ? '/kitchen' : '/tables'} replace />} />
+          <Route path="/" element={<Navigate to={defaultPath} replace />} />
+          <Route path="/home" element={
+            <ProtectedRoute requiredRoles={['admin', 'cashier']}>
+              <HomeScreen />
+            </ProtectedRoute>
+          } />
           <Route path="/tables" element={
             <ProtectedRoute requiredRoles={['admin', 'cashier', 'waiter']}>
               <TablesScreen
@@ -117,7 +137,6 @@ export default function App() {
             </ProtectedRoute>
           } />
           <Route path="/takeaway" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><TakeawayScreen onNewOrder={handleNewTakeawayOrder} /></ProtectedRoute>} />
-          <Route path="/callerid" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><CallerIdScreen /></ProtectedRoute>} />
           <Route path="/kitchen" element={<ProtectedRoute requiredRoles={['admin', 'kitchen']}><KitchenScreen /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><CustomersScreen /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><ReportsScreen /></ProtectedRoute>} />

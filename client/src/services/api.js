@@ -173,6 +173,9 @@ class ApiService {
   deleteAdminUser(id) { return this.delete(`/admin/users/${id}`); }
 
   getAdminDiningAreas() { return this.get('/admin/dining-areas'); }
+  postAdminDiningArea(body) { return this.post('/admin/dining-areas', body); }
+  patchAdminDiningArea(id, body) { return this.patch(`/admin/dining-areas/${id}`, body); }
+  deleteAdminDiningArea(id) { return this.delete(`/admin/dining-areas/${id}`); }
   syncDiningAreaTables(areaId, targetTableCount) {
     return this.post(`/admin/dining-areas/${areaId}/sync-tables`, { target_table_count: targetTableCount });
   }

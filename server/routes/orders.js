@@ -351,6 +351,38 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
 
+    if (status === 'cancelled') {
+      const canCancel = req.user.permissions?.all || ['admin', 'cashier', 'waiter'].includes(req.user.role_slug);
+      if (!canCancel) {
+        return res.status(403).json({ error: 'Bu işlem için yetkiniz yok' });
+      }
+      if (order.status === 'closed' || order.status === 'cancelled') {
+        return res.status(400).json({ error: 'Sipariş zaten kapalı veya iptal edilmiş' });
+      }
+      const payments = db.prepare('SELECT COUNT(*) as c FROM payments WHERE order_id = ?').get(order.id);
+      if (payments.c > 0) {
+        return res.status(400).json({ error: 'Ödeme kaydı olan sipariş iptal edilemez' });
+      }
+
+      const txn = db.transaction(() => {
+        db.prepare(
+          `UPDATE orders SET status = 'cancelled', updated_at = datetime('now'), updated_by = ? WHERE id = ? AND business_id = ?`,
+        ).run(req.user.id, order.id, req.businessId);
+        db.prepare(
+          `UPDATE tables SET status = 'empty', current_order_id = NULL, guest_count = 0, updated_at = datetime('now')
+           WHERE business_id = ? AND current_order_id = ?`,
+        ).run(req.businessId, order.id);
+        db.prepare(`UPDATE order_items SET status = 'cancelled' WHERE order_id = ?`).run(order.id);
+      });
+      txn();
+
+      auditLog(req.businessId, req.user.id, 'order_cancelled', 'order', req.params.id);
+
+      const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
+      updated.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+      return res.json(updated);
+    }
+
     let sentItemIds = [];
     if (status === 'in_kitchen') {
       const rows = db.prepare(`SELECT id FROM order_items WHERE order_id = ? AND status = 'new'`).all(order.id);

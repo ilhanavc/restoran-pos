@@ -126,7 +126,7 @@ export default function LoginScreen() {
               { label: 'Yönetici', email: 'admin@demo.com', color: 'var(--accent)' },
               { label: 'Kasiyer', email: 'kasiyer@demo.com', color: 'var(--success)' },
               { label: 'Garson', email: 'garson@demo.com', color: 'var(--warning)' },
-              { label: 'Mutfak', email: 'mutfak@demo.com', color: 'var(--orange)' },
+              { label: 'Muıtfak', email: 'mutfak@demo.com', color: 'var(--orange)' },
             ].map(q => (
               <button key={q.email} className="btn btn-ghost btn-sm" onClick={() => quickLogin(q.email)}
                 style={{ justifyContent: 'flex-start', gap: 8 }}>

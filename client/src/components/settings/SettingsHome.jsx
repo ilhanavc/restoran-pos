@@ -1,10 +1,8 @@
-import { Settings, Store, Users, Printer, Monitor, UtensilsCrossed, LayoutGrid } from 'lucide-react';
+import { Settings, Store, Users, Printer, Monitor } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const sections = [
   { icon: Store, label: 'İşletme Bilgileri', desc: 'Ad, adres, vergi bilgileri, fiş ayarları', to: '/settings/business' },
-  { icon: UtensilsCrossed, label: 'Menü Tanımları', desc: 'Kategori ve ürün ekleme, düzenleme', to: '/settings/menu' },
-  { icon: LayoutGrid, label: 'Salon Bölgeleri', desc: 'Bölge başına masa sayısı senkronu', to: '/settings/dining-areas' },
   { icon: Users, label: 'Kullanıcı Yönetimi', desc: 'Personel ekleme, rol atama, yetkilendirme', to: '/settings/users' },
   { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller, kategori yönlendirme (Ayarlar > Yazıcılar)', to: '/settings/printers' },
   { icon: Monitor, label: 'Ekran Ayarları', desc: 'Tema, düzen, dil tercihleri', to: '/settings/display' },

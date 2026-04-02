@@ -4,6 +4,7 @@ import db from '../config/database.js';
 import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
+import { ORDER_STATUSES_CLOSED } from '../constants/orderStatus.js';
 
 const router = Router();
 router.use(authenticate, businessScope, authorize('admin'));
@@ -1011,6 +1012,129 @@ router.get('/dining-areas', (req, res) => {
   }
 });
 
+function resolveBranchIdForDining(req) {
+  let branchId = req.branchId || null;
+  if (!branchId) {
+    branchId = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId)?.id || null;
+  }
+  return branchId;
+}
+
+function diningAreaNameTaken(businessId, nameTrimmed, excludeAreaId = null) {
+  const dup = excludeAreaId
+    ? db
+        .prepare(
+          `SELECT id FROM dining_areas WHERE business_id = ? AND is_active = 1 AND id != ? AND LOWER(TRIM(name)) = LOWER(?)`,
+        )
+        .get(businessId, excludeAreaId, nameTrimmed)
+    : db
+        .prepare(
+          `SELECT id FROM dining_areas WHERE business_id = ? AND is_active = 1 AND LOWER(TRIM(name)) = LOWER(?)`,
+        )
+        .get(businessId, nameTrimmed);
+  return !!dup;
+}
+
+router.post('/dining-areas', (req, res) => {
+  try {
+    const nameTrimmed = String(req.body?.name ?? '').trim();
+    if (!nameTrimmed) {
+      return res.status(400).json({ error: 'Bölge adı gerekli' });
+    }
+    if (diningAreaNameTaken(req.businessId, nameTrimmed)) {
+      return res.status(400).json({ error: 'Bu isimde aktif bir bölge zaten var' });
+    }
+
+    const branchId = resolveBranchIdForDining(req);
+    const maxSort = db
+      .prepare(`SELECT COALESCE(MAX(sort_order), -1) AS m FROM dining_areas WHERE business_id = ?`)
+      .get(req.businessId).m;
+    const sortOrder =
+      req.body.sort_order !== undefined && req.body.sort_order !== null
+        ? Math.floor(Number(req.body.sort_order))
+        : maxSort + 1;
+
+    const id = genId();
+    db.prepare(
+      `INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order, is_active, target_table_count, created_at)
+       VALUES (?, ?, ?, ?, ?, 1, 0, datetime('now'))`,
+    ).run(id, req.businessId, branchId, nameTrimmed, sortOrder);
+
+    auditLog(req.businessId, req.user.id, 'dining_area_create', 'dining_area', id, { name: nameTrimmed });
+    const area = db.prepare(`SELECT * FROM dining_areas WHERE id = ?`).get(id);
+    res.status(201).json({ area });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.patch('/dining-areas/:id', (req, res) => {
+  try {
+    const area = db
+      .prepare(`SELECT * FROM dining_areas WHERE id = ? AND business_id = ? AND is_active = 1`)
+      .get(req.params.id, req.businessId);
+    if (!area) {
+      return res.status(404).json({ error: 'Bölge bulunamadı' });
+    }
+
+    const { name, sort_order } = req.body;
+    if (name !== undefined) {
+      const nameTrimmed = String(name).trim();
+      if (!nameTrimmed) {
+        return res.status(400).json({ error: 'Bölge adı boş olamaz' });
+      }
+      if (diningAreaNameTaken(req.businessId, nameTrimmed, area.id)) {
+        return res.status(400).json({ error: 'Bu isimde aktif bir bölge zaten var' });
+      }
+      db.prepare(`UPDATE dining_areas SET name = ? WHERE id = ? AND business_id = ?`).run(nameTrimmed, area.id, req.businessId);
+    }
+    if (sort_order !== undefined && sort_order !== null) {
+      const so = Math.floor(Number(sort_order));
+      if (Number.isFinite(so)) {
+        db.prepare(`UPDATE dining_areas SET sort_order = ? WHERE id = ? AND business_id = ?`).run(so, area.id, req.businessId);
+      }
+    }
+
+    auditLog(req.businessId, req.user.id, 'dining_area_update', 'dining_area', area.id, { name, sort_order });
+    const updated = db.prepare(`SELECT * FROM dining_areas WHERE id = ?`).get(area.id);
+    res.json({ area: updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.delete('/dining-areas/:id', (req, res) => {
+  try {
+    const area = db
+      .prepare(`SELECT * FROM dining_areas WHERE id = ? AND business_id = ? AND is_active = 1`)
+      .get(req.params.id, req.businessId);
+    if (!area) {
+      return res.status(404).json({ error: 'Bölge bulunamadı' });
+    }
+
+    const activeCount = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM tables WHERE dining_area_id = ? AND business_id = ? AND is_active = 1`,
+      )
+      .get(area.id, req.businessId).c;
+    if (activeCount > 0) {
+      return res.status(400).json({
+        error:
+          'Bu bölgede hâlâ aktif masa var. Önce hedef masa sayısını azaltarak tüm masaları kaldırın, sonra silmeyi deneyin.',
+      });
+    }
+
+    db.prepare(`UPDATE dining_areas SET is_active = 0 WHERE id = ? AND business_id = ?`).run(area.id, req.businessId);
+    auditLog(req.businessId, req.user.id, 'dining_area_delete', 'dining_area', area.id, {});
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
 router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
   try {
     const { target_table_count: rawTarget } = req.body;
@@ -1024,10 +1148,7 @@ router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
       .get(req.params.areaId, req.businessId);
     if (!area) return res.status(404).json({ error: 'Bölge bulunamadı' });
 
-    let branchId = req.branchId || null;
-    if (!branchId) {
-      branchId = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId)?.id || null;
-    }
+    const branchId = resolveBranchIdForDining(req);
 
     const activeTables = db
       .prepare(
@@ -1040,18 +1161,52 @@ router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
     let toDeactivate = [];
     if (target < current) {
       const need = current - target;
-      toDeactivate = db
+      const tail = db
         .prepare(
-          `SELECT id FROM tables WHERE dining_area_id = ? AND business_id = ? AND is_active = 1
-           AND status = 'empty' AND (current_order_id IS NULL OR current_order_id = '')
+          `SELECT id, name, status, current_order_id FROM tables
+           WHERE dining_area_id = ? AND business_id = ? AND is_active = 1
            ORDER BY sort_order DESC, name DESC LIMIT ?`,
         )
         .all(area.id, req.businessId, need);
-      if (toDeactivate.length < need) {
-        return res.status(400).json({
-          error: 'Dolu masalar veya açık adisyon varken masa sayısı güvenli şekilde düşürülemedi',
+
+      const closedPlaceholders = ORDER_STATUSES_CLOSED.map(() => '?').join(', ');
+      const openOrderForTable = db.prepare(
+        `SELECT 1 FROM orders WHERE table_id = ? AND business_id = ? AND status NOT IN (${closedPlaceholders}) LIMIT 1`,
+      );
+
+      const blockerMsgs = [];
+      const labels = [];
+      const seen = new Set();
+      for (const t of tail) {
+        const label = String(t.name || 'Masa').trim() || 'Masa';
+        const noCurrentOrder =
+          t.current_order_id == null || String(t.current_order_id).trim() === '';
+        const empty = t.status === 'empty';
+        const orphanOpen = openOrderForTable.get(t.id, req.businessId, ...ORDER_STATUSES_CLOSED);
+        const canRemove = empty && noCurrentOrder && !orphanOpen;
+        if (canRemove) continue;
+        if (seen.has(t.id)) continue;
+        seen.add(t.id);
+        labels.push(label);
+        blockerMsgs.push(
+          `${label}: Bu masada açık sipariş veya dolu adisyon var. Önce masayı kapatın veya siparişi iptal edin.`,
+        );
+      }
+
+      if (blockerMsgs.length > 0) {
+        const namesJoined = labels.join(', ');
+        const summary =
+          blockerMsgs.length === 1
+            ? blockerMsgs[0]
+            : `${namesJoined} masaları aktif kullanımda olduğu için hedef ${target} uygulanamadı. Önce bu masaları boşaltın veya adisyonları kapatın.`;
+
+        return res.status(409).json({
+          error: summary,
+          blockers: blockerMsgs,
         });
       }
+
+      toDeactivate = tail.map((row) => ({ id: row.id }));
     }
 
     const txn = db.transaction(() => {

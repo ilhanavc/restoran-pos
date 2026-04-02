@@ -41,7 +41,7 @@ function findFirstPrinterByType(businessId, type) {
 }
 
 /**
- * Mutfak satırı için hedef yazıcı.
+ * Muıtfak satırı için hedef yazıcı.
  * a) printer_routing (category_id)
  * b) product / category printer_target (kitchen | bar)
  * c) type=kitchen / type=bar ilk aktif yazıcı

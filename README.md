@@ -9,11 +9,11 @@ Modern, dokunmatik uyumlu, Türkçe arayüzlü restoran adisyon ve satış nokta
 - **Paket Sipariş** — Müşteri arama/oluşturma, adres yönetimi, ayrı sipariş akışı
 - **Caller ID** — Gelen arama eşleştirme, müşteri popup, tek tıkla sipariş başlatma
 - **Ödeme** — Nakit/kart/karışık, indirim, para üstü hesaplama, otomatik adisyon kapama
-- **Mutfak Ekranı** — Aktif siparişler, ürün bazlı hazırlık takibi
+- **Muıtfak Ekranı** — Aktif siparişler, ürün bazlı hazırlık takibi
 - **Müşteri Yönetimi** — Çoklu telefon/adres, sipariş geçmişi
 - **Raporlar** — Günlük satış, ödeme dağılımı, en çok satanlar, kategori/kullanıcı bazlı
 - **Yazıcı Entegrasyonu** — Mock servis (ESC/POS hazır mimari)
-- **Rol Bazlı Yetkilendirme** — Yönetici, Kasiyer, Garson, Mutfak
+- **Rol Bazlı Yetkilendirme** — Yönetici, Kasiyer, Garson, Muıtfak
 - **Multi-tenant Hazır** — business_id izolasyonu tüm tablolarda
 
 ## Teknoloji
@@ -93,7 +93,7 @@ Dükkan bilgisayarında az komut kullanmak için `scripts` klasöründeki `.bat`
 | Yönetici | admin@demo.com | 123456 |
 | Kasiyer | kasiyer@demo.com | 123456 |
 | Garson | garson@demo.com | 123456 |
-| Mutfak | mutfak@demo.com | 123456 |
+| Muıtfak | mutfak@demo.com | 123456 |
 
 ## Proje Yapısı
 
@@ -125,7 +125,7 @@ restoran-pos/
 │       │   ├── tables/        # Masa ekranı
 │       │   ├── orders/        # Sipariş ekranı
 │       │   ├── payments/      # Ödeme ekranı
-│       │   ├── kitchen/       # Mutfak ekranı
+│       │   ├── kitchen/       # Muıtfak ekranı
 │       │   ├── takeaway/      # Paket sipariş
 │       │   ├── callerid/      # Caller ID
 │       │   ├── customers/     # Müşteri yönetimi
@@ -158,7 +158,7 @@ restoran-pos/
 
 ### Siparişler
 - `GET /api/orders` — Sipariş listesi
-- `GET /api/orders/active` — Mutfak aktif siparişler
+- `GET /api/orders/active` — Muıtfak aktif siparişler
 - `GET /api/orders/:id` — Sipariş detayı
 - `POST /api/orders` — Sipariş oluştur
 - `POST /api/orders/:id/items` — Ürün ekle
@@ -187,7 +187,7 @@ restoran-pos/
 
 ### Yazıcı
 - `POST /api/print/receipt` — Müşteri fişi
-- `POST /api/print/kitchen` — Mutfak fişi
+- `POST /api/print/kitchen` — Muıtfak fişi
 
 ## Caller ID (Clipboard Akışı - Önerilen)
 

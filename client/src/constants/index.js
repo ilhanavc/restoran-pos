@@ -1,7 +1,7 @@
 /** Sipariş satırı (order_items) durum rozetleri — sipariş alma ekranı */
 export const ORDER_ITEM_LINE_STATUS = {
   new: { label: 'Yeni', short: 'YENİ', bg: 'rgba(59,130,246,.2)', color: '#93c5fd' },
-  sent: { label: 'Mutfakta', short: 'MUTFAK', bg: 'rgba(245,158,11,.2)', color: '#fbbf24' },
+  sent: { label: 'Muıtfakta', short: 'MUTFAK', bg: 'rgba(245,158,11,.2)', color: '#fbbf24' },
   preparing: { label: 'Hazırlanıyor', short: 'HAZIRLANIYOR', bg: 'rgba(245,158,11,.25)', color: '#f59e0b' },
   ready: { label: 'Hazır', short: 'HAZIR', bg: 'rgba(34,197,94,.25)', color: '#4ade80' },
   served: { label: 'Servis', short: 'SERVİS', bg: 'rgba(148,163,184,.2)', color: '#94a3b8' },
@@ -11,7 +11,7 @@ export const ORDER_ITEM_LINE_STATUS = {
 export const ORDER_STATUS = {
   new: { label: 'Yeni', color: 'info' },
   saved: { label: 'Kaydedildi', color: 'info' },
-  in_kitchen: { label: 'Mutfakta', color: 'warning' },
+  in_kitchen: { label: 'Muıtfakta', color: 'warning' },
   preparing: { label: 'Hazırlanıyor', color: 'orange' },
   ready: { label: 'Hazır', color: 'success' },
   served: { label: 'Servis Edildi', color: 'success' },
@@ -45,7 +45,7 @@ export const ROLES = {
   admin: 'Yönetici',
   cashier: 'Kasiyer',
   waiter: 'Garson',
-  kitchen: 'Mutfak',
+  kitchen: 'Muıtfak',
 };
 
 export function formatCurrency(amount) {

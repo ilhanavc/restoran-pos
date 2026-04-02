@@ -8,7 +8,7 @@ try {
   
   console.log('Seeding database...');
 
-  // Onceleri mevcut verileri temizle
+  // Önceleri mevcut verileri temizle
   const tablesToClear = ['call_logs', 'incoming_calls', 'audit_logs', 'settings', 'print_jobs', 'printer_routing', 'printers',
     'payments', 'order_items', 'orders', 'customer_addresses', 'customer_phones', 'customers',
     'product_modifiers', 'products', 'categories', 'tables', 'dining_areas', 'users', 'roles', 'branches', 'businesses'];
@@ -24,17 +24,17 @@ try {
   // Business
   db.prepare(`INSERT INTO businesses (id, name, phone, address, tax_id, tax_office, receipt_header, receipt_footer)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    businessId, 'Demo Restoran', '0312 555 0001', 'Ataturk Bulvari No:42, Kizilay/Ankara',
-    '1234567890', 'Kizilay VD', 'DEMO RESTORAN', 'Bizi tercih ettiginiz icin tesekkurler!'
+    businessId, 'Demo Restoran', '0312 555 0001', 'Atatürk Bulvarı No:42, Kızılay/Ankara',
+    '1234567890', 'Kızılay VD', 'DEMO RESTORAN', 'Bizi tercih ettiğiniz için teşekkürler!'
   );
-  console.log('   Business olusturuldu');
+  console.log('   Business oluşturuldu');
 
   // Branch
   db.prepare(`INSERT INTO branches (id, business_id, name, phone, address)
     VALUES (?, ?, ?, ?, ?)`).run(
-    branchId, businessId, 'Merkez Sube', '0312 555 0001', 'Ataturk Bulvari No:42'
+    branchId, businessId, 'Merkez Şube', '0312 555 0001', 'Atatürk Bulvarı No:42'
   );
-  console.log('   Branch olusturuldu');
+  console.log('   Branch oluşturuldu');
 
   // Roles
   const adminRoleId = uuid();
@@ -43,41 +43,41 @@ try {
   const kitchenRoleId = uuid();
 
   db.prepare(`INSERT INTO roles (id, business_id, name, slug, permissions) VALUES (?, ?, ?, ?, ?)`)
-    .run(adminRoleId, businessId, 'Yonetici', 'admin', JSON.stringify({ all: true }));
+    .run(adminRoleId, businessId, 'Yönetici', 'admin', JSON.stringify({ all: true }));
   db.prepare(`INSERT INTO roles (id, business_id, name, slug, permissions) VALUES (?, ?, ?, ?, ?)`)
     .run(cashierRoleId, businessId, 'Kasiyer', 'cashier', JSON.stringify({ orders: true, payments: true, customers: true, reports_basic: true }));
   db.prepare(`INSERT INTO roles (id, business_id, name, slug, permissions) VALUES (?, ?, ?, ?, ?)`)
     .run(waiterRoleId, businessId, 'Garson', 'waiter', JSON.stringify({ tables: true, orders_create: true, orders_send: true }));
   db.prepare(`INSERT INTO roles (id, business_id, name, slug, permissions) VALUES (?, ?, ?, ?, ?)`)
-    .run(kitchenRoleId, businessId, 'Mutfak', 'kitchen', JSON.stringify({ kitchen_screen: true, order_status: true }));
-  console.log('   Roller olusturuldu');
+    .run(kitchenRoleId, businessId, 'Muıtfak', 'kitchen', JSON.stringify({ kitchen_screen: true, order_status: true }));
+  console.log('   Roller oluşturuldu');
 
   // Users
   const hash = bcryptjs.hashSync('123456', 10);
-  console.log('   Sifre hash:', hash.substring(0, 20) + '...');
+  console.log('   Şifre hash:', hash.substring(0, 20) + '...');
 
   const roleMap = { admin: adminRoleId, cashier: cashierRoleId, waiter: waiterRoleId, kitchen: kitchenRoleId };
   const users = [
-    { email: 'admin@demo.com', name: 'Ali Yilmaz', role: 'admin' },
-    { email: 'kasiyer@demo.com', name: 'Ayse Demir', role: 'cashier' },
+    { email: 'admin@demo.com', name: 'Ali Yılmaz', role: 'admin' },
+    { email: 'kasiyer@demo.com', name: 'Ayşe Demir', role: 'cashier' },
     { email: 'garson@demo.com', name: 'Mehmet Kaya', role: 'waiter' },
-    { email: 'mutfak@demo.com', name: 'Fatma Celik', role: 'kitchen' },
+    { email: 'mutfak@demo.com', name: 'Fatma Çelik', role: 'kitchen' },
   ];
   
   for (const u of users) {
     const userId = uuid();
     db.prepare(`INSERT INTO users (id, business_id, branch_id, role_id, email, password_hash, full_name)
       VALUES (?, ?, ?, ?, ?, ?, ?)`).run(userId, businessId, branchId, roleMap[u.role], u.email, hash, u.name);
-    console.log('   Kullanici olusturuldu:', u.email);
+    console.log('   Kullanıcı oluşturuldu:', u.email);
   }
 
   // Dining Areas
   const area1 = uuid(), area2 = uuid(), area3 = uuid(), area4 = uuid();
-  db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area1, businessId, branchId, 'Ic Salon', 0);
-  db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area2, businessId, branchId, 'Bahce', 1);
+  db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area1, businessId, branchId, 'İç Salon', 0);
+  db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area2, businessId, branchId, 'Bahçe', 1);
   db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area3, businessId, branchId, 'VIP', 2);
-  db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area4, businessId, branchId, 'Ust Kat', 3);
-  console.log('   Alanlar olusturuldu');
+  db.prepare(`INSERT INTO dining_areas (id, business_id, branch_id, name, sort_order) VALUES (?, ?, ?, ?, ?)`).run(area4, businessId, branchId, 'Üst Kat', 3);
+  console.log('   Alanlar oluşturuldu');
 
   // Tables
   const areaIds = [area1, area2, area3, area4];
@@ -95,15 +95,15 @@ try {
       tableCount++;
     }
   }
-  console.log('   ' + tableCount + ' masa olusturuldu');
+  console.log('   ' + tableCount + ' masa oluşturuldu');
 
   // Kategori / ürün / modifier yok — Ayarlar > Menü tanımlarından manuel girilir
-  console.log('   Kategori ve urun yok (manuel giris)');
+  console.log('   Kategori ve ürün yok (manuel giriş)');
 
   // Demo Customers
   const cust1 = uuid(), cust2 = uuid(), cust3 = uuid();
   
-  db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust1, businessId, 'Ahmet Yildiz', 12);
+  db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust1, businessId, 'Ahmet Yıldız', 12);
   db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust2, businessId, 'Zeynep Kara', 5);
   db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust3, businessId, 'Mustafa Arslan', 8);
 
@@ -112,35 +112,35 @@ try {
   db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)`).run(uuid(), cust2, '905339876543', '905339876543');
   db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)`).run(uuid(), cust3, '905447654321', '905447654321');
 
-  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust1, 'Ev', 'Kizilay Mah. GMK Blv. No:15/3');
-  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 0)`).run(uuid(), cust1, 'Is', 'Sogutozu Cad. No:42 Cankaya');
-  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust2, 'Ev', 'Bahcelievler 7. Cadde No:8/12');
-  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust3, 'Ev', 'Tunali Hilmi Cad. No:120/5');
-  console.log('   3 demo musteri olusturuldu');
+  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust1, 'Ev', 'Kızılay Mah. GMK Blv. No:15/3');
+  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 0)`).run(uuid(), cust1, 'İş', 'Söğütözü Cad. No:42 Çankaya');
+  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust2, 'Ev', 'Bahçelievler 7. Cadde No:8/12');
+  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust3, 'Ev', 'Tunalı Hilmi Cad. No:120/5');
+  console.log('   3 demo müşteri oluşturuldu');
 
   // Mock Printers
   db.prepare(`INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(uuid(), businessId, branchId, 'Mutfak Yazicisi', 'kitchen', 'network', '192.168.1.100');
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(uuid(), businessId, branchId, 'Muıtfak Yazıcısı', 'kitchen', 'network', '192.168.1.100');
   db.prepare(`INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(uuid(), businessId, branchId, 'Bar Yazicisi', 'bar', 'network', '192.168.1.101');
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(uuid(), businessId, branchId, 'Bar Yazıcısı', 'bar', 'network', '192.168.1.101');
   db.prepare(`INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(uuid(), businessId, branchId, 'Kasa Yazicisi', 'receipt', 'network', '192.168.1.102');
-  console.log('   3 yazici olusturuldu');
+    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(uuid(), businessId, branchId, 'Kasa Yazıcısı', 'receipt', 'network', '192.168.1.102');
+  console.log('   3 yazıcı oluşturuldu');
 
-  // Dogrulama
+  // Doğrulama
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get();
   const productCount = db.prepare('SELECT COUNT(*) as c FROM products').get();
   const tableCountCheck = db.prepare('SELECT COUNT(*) as c FROM tables').get();
 
   console.log('');
-  console.log('Seed tamamlandi!');
-  console.log('   ' + userCount.c + ' kullanici, ' + productCount.c + ' urun (menuyu Ayarlar > Menuden ekleyin), ' + tableCountCheck.c + ' masa');
+  console.log('Seed tamamlandı!');
+  console.log('   ' + userCount.c + ' kullanıcı, ' + productCount.c + ' ürün (menüyü Ayarlar > Menüden ekleyin), ' + tableCountCheck.c + ' masa');
   console.log('');
-  console.log('Demo Giris Bilgileri:');
-  console.log('   Yonetici: admin@demo.com / 123456');
+  console.log('Demo Giriş Bilgileri:');
+  console.log('   Yönetici: admin@demo.com / 123456');
   console.log('   Kasiyer:  kasiyer@demo.com / 123456');
   console.log('   Garson:   garson@demo.com / 123456');
-  console.log('   Mutfak:   mutfak@demo.com / 123456');
+  console.log('   Muıtfak:   mutfak@demo.com / 123456');
 
 } catch (err) {
   console.error('SEED HATASI:', err.message);

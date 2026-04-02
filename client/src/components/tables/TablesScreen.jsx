@@ -3,7 +3,9 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { TABLE_STATUS, formatCurrency, timeAgo } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
-import { RefreshCw, Users, Clock, ArrowRightLeft } from 'lucide-react';
+import {
+  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2,
+} from 'lucide-react';
 
 export default function TablesScreen({
   onOpenOrder,
@@ -15,7 +17,11 @@ export default function TablesScreen({
   const [loading, setLoading] = useState(true);
   const [transferMode, setTransferMode] = useState(null);
   const [takeawayOrders, setTakeawayOrders] = useState([]);
+  const [callModalOpen, setCallModalOpen] = useState(false);
+  const [callHistory, setCallHistory] = useState([]);
+  const [callHistoryLoading, setCallHistoryLoading] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [openMenuTableId, setOpenMenuTableId] = useState(null);
   const toast = useToast();
 
   const loadTables = useCallback(async () => {
@@ -68,6 +74,36 @@ export default function TablesScreen({
     loadTakeaway();
   };
 
+  const loadCallHistory = useCallback(async () => {
+    setCallHistoryLoading(true);
+    try {
+      const data = await api.getCallHistory();
+      setCallHistory(data || []);
+    } catch (err) {
+      toast.error('Arama geçmişi yüklenemedi');
+    } finally {
+      setCallHistoryLoading(false);
+    }
+  }, [toast]);
+
+  const openCallHistoryModal = async () => {
+    setCallModalOpen(true);
+    await loadCallHistory();
+  };
+
+  const formatCallDateTime = (value) => {
+    if (!value) return '-';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return '-';
+    return dt.toLocaleString('tr-TR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
   const currentArea = areas.find(a => a.id === activeArea);
 
   const handleTableClick = async (table) => {
@@ -98,6 +134,49 @@ export default function TablesScreen({
     });
   };
 
+  const handleTableMenuAction = async (action, table, e) => {
+    e.stopPropagation();
+    if (action === 'transfer') {
+      setOpenMenuTableId(null);
+      setTransferMode(table.id);
+      return;
+    }
+    if (action === 'cancel') {
+      const orderId = table.current_order_id;
+      if (!orderId) {
+        toast.error('Sipariş bulunamadı');
+        return;
+      }
+      const peerTables = (areas.find((a) => (a.tables || []).some((t) => t.id === table.id))?.tables || currentArea?.tables || []);
+      const label = masaLabelInArea(table, peerTables);
+      if (!window.confirm(`${label} siparişi iptal edilsin mi? Masa boşaltılacak.`)) return;
+      try {
+        await api.updateOrderStatus(orderId, 'cancelled');
+        toast.success('Sipariş iptal edildi');
+        setOpenMenuTableId(null);
+        if (transferMode === table.id) setTransferMode(null);
+        loadTables();
+      } catch (err) {
+        toast.error(err.message);
+      }
+      return;
+    }
+    if (action === 'print') {
+      const orderId = table.current_order_id;
+      if (!orderId) {
+        toast.error('Sipariş bulunamadı');
+        return;
+      }
+      try {
+        await api.printReceipt(orderId);
+        toast.success('Yazdırma isteği gönderildi');
+        setOpenMenuTableId(null);
+      } catch (err) {
+        toast.error(err.message);
+      }
+    }
+  };
+
   const handleTakeawayDelivery = async (orderId, action, e) => {
     e?.stopPropagation();
     try {
@@ -110,6 +189,12 @@ export default function TablesScreen({
   };
 
   const allTables = areas.flatMap(a => a.tables || []);
+  const actionTable = openMenuTableId ? allTables.find((t) => t.id === openMenuTableId) : null;
+  const actionTablePeers = actionTable
+    ? (areas.find((a) => (a.tables || []).some((t) => t.id === actionTable.id))?.tables || [])
+    : [];
+  const actionDisplayName = actionTable ? masaLabelInArea(actionTable, actionTablePeers) : '';
+
   const stats = {
     total: allTables.length,
     empty: allTables.filter(t => t.status === 'empty').length,
@@ -124,6 +209,25 @@ export default function TablesScreen({
     cursor: 'pointer',
     border: '1px solid rgba(255,255,255,.12)',
     flex: 1,
+  };
+
+  const actionTileBase = {
+    minHeight: 84,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--border)',
+    background: 'var(--bg-tertiary)',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    fontSize: 12,
+    fontWeight: 700,
+    color: 'var(--text-primary)',
+    WebkitTapHighlightColor: 'transparent',
   };
 
   return (
@@ -141,13 +245,16 @@ export default function TablesScreen({
               </span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="tables-header-actions">
+            <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
+              <Phone size={16} />
+            </button>
             {transferMode && (
               <button className="btn btn-ghost btn-sm" onClick={() => setTransferMode(null)}>
                 İptal
               </button>
             )}
-            <button className="btn btn-ghost btn-icon" onClick={refreshAll} title="Yenile">
+            <button className="btn btn-ghost btn-icon tables-action-btn" onClick={refreshAll} title="Yenile">
               <RefreshCw size={16} />
             </button>
           </div>
@@ -245,30 +352,59 @@ export default function TablesScreen({
                       e.currentTarget.style.borderColor = borderColor;
                     }}
                   >
-                    {hasReady && (
-                      <span
-                        style={{
-                          position: 'absolute',
-                          top: 8,
-                          right: 8,
-                          fontSize: 10,
-                          background: 'var(--success)',
-                          color: '#fff',
-                          padding: '2px 7px',
-                          borderRadius: 6,
-                          fontWeight: 700,
-                          animation: 'pulse 2s infinite',
-                        }}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: 10,
+                        marginBottom: 6,
+                      }}
+                    >
+                      <div style={{
+                        fontSize: 24,
+                        fontWeight: 800,
+                        letterSpacing: '-0.02em',
+                        lineHeight: 1.15,
+                        minWidth: 0,
+                      }}
                       >
-                        HAZIR
-                      </span>
-                    )}
-                    {!hasReady && (
-                      <div style={{ position: 'absolute', top: 12, right: 12, width: 8, height: 8, borderRadius: '50%', background: st.color }} />
-                    )}
-
-                    <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', marginBottom: 6 }}>
-                      {displayName}
+                        {displayName}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                        {hasReady && (
+                          <span
+                            style={{
+                              fontSize: 10,
+                              background: 'var(--success)',
+                              color: '#fff',
+                              padding: '2px 7px',
+                              borderRadius: 6,
+                              fontWeight: 700,
+                              animation: 'pulse 2s infinite',
+                            }}
+                          >
+                            HAZIR
+                          </span>
+                        )}
+                        {!hasReady && (
+                          <div style={{ width: 8, height: 8, borderRadius: '50%', background: st.color }} />
+                        )}
+                        {isOccupied && !isReserved && !transferMode && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-icon"
+                            style={{ padding: 4, minHeight: 'auto', flexShrink: 0 }}
+                            title="İşlemler"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuTableId((id) => (id === table.id ? null : table.id));
+                            }}
+                          >
+                            <MoreVertical size={18} />
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     {!isReserved && (
@@ -284,16 +420,20 @@ export default function TablesScreen({
                     )}
 
                     {isOccupied && (
-                      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {table.order_total > 0 && (
-                          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
+                          <div style={{
+                            fontSize: 22,
+                            fontWeight: 800,
+                            color: 'var(--text-primary)',
+                            letterSpacing: '-0.02em',
+                            lineHeight: 1.2,
+                          }}
+                          >
                             {formatCurrency(table.order_total)}
                           </div>
                         )}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
-                          {table.order_line_count > 0 && (
-                            <span>{table.order_line_count} kalem</span>
-                          )}
                           {table.guest_count > 0 && (
                             <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                               <Users size={10} /> {table.guest_count}
@@ -306,21 +446,6 @@ export default function TablesScreen({
                           )}
                         </div>
                       </div>
-                    )}
-
-                    {isOccupied && !transferMode && (
-                      <button
-                        style={{
-                          position: 'absolute', bottom: 8, right: 8,
-                          background: 'var(--bg-tertiary)', border: 'none',
-                          borderRadius: 4, padding: '3px 6px', cursor: 'pointer',
-                          color: 'var(--text-muted)', fontSize: 10,
-                        }}
-                        onClick={(e) => { e.stopPropagation(); setTransferMode(table.id); }}
-                        title="Masa Taşı"
-                      >
-                        <ArrowRightLeft size={12} />
-                      </button>
                     )}
                   </div>
                 );
@@ -449,7 +574,130 @@ export default function TablesScreen({
         @media (max-width: 520px) {
           .tables-grid { grid-template-columns: minmax(0, 1fr) !important; }
         }
+        .table-action-sheet-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 14px;
+        }
+        @media (max-width: 480px) {
+          .table-action-sheet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
       `}</style>
+
+      {openMenuTableId && actionTable && (
+        <div className="modal-overlay" onClick={() => setOpenMenuTableId(null)}>
+          <div
+            className="modal modal-md table-action-sheet-modal"
+            style={{ maxWidth: 440, width: '100%' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+              <div style={{ minWidth: 0, paddingRight: 8 }}>
+                <h2 style={{ fontSize: 18, margin: 0, lineHeight: 1.3 }}>Masa Adı: {actionDisplayName}</h2>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.4 }}>
+                  Sipariş veya masa ile ilgili hızlı işlemler
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setOpenMenuTableId(null)}
+                title="Kapat"
+                style={{ flexShrink: 0 }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ paddingTop: 8 }}>
+              <div className="table-action-sheet-grid">
+                <button
+                  type="button"
+                  style={actionTileBase}
+                  onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
+                >
+                  <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
+                  Masayı Taşı
+                </button>
+                <button
+                  type="button"
+                  style={{
+                    ...actionTileBase,
+                    borderColor: 'var(--danger)',
+                    color: 'var(--danger)',
+                    background: 'rgba(239, 68, 68, 0.08)',
+                  }}
+                  onClick={(e) => handleTableMenuAction('cancel', actionTable, e)}
+                >
+                  <Undo2 size={26} color="var(--danger)" strokeWidth={2} />
+                  İptal
+                </button>
+                <button
+                  type="button"
+                  style={actionTileBase}
+                  onClick={(e) => handleTableMenuAction('print', actionTable, e)}
+                >
+                  <Printer size={26} color="var(--accent)" strokeWidth={2} />
+                  Yazdırma
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {callModalOpen && (
+        <div className="modal-overlay" onClick={() => setCallModalOpen(false)}>
+          <div className="modal modal-lg calls-history-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Caller ID Son 7 Gunluk Arama Gecmisi</h2>
+              <button className="btn btn-ghost btn-icon" onClick={() => setCallModalOpen(false)} title="Kapat">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="modal-body">
+              {callHistoryLoading ? (
+                <div className="empty-state">Yükleniyor...</div>
+              ) : callHistory.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-text">Gosterilecek arama kaydi bulunamadi</div>
+                </div>
+              ) : (
+                <table className="data-table calls-history-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Numara</th>
+                      <th>Musteri</th>
+                      <th>Arama Tarih/Saat</th>
+                      <th>Durum</th>
+                      <th>Sipariş</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {callHistory.map((call, index) => {
+                      const orderOpened = Boolean(call.opened_order || call.order_id || call.order_no);
+                      return (
+                        <tr key={call.id}>
+                          <td>{index + 1}</td>
+                          <td>{call.phone || '-'}</td>
+                          <td>{call.customer_name_snapshot || call.customer_name || 'Yeni Musteri'}</td>
+                          <td>{formatCallDateTime(call.created_at)}</td>
+                          <td>{call.status || '-'}</td>
+                          <td>
+                            <span className={`badge ${orderOpened ? 'badge-success' : 'badge-warning'}`}>
+                              {orderOpened ? 'Sipariş Alındı' : 'Sipariş Alınmadı'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

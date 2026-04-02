@@ -1,6 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Pencil, Trash2, UtensilsCrossed } from 'lucide-react';
+import {
+  Plus,
+  Pencil,
+  Trash2,
+  MoreVertical,
+  Search,
+  SlidersHorizontal,
+  ArrowUp,
+  ArrowDown,
+  FilePlus,
+  CheckSquare,
+  ListOrdered,
+} from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency } from '../../constants/index.js';
@@ -8,9 +20,11 @@ import { MENU_ICON_OPTIONS, MENU_COLOR_OPTIONS } from '../../constants/menuUi.js
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 
 const PRINTER_OPTIONS = [
-  { value: 'kitchen', label: 'Mutfak' },
+  { value: 'kitchen', label: 'Muıtfak' },
   { value: 'bar', label: 'Bar' },
 ];
+
+const PAGE_SIZE = 30;
 
 function CategoryModal({ item, categories, onClose, onSaved }) {
   const { success, error } = useToast();
@@ -135,16 +149,24 @@ function CategoryModal({ item, categories, onClose, onSaved }) {
   );
 }
 
-function ProductModal({ item, categories, onClose, onSaved }) {
+function ProductModal({ item, categories, defaultCategoryId, onClose, onSaved }) {
   const { success, error } = useToast();
   const activeCats = categories.filter(
     (c) => Number(c.is_active) === 1 || (item?.category_id && c.id === item.category_id),
   );
   const [name, setName] = useState(item?.name || '');
   const [price, setPrice] = useState(item?.price != null ? String(item.price) : '');
-  const [categoryId, setCategoryId] = useState(item?.category_id || activeCats[0]?.id || '');
+  const [categoryId, setCategoryId] = useState(
+    item?.category_id || defaultCategoryId || activeCats[0]?.id || '',
+  );
   const [saving, setSaving] = useState(false);
   const isEdit = !!item?.id;
+
+  useEffect(() => {
+    if (!item && defaultCategoryId) {
+      setCategoryId(defaultCategoryId);
+    }
+  }, [item, defaultCategoryId]);
 
   const handleSave = async () => {
     const trimmed = name.trim();
@@ -233,17 +255,144 @@ function ProductModal({ item, categories, onClose, onSaved }) {
   );
 }
 
+function ProductSortModal({ category, productsInCategory, onClose, onSaved }) {
+  const { success, error } = useToast();
+  const [order, setOrder] = useState(() =>
+    [...productsInCategory].sort((a, b) => {
+      const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+      if (so !== 0) return so;
+      return String(a.name).localeCompare(String(b.name), 'tr');
+    })
+  );
+  const [saving, setSaving] = useState(false);
+
+  const move = (index, dir) => {
+    const j = index + dir;
+    if (j < 0 || j >= order.length) return;
+    setOrder((prev) => {
+      const next = [...prev];
+      [next[index], next[j]] = [next[j], next[index]];
+      return next;
+    });
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      for (let i = 0; i < order.length; i++) {
+        await api.patchProduct(order[i].id, { sort_order: i });
+      }
+      success('Sıralama kaydedildi');
+      onSaved();
+    } catch (e) {
+      error(e.message || 'Kayıt başarısız');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={() => !saving && onClose()}>
+      <div role="dialog" className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Ürünleri sırala — {category.name}</h2>
+          <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} disabled={saving}>
+            ×
+          </button>
+        </div>
+        <div className="modal-body" style={{ paddingTop: 0 }}>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
+            Listeyi yukarı / aşağı taşıyın; kaydettiğinizde sipariş ekranındaki ürün sırası güncellenir.
+          </p>
+          {order.length === 0 ? (
+            <div className="empty-state" style={{ padding: 24 }}>
+              Bu kategoride sıralanacak ürün yok
+            </div>
+          ) : (
+            <ul className="menu-settings-sort-list">
+              {order.map((p, i) => (
+                <li key={p.id} className="menu-settings-sort-row">
+                  <span className="menu-settings-sort-name truncate">{p.name}</span>
+                  <span className="menu-settings-sort-price">{formatCurrency(p.price)}</span>
+                  <div className="menu-settings-sort-actions">
+                    <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Yukarı" disabled={saving || i === 0} onClick={() => move(i, -1)}>
+                      <ArrowUp size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm btn-icon"
+                      title="Aşağı"
+                      disabled={saving || i === order.length - 1}
+                      onClick={() => move(i, 1)}
+                    >
+                      <ArrowDown size={16} />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+            İptal
+          </button>
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || order.length === 0}>
+            {saving ? 'Kaydediliyor…' : 'Kaydet'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MenuSettingsPage() {
   const navigate = useNavigate();
   const { success, error } = useToast();
-  const [tab, setTab] = useState('categories');
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterCat, setFilterCat] = useState('all');
+  /** 'all' = tüm kategorilerdeki ürünler; 'one' = tek kategori */
+  const [filterMode, setFilterMode] = useState('one');
+  /** filterMode === 'one' iken geçerli kategori id */
+  const [activeCategoryId, setActiveCategoryId] = useState(null);
+  const [initialized, setInitialized] = useState(false);
+
   const [catModal, setCatModal] = useState(null);
   const [prodModal, setProdModal] = useState(null);
+  const [sortModalCategory, setSortModalCategory] = useState(null);
+  const [bulkMode, setBulkMode] = useState(null);
+  const [bulkSelected, setBulkSelected] = useState(() => new Set());
+  const [bulkTargetCategoryId, setBulkTargetCategoryId] = useState('');
+  const [openMenuCatId, setOpenMenuCatId] = useState(null);
+  const [dropdownPos, setDropdownPos] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  const menuRef = useRef(null);
+
+  const closeCategoryMenu = useCallback(() => {
+    setOpenMenuCatId(null);
+    setDropdownPos(null);
+  }, []);
+
+  const toggleCategoryMenu = useCallback(
+    (e, cat) => {
+      e.stopPropagation();
+      if (openMenuCatId === cat.id) {
+        closeCategoryMenu();
+        return;
+      }
+      const r = e.currentTarget.getBoundingClientRect();
+      const w = 220;
+      let left = r.right - w;
+      if (left < 8) left = 8;
+      if (left + w > window.innerWidth - 8) left = window.innerWidth - w - 8;
+      setDropdownPos({ top: r.bottom + 4, left });
+      setOpenMenuCatId(cat.id);
+    },
+    [openMenuCatId, closeCategoryMenu],
+  );
 
   const loadCategories = useCallback(async () => {
     const rows = await api.getCategories({ include_inactive: 1 });
@@ -270,7 +419,28 @@ export default function MenuSettingsPage() {
     load();
   }, [load]);
 
-  const handleBack = () => navigate('/settings');
+  const activeCategories = useMemo(
+    () => categories.filter((c) => Number(c?.is_active) === 1).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.name).localeCompare(String(b.name), 'tr')),
+    [categories],
+  );
+
+  useEffect(() => {
+    if (loading || initialized || activeCategories.length === 0) return;
+    setActiveCategoryId(activeCategories[0].id);
+    setFilterMode('one');
+    setInitialized(true);
+  }, [loading, initialized, activeCategories]);
+
+  useEffect(() => {
+    if (!openMenuCatId) return;
+    const onDoc = (e) => {
+      if (e.target.closest('[data-cat-menu-trigger]')) return;
+      if (menuRef.current?.contains(e.target)) return;
+      closeCategoryMenu();
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [openMenuCatId, closeCategoryMenu]);
 
   const isCatActive = (c) => Number(c?.is_active) === 1;
 
@@ -283,20 +453,42 @@ export default function MenuSettingsPage() {
     return m;
   }, [products]);
 
+  const searchNorm = search.trim().toLowerCase();
+
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      const ms = !search || p.name.toLowerCase().includes(search.toLowerCase());
-      const mc = filterCat === 'all' || p.category_id === filterCat;
-      return ms && mc;
+      const nameOk = !searchNorm || String(p.name).toLowerCase().includes(searchNorm);
+      const catOk =
+        filterMode === 'all' || (filterMode === 'one' && activeCategoryId && p.category_id === activeCategoryId);
+      return nameOk && catOk;
     });
-  }, [products, search, filterCat]);
+  }, [products, searchNorm, filterMode, activeCategoryId]);
+
+  const displayedProducts = useMemo(() => filteredProducts.slice(0, visibleCount), [filteredProducts, visibleCount]);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchNorm, filterMode, activeCategoryId, bulkMode]);
 
   const deleteCategory = async (id) => {
-    if (!window.confirm('Bu kategori pasif yapılacak ve içindeki ürünler menüden kaldırılacak. Devam edilsin mi?')) return;
+    const n = productCountByCat[id] || 0;
+    const msg =
+      n > 0
+        ? `Bu kategori pasif yapılacak ve içindeki ${n} ürün menüden kaldırılacak. Devam edilsin mi?`
+        : 'Bu kategori pasif yapılacak. Devam edilsin mi?';
+    if (!window.confirm(msg)) return;
     try {
       await api.deleteCategory(id);
       success('Kategori kaldırıldı');
       await load();
+      if (activeCategoryId === id) {
+        setFilterMode('all');
+        setActiveCategoryId(null);
+      }
+      if (bulkMode?.categoryId === id) {
+        setBulkMode(null);
+        setBulkSelected(new Set());
+      }
     } catch (e) {
       error(e.message || 'İşlem başarısız');
     }
@@ -308,6 +500,11 @@ export default function MenuSettingsPage() {
       await api.deleteProduct(id);
       success('Ürün kaldırıldı');
       await loadProducts();
+      setBulkSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     } catch (e) {
       error(e.message || 'İşlem başarısız');
     }
@@ -323,169 +520,419 @@ export default function MenuSettingsPage() {
     }
   };
 
-  const activeCategories = categories.filter((c) => isCatActive(c));
+  const handleSidebarSelect = (id) => {
+    setFilterMode('one');
+    setActiveCategoryId(id);
+    closeCategoryMenu();
+  };
+
+  const menuCatForDropdown = useMemo(
+    () => (openMenuCatId ? categories.find((c) => c.id === openMenuCatId) : null),
+    [openMenuCatId, categories],
+  );
+
+  const handleFilterDropdown = (value) => {
+    if (value === 'all') {
+      setFilterMode('all');
+      setActiveCategoryId(null);
+    } else {
+      setFilterMode('one');
+      setActiveCategoryId(value);
+    }
+  };
+
+  const newProductDefaultCategoryId = useMemo(() => {
+    if (filterMode === 'one' && activeCategoryId) return activeCategoryId;
+    return activeCategories[0]?.id || '';
+  }, [filterMode, activeCategoryId, activeCategories]);
+
+  const openNewProduct = () => {
+    if (!newProductDefaultCategoryId) {
+      error('Önce aktif kategori ekleyin');
+      return;
+    }
+    setProdModal({ kind: 'new', defaultCategoryId: newProductDefaultCategoryId });
+  };
+
+  const productsForSort = useMemo(() => {
+    if (!sortModalCategory) return [];
+    return products.filter((p) => p.category_id === sortModalCategory.id && !p.is_deleted);
+  }, [sortModalCategory, products]);
+
+  const bulkAppliesToProduct = (p) => {
+    if (!bulkMode) return false;
+    return p.category_id === bulkMode.categoryId && !p.is_deleted;
+  };
+
+  const toggleBulkOne = (id) => {
+    setBulkSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllInBulkScope = () => {
+    if (!bulkMode) return;
+    const ids = products.filter((p) => bulkAppliesToProduct(p)).map((p) => p.id);
+    setBulkSelected(new Set(ids));
+  };
+
+  const clearBulkSelection = () => setBulkSelected(new Set());
+
+  const exitBulkMode = () => {
+    setBulkMode(null);
+    setBulkSelected(new Set());
+    setBulkTargetCategoryId('');
+  };
+
+  const applyBulkMove = async () => {
+    if (!bulkTargetCategoryId || bulkSelected.size === 0) {
+      error('Hedef kategori ve en az bir ürün seçin');
+      return;
+    }
+    try {
+      for (const id of bulkSelected) {
+        await api.patchProduct(id, { category_id: bulkTargetCategoryId });
+      }
+      success(`${bulkSelected.size} ürün taşındı`);
+      exitBulkMode();
+      await loadProducts();
+    } catch (e) {
+      error(e.message || 'İşlem başarısız');
+    }
+  };
+
+  const applyBulkDeactivate = async () => {
+    if (bulkSelected.size === 0) {
+      error('En az bir ürün seçin');
+      return;
+    }
+    if (!window.confirm(`${bulkSelected.size} ürün pasif yapılsın mı? (Menüden gizlenir.)`)) return;
+    try {
+      for (const id of bulkSelected) {
+        await api.patchProduct(id, { is_active: 0 });
+      }
+      success('Seçilen ürünler pasif yapıldı');
+      exitBulkMode();
+      await loadProducts();
+    } catch (e) {
+      error(e.message || 'İşlem başarısız');
+    }
+  };
+
+  const handleBack = () => navigate('/settings');
+
+  const dropdownValue = filterMode === 'all' ? 'all' : activeCategoryId || 'all';
 
   return (
-    <div className="page-container">
+    <div className="page-container menu-settings-page">
       <SettingsDetailHeader title="Menü tanımları" onBack={handleBack} />
 
-      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+      <p className="menu-settings-lead">
         Kategori ve ürünleri buradan yönetin; sipariş ekranı bu listeyi kullanır.
       </p>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <button type="button" className={`btn btn-sm ${tab === 'categories' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('categories')}>
-          Kategoriler ({activeCategories.length})
-        </button>
-        <button type="button" className={`btn btn-sm ${tab === 'products' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setTab('products')}>
-          Ürünler ({products.filter((p) => !p.is_deleted).length})
-        </button>
-      </div>
-
       {loading ? (
         <div className="empty-state">Yükleniyor…</div>
-      ) : tab === 'categories' ? (
-        <>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => setCatModal('new')}>
-              <Plus size={16} /> Yeni kategori
-            </button>
-          </div>
-          {categories.length === 0 ? (
-            <div className="empty-state">Henüz kategori yok</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {categories.map((cat) => (
-                <div
-                  key={cat.id}
-                  className="card card-padded"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    opacity: isCatActive(cat) ? 1 : 0.55,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div
-                      style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 10,
-                        background: `${cat.color || '#6366f1'}22`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 22,
-                      }}
-                    >
-                      {cat.icon || '🍽️'}
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{cat.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                        {productCountByCat[cat.id] || 0} ürün
-                        {!isCatActive(cat) ? ' · Pasif' : ''}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {isCatActive(cat) && (
-                      <>
-                        <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Düzenle" onClick={() => setCatModal(cat)}>
-                          <Pencil size={16} />
-                        </button>
-                        <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Kaldır" onClick={() => deleteCategory(cat.id)}>
-                          <Trash2 size={16} color="var(--danger)" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
       ) : (
         <>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input
-              className="input"
-              placeholder="Ürün ara…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ maxWidth: 220 }}
-            />
-            <select className="input" value={filterCat} onChange={(e) => setFilterCat(e.target.value)} style={{ maxWidth: 200 }}>
-              <option value="all">Tüm kategoriler</option>
-              {activeCategories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            <div style={{ flex: 1 }} />
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setProdModal('new')}
-              disabled={activeCategories.length === 0}
+        <div className="menu-settings-split">
+          <aside className="menu-settings-sidebar">
+            <div className="menu-settings-sidebar-head">
+              <button type="button" className="btn btn-primary btn-sm menu-settings-add-cat" onClick={() => setCatModal('new')}>
+                <Plus size={16} />
+                Kategori Ekle
+              </button>
+            </div>
+            <div
+              className="menu-settings-cat-scroll"
+              onScroll={() => {
+                if (openMenuCatId) closeCategoryMenu();
+              }}
             >
-              <Plus size={16} /> Yeni ürün
-            </button>
-          </div>
-          {activeCategories.length === 0 ? (
-            <div className="empty-state">Önce kategori ekleyin</div>
-          ) : filteredProducts.length === 0 ? (
-            <div className="empty-state">Ürün bulunamadı</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {filteredProducts.map((prod) => {
-                const cat = categories.find((c) => c.id === prod.category_id);
-                return (
-                  <div
-                    key={prod.id}
-                    className="card card-padded"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: 12,
-                      opacity: prod.is_deleted ? 0.5 : 1,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                      <UtensilsCrossed size={18} color="var(--accent)" />
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{prod.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                          {cat?.name || '—'} {prod.is_deleted ? ' · Kaldırıldı' : ''}
+              {categories.length === 0 ? (
+                <div className="empty-state menu-settings-cat-empty">Henüz kategori yok</div>
+              ) : (
+                categories.map((cat) => {
+                  const activeRow = filterMode === 'one' && activeCategoryId === cat.id;
+                  return (
+                    <div
+                      key={cat.id}
+                      className={`menu-settings-cat-row ${activeRow ? 'menu-settings-cat-row--active' : ''} ${!isCatActive(cat) ? 'menu-settings-cat-row--inactive' : ''}`}
+                    >
+                      <button
+                        type="button"
+                        className="menu-settings-cat-main"
+                        onClick={() => handleSidebarSelect(cat.id)}
+                      >
+                        <span
+                          className="menu-settings-cat-icon"
+                          style={{ background: `${cat.color || '#6366f1'}22` }}
+                        >
+                          {cat.icon || '🍽️'}
+                        </span>
+                        <span className="menu-settings-cat-text">
+                          <span className="menu-settings-cat-name truncate">{cat.name}</span>
+                          <span className="menu-settings-cat-meta">
+                            {productCountByCat[cat.id] || 0} ürün
+                            {!isCatActive(cat) ? ' · Pasif' : ''}
+                          </span>
+                        </span>
+                      </button>
+                      {isCatActive(cat) && (
+                        <div className="menu-settings-cat-menu-wrap">
+                          <button
+                            type="button"
+                            data-cat-menu-trigger
+                            className="btn btn-ghost btn-sm btn-icon menu-settings-kebab"
+                            aria-expanded={openMenuCatId === cat.id}
+                            aria-label="Kategori işlemleri"
+                            onClick={(e) => toggleCategoryMenu(e, cat)}
+                          >
+                            <MoreVertical size={18} />
+                          </button>
                         </div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontWeight: 700 }}>{formatCurrency(prod.price)}</span>
-                      {!prod.is_deleted ? (
-                        <>
-                          <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => setProdModal(prod)}>
-                            <Pencil size={16} />
-                          </button>
-                          <button type="button" className="btn btn-ghost btn-sm btn-icon" onClick={() => deleteProduct(prod.id)}>
-                            <Trash2 size={16} color="var(--danger)" />
-                          </button>
-                        </>
-                      ) : (
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => restoreProduct(prod.id)}>
-                          Geri al
-                        </button>
                       )}
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
-          )}
+          </aside>
+
+          <section className="menu-settings-main">
+            <div className="menu-settings-toolbar">
+              <select
+                className="input menu-settings-toolbar-filter"
+                value={dropdownValue}
+                onChange={(e) => handleFilterDropdown(e.target.value)}
+              >
+                <option value="all">Tüm kategoriler</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {!isCatActive(c) ? ' (pasif)' : ''}
+                  </option>
+                ))}
+              </select>
+              <div className="menu-settings-search-wrap">
+                <Search size={18} className="menu-settings-search-icon" aria-hidden />
+                <input
+                  className="input menu-settings-search"
+                  placeholder="Arama…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm menu-settings-new-prod"
+                onClick={openNewProduct}
+                disabled={activeCategories.length === 0}
+              >
+                <Plus size={16} />
+                Yeni ürün ekle
+              </button>
+            </div>
+
+            {bulkMode && (
+              <div className="menu-settings-bulk-bar">
+                <span className="menu-settings-bulk-label">
+                  <CheckSquare size={18} />
+                  Toplu işlem —{' '}
+                  {categories.find((c) => c.id === bulkMode.categoryId)?.name || 'Kategori'}
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={selectAllInBulkScope}>
+                  Bu kategorideki tümünü seç
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={clearBulkSelection}>
+                  Seçimi temizle
+                </button>
+                <select
+                  className="input menu-settings-bulk-target"
+                  value={bulkTargetCategoryId}
+                  onChange={(e) => setBulkTargetCategoryId(e.target.value)}
+                >
+                  <option value="">Taşı: hedef kategori…</option>
+                  {activeCategories.filter((c) => c.id !== bulkMode.categoryId).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="btn btn-primary btn-sm" onClick={applyBulkMove} disabled={bulkSelected.size === 0 || !bulkTargetCategoryId}>
+                  Seçilenleri taşı
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={applyBulkDeactivate} disabled={bulkSelected.size === 0}>
+                  Pasifleştir
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={exitBulkMode}>
+                  İptal
+                </button>
+                <span className="menu-settings-bulk-count">{bulkSelected.size} seçili</span>
+              </div>
+            )}
+
+            {activeCategories.length === 0 ? (
+              <div className="empty-state">Önce kategori ekleyin</div>
+            ) : filteredProducts.length === 0 ? (
+              <div className="empty-state">Ürün bulunamadı</div>
+            ) : (
+              <>
+                <div className="menu-settings-product-grid">
+                  {displayedProducts.map((prod) => {
+                    const cat = categories.find((c) => c.id === prod.category_id);
+                    const subtitle =
+                      (prod.description && String(prod.description).trim()) ||
+                      (cat?.name ? `· ${cat.name}` : '');
+                    const bulkOn = bulkMode && bulkAppliesToProduct(prod);
+                    return (
+                      <div
+                        key={prod.id}
+                        className={`menu-settings-prod-card ${prod.is_deleted ? 'menu-settings-prod-card--deleted' : ''} ${bulkOn ? 'menu-settings-prod-card--bulk' : ''}`}
+                      >
+                        <div className="menu-settings-prod-card-top">
+                          {bulkOn && (
+                            <label className="menu-settings-prod-check">
+                              <input
+                                type="checkbox"
+                                checked={bulkSelected.has(prod.id)}
+                                onChange={() => toggleBulkOne(prod.id)}
+                              />
+                            </label>
+                          )}
+                          <div className="menu-settings-prod-actions">
+                            {!prod.is_deleted ? (
+                              <>
+                                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Düzenle" onClick={() => setProdModal({ kind: 'edit', product: prod })}>
+                                  <Pencil size={16} />
+                                </button>
+                                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Kaldır" onClick={() => deleteProduct(prod.id)}>
+                                  <Trash2 size={16} color="var(--danger)" />
+                                </button>
+                              </>
+                            ) : (
+                              <button type="button" className="btn btn-primary btn-sm" onClick={() => restoreProduct(prod.id)}>
+                                Geri al
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="menu-settings-prod-title truncate" title={prod.name}>
+                          {prod.name}
+                        </div>
+                        {subtitle ? (
+                          <div className="menu-settings-prod-sub truncate" title={subtitle}>
+                            {subtitle}
+                          </div>
+                        ) : (
+                          <div className="menu-settings-prod-sub menu-settings-prod-sub--muted">—</div>
+                        )}
+                        <div className="menu-settings-prod-bottom">
+                          <span className="menu-settings-prod-price">{formatCurrency(prod.price)}</span>
+                          {!prod.is_deleted && Number(prod.is_active) === 0 && (
+                            <span className="badge badge-warning">Pasif</span>
+                          )}
+                          {prod.is_deleted && <span className="badge badge-danger">Kaldırıldı</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {filteredProducts.length > displayedProducts.length && (
+                  <div className="menu-settings-more-wrap">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}>
+                      Daha fazla göster ({filteredProducts.length - displayedProducts.length} kaldı)
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+
+        {openMenuCatId && dropdownPos && menuCatForDropdown && isCatActive(menuCatForDropdown) && (
+          <div
+            ref={menuRef}
+            className="menu-settings-dropdown menu-settings-dropdown--fixed"
+            style={{ top: dropdownPos.top, left: dropdownPos.left }}
+            role="menu"
+          >
+            <button
+              type="button"
+              className="menu-settings-dropdown-item"
+              role="menuitem"
+              onClick={() => {
+                const cat = menuCatForDropdown;
+                closeCategoryMenu();
+                setFilterMode('one');
+                setActiveCategoryId(cat.id);
+                setBulkMode({ categoryId: cat.id });
+                setBulkSelected(new Set());
+                setBulkTargetCategoryId(activeCategories.find((c) => c.id !== cat.id)?.id || '');
+              }}
+            >
+              <SlidersHorizontal size={16} />
+              Toplu işlemler
+            </button>
+            <button
+              type="button"
+              className="menu-settings-dropdown-item"
+              role="menuitem"
+              onClick={() => {
+                const cat = menuCatForDropdown;
+                closeCategoryMenu();
+                setSortModalCategory(cat);
+              }}
+            >
+              <ListOrdered size={16} />
+              Ürünleri sırala
+            </button>
+            <button
+              type="button"
+              className="menu-settings-dropdown-item"
+              role="menuitem"
+              onClick={() => {
+                const cat = menuCatForDropdown;
+                closeCategoryMenu();
+                setFilterMode('one');
+                setActiveCategoryId(cat.id);
+                setProdModal({ kind: 'new', defaultCategoryId: cat.id });
+              }}
+            >
+              <FilePlus size={16} />
+              Yeni ürün ekle
+            </button>
+            <button
+              type="button"
+              className="menu-settings-dropdown-item"
+              role="menuitem"
+              onClick={() => {
+                const cat = menuCatForDropdown;
+                closeCategoryMenu();
+                setCatModal(cat);
+              }}
+            >
+              <Pencil size={16} />
+              Düzenle
+            </button>
+            <button
+              type="button"
+              className="menu-settings-dropdown-item menu-settings-dropdown-item--danger"
+              role="menuitem"
+              onClick={() => {
+                const cat = menuCatForDropdown;
+                closeCategoryMenu();
+                deleteCategory(cat.id);
+              }}
+            >
+              <Trash2 size={16} />
+              Kategoriyi sil
+            </button>
+          </div>
+        )}
         </>
       )}
 
@@ -502,12 +949,25 @@ export default function MenuSettingsPage() {
       )}
       {prodModal && (
         <ProductModal
-          item={prodModal === 'new' ? null : prodModal}
+          item={prodModal.kind === 'edit' ? prodModal.product : null}
+          defaultCategoryId={prodModal.kind === 'new' ? prodModal.defaultCategoryId : undefined}
           categories={categories}
           onClose={() => setProdModal(null)}
           onSaved={async () => {
             setProdModal(null);
             await load();
+          }}
+        />
+      )}
+      {sortModalCategory && (
+        <ProductSortModal
+          key={sortModalCategory.id}
+          category={sortModalCategory}
+          productsInCategory={productsForSort}
+          onClose={() => setSortModalCategory(null)}
+          onSaved={async () => {
+            setSortModalCategory(null);
+            await loadProducts();
           }}
         />
       )}

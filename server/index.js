@@ -48,7 +48,14 @@ app.use('/api/bridge', bridgeRoutes);
 
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {
-  res.status(404).json({ error: 'İstek bulunamadı', path: req.originalUrl });
+  if (config.nodeEnv !== 'production') {
+    console.warn('[api 404]', req.method, req.originalUrl);
+  }
+  res.status(404).json({
+    error: 'İstek bulunamadı',
+    path: req.originalUrl,
+    method: req.method,
+  });
 });
 
 // Error handler

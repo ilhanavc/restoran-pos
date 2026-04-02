@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatTime, timeAgo, TAKEAWAY_STATUS } from '../../constants/index.js';
-import { Package, Plus, Phone, Search, User, MapPin, Clock, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Package, Plus, Phone, Search, User, MapPin, Clock, RefreshCw } from 'lucide-react';
 
 export default function TakeawayScreen({ onNewOrder }) {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [customerSearch, setCustomerSearch] = useState('');
@@ -90,6 +92,14 @@ export default function TakeawayScreen({ onNewOrder }) {
           flexShrink: 0,
         }}>
           <div>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm takeaway-back-btn"
+              onClick={() => navigate('/tables')}
+            >
+              <ArrowLeft size={14} />
+              Masalara Dön
+            </button>
             <h1 className="page-title" style={{ fontSize: 20 }}>
               <Package size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
               Paket Siparişler

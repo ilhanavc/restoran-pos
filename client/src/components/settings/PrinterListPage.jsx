@@ -241,7 +241,7 @@ export default function PrinterListPage() {
             <strong style={{ color: 'var(--text-primary)', display: 'block', marginTop: 10 }}>2) Doğrulama</strong>
             <div>IP/Port ve fiziksel eşleştirme adını kontrol edin, satırdan Test çalıştırın.</div>
             <strong style={{ color: 'var(--text-primary)', display: 'block', marginTop: 10 }}>3) Operasyon</strong>
-            <div>Adisyon ve Mutfak yazıcılarını ayrı rollerle yönetin.</div>
+            <div>Adisyon ve Muıtfak yazıcılarını ayrı rollerle yönetin.</div>
           </div>
           <div
             style={{

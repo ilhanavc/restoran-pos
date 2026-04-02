@@ -70,14 +70,14 @@ router.post('/kitchen', (req, res) => {
 
     auditLog(req.businessId, req.user.id, 'print_kitchen', 'order', order_id);
 
-    console.log('🖨️  [MOCK] Mutfak fişi:', kitchenItems.length, 'ürün');
+    console.log('🖨️  [MOCK] Muıtfak fişi:', kitchenItems.length, 'ürün');
     if (barItems.length) console.log('🖨️  [MOCK] Bar fişi:', barItems.length, 'ürün');
 
     res.json({ 
       success: true, 
       kitchenItems: kitchenItems.length,
       barItems: barItems.length,
-      message: 'Mutfak fişi gönderildi (mock)' 
+      message: 'Muıtfak fişi gönderildi (mock)' 
     });
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
