@@ -91,12 +91,34 @@ npm run start:prod     # production sunucu (önce build alınmış olmalı)
 
 **Store Bridge / Caller ID:** Bu süreçler HTTP ile API’ye bağlanmaya devam eder; varsayılan `API_BASE=http://127.0.0.1:3001/api` aynı kalır. Portu değiştirirseniz `API_BASE` ve script ortamlarını güncelleyin.
 
+### Electron masaüstü kabuğu (deneysel)
+
+Tarayıcı yerine **Electron** penceresi açılır; arka planda **ayrı bir Node süreci** mevcut Express sunucusunu (`server/index.js`) production modda çalıştırır. Pencere adresi **`http://127.0.0.1:PORT/`** — `file://` kullanılmaz; `/api` yapısı değişmez.
+
+**Geliştirme (Vite + API) ile fark:** Günlük geliştirme için **`npm run dev`** kullanın (Vite 5173 + API 3001). Electron, **önceden alınmış client build** ile tek portta çalışır; canlı HMR istemiyorsanız masaüstü denemesi için uygundur.
+
+**Komutlar (proje kökü):**
+
+| Komut | Açıklama |
+|-------|----------|
+| `npm run electron:prod` | `npm run build` sonrası Electron’u başlatır (önerilen ilk deneme). |
+| `npm run electron` | `client/dist` zaten varsa yalnızca Electron’u başlatır. |
+
+**Ön koşullar:** `server/.env` içinde üretim için geçerli `JWT_SECRET`; `npm run build` ile `client/dist` oluşmuş olmalı.
+
+**Ortam:** Varsayılan port **3001** (`127.0.0.1`). Çakışmada hata mesajı gösterilir. Farklı port için `POS_PORT` (veya `PORT`) kullanın; Store Bridge / Caller ID için `API_BASE` örneğin `http://127.0.0.1:3001/api` aynı kalmalıdır.
+
+**Kapanış:** Uygulama kapanırken API süreci sonlandırılır (Windows’ta gerekirse zorla sonlandırma). Geliştirme modu (`npm run dev`) bu dosyaları değiştirmez.
+
+**Sorun giderme (Electron binary):** `Electron failed to install correctly` veya benzeri bir hata alırsanız `node_modules/electron` klasörünü silip proje kökünde `npm install` çalıştırın. Klasör kilitleniyorsa (OneDrive, antivirus, arka planda `npm`) ilgili süreçleri kapatıp tekrar deneyin.
+
 ### Erişim (özet)
 
 | Mod | Arayüz | API |
 |-----|--------|-----|
 | Geliştirme | http://localhost:5173 | http://localhost:3001 |
-| Production | http://localhost:3001 (tek sunucu) | aynı origin, `/api/...` |
+| Production (tarayıcı) | http://localhost:3001 (tek sunucu) | aynı origin, `/api/...` |
+| Electron | `http://127.0.0.1:PORT` (BrowserWindow) | aynı süreçte başlatılan child Express |
 
 ### Windows: tek tık / kolay başlatma
 

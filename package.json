@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Modern Restoran POS Sistemi",
+  "main": "electron/main.cjs",
   "scripts": {
     "build": "npm run build --prefix client",
     "start:prod": "cross-env NODE_ENV=production node server/index.js",
@@ -18,10 +19,13 @@
     "app:start": "npm run dev",
     "bridge:start": "npm run bridge",
     "callerid:start": "dotnet run --project ./tools/callerid-sdk-helper/CallerIdSdkHelper.csproj -- --post-enabled true",
-    "all:start": "scripts\\start-all.bat"
+    "all:start": "scripts\\start-all.bat",
+    "electron": "electron .",
+    "electron:prod": "npm run build && electron ."
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
-    "cross-env": "^7.0.3"
+    "cross-env": "^7.0.3",
+    "electron": "^34.0.0"
   }
 }
