@@ -11,6 +11,8 @@ const http = require('http');
 
 const PROJECT_ROOT = path.join(__dirname, '..');
 const SERVER_ENTRY = path.join(PROJECT_ROOT, 'server', 'index.js');
+/** Eski (proje altı) SQLite — yalnızca Electron ilk açılışında userData boşsa tek seferlik kopya kaynağı */
+const LEGACY_DB_MAIN = path.join(PROJECT_ROOT, 'server', 'data', 'pos.db');
 const DEFAULT_PORT = 3001;
 const HEALTH_HOST = '127.0.0.1';
 const HEALTH_PATH = '/api/health';
@@ -28,21 +30,78 @@ function getTargetPort() {
   return parseInt(String(p), 10);
 }
 
-function buildChildEnv(port) {
+/**
+ * @param {number} port
+ * @param {string} absoluteDbPath — backend `resolveDbPath` ile uyumlu mutlak SQLite yolu (Electron: userData)
+ */
+function buildChildEnv(port, absoluteDbPath) {
   const env = { ...process.env };
   env.NODE_ENV = 'production';
   env.PORT = String(port);
+  env.DB_PATH = absoluteDbPath;
   const dist = path.join(PROJECT_ROOT, 'client', 'dist');
   if (!env.CLIENT_DIST_PATH) {
     env.CLIENT_DIST_PATH = dist;
-  }
-  if (process.env.DB_PATH) {
-    env.DB_PATH = process.env.DB_PATH;
   }
   if (process.env.JWT_SECRET) {
     env.JWT_SECRET = process.env.JWT_SECRET;
   }
   return env;
+}
+
+/**
+ * userData’da pos.db yoksa ve proje altında legacy DB varsa, bir kez güvenli kopya.
+ * userData’da pos.db varsa hiçbir şey yapılmaz (üzerine yazılmaz).
+ * Kopya başarısız olursa oluşturulan hedef dosyalar geri alınır.
+ *
+ * @param {string} userDataDbPath — örn. .../userData/pos.db
+ */
+function copyLegacySqliteToUserDataIfNeeded(userDataDbPath) {
+  if (fs.existsSync(userDataDbPath)) {
+    console.log('[electron] SQLite: userData veritabanı zaten mevcut, legacy taşınmadı:', userDataDbPath);
+    return;
+  }
+
+  if (!fs.existsSync(LEGACY_DB_MAIN)) {
+    console.log(
+      '[electron] SQLite: legacy bulunamadı (ilk çalıştırma); boş DB oluşturulacak. Kaynak:',
+      LEGACY_DB_MAIN,
+    );
+    return;
+  }
+
+  const userDataDir = path.dirname(userDataDbPath);
+  fs.mkdirSync(userDataDir, { recursive: true });
+
+  const suffixes = ['', '-wal', '-shm'];
+  const sources = suffixes.map((s) => (s === '' ? LEGACY_DB_MAIN : LEGACY_DB_MAIN + s));
+  const copied = [];
+
+  try {
+    for (const src of sources) {
+      if (!fs.existsSync(src)) continue;
+      const dest = path.join(userDataDir, path.basename(src));
+      fs.copyFileSync(src, dest);
+      copied.push(path.basename(dest));
+    }
+    console.log(
+      '[electron] SQLite: legacy tek seferlik kopyalandı →',
+      userDataDir,
+      copied.length ? `(${copied.join(', ')})` : '',
+    );
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    for (const name of copied) {
+      const p = path.join(userDataDir, name);
+      try {
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      } catch {
+        /* ignore */
+      }
+    }
+    console.error('[electron] SQLite: legacy kopyası başarısız, userData tarafı geri alındı:', msg);
+    throw new Error(`Veritabanı taşınamadı (legacy kopyası): ${msg}`);
+  }
 }
 
 function httpHealthCheck(port) {
@@ -138,9 +197,10 @@ function forceKillAfterTimeout(child) {
 }
 
 /**
+ * @param {string} absoluteDbPath
  * @returns {Promise<number>} port
  */
-function startServerAndWaitForHealth() {
+function startServerAndWaitForHealth(absoluteDbPath) {
   return new Promise((resolve, reject) => {
     if (!fs.existsSync(SERVER_ENTRY)) {
       reject(new Error(`Sunucu dosyası bulunamadı: ${SERVER_ENTRY}`));
@@ -153,7 +213,9 @@ function startServerAndWaitForHealth() {
       return;
     }
 
-    const env = buildChildEnv(port);
+    console.log('[electron] SQLite: backend DB_PATH =', absoluteDbPath);
+
+    const env = buildChildEnv(port, absoluteDbPath);
     let stderrBuf = '';
 
     const child = spawn('node', [SERVER_ENTRY], {
@@ -256,8 +318,11 @@ app.whenReady().then(async () => {
     return;
   }
 
+  const userDataDbPath = path.join(app.getPath('userData'), 'pos.db');
+
   try {
-    const port = await startServerAndWaitForHealth();
+    copyLegacySqliteToUserDataIfNeeded(userDataDbPath);
+    const port = await startServerAndWaitForHealth(userDataDbPath);
     createWindow(port);
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);

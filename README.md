@@ -108,6 +108,8 @@ Tarayıcı yerine **Electron** penceresi açılır; arka planda **ayrı bir Node
 
 **Ortam:** Varsayılan port **3001** (`127.0.0.1`). Çakışmada hata mesajı gösterilir. Farklı port için `POS_PORT` (veya `PORT`) kullanın; Store Bridge / Caller ID için `API_BASE` örneğin `http://127.0.0.1:3001/api` aynı kalmalıdır.
 
+**Veri konumu (SQLite):** Masaüstü Electron ile açıldığında SQLite dosyası `server/data` altında değil, Electron’ın **userData** klasöründe tutulur (Windows’ta tipik olarak `%APPDATA%\restoran-pos\pos.db`). İlk açılışta yalnızca userData’da veri yokken ve proje altında eski `server/data/pos.db` varsa, bu dosya (ve varsa `-wal`/`-shm` yardımcı dosyaları) bir kez güvenli şekilde userData’ya kopyalanır; userData’da zaten `pos.db` varsa üzerine yazılmaz. `npm run dev` ile geliştirme modunda veri yolu önceki gibi `server/.env` / `server/data` ile belirlenir.
+
 **Kapanış:** Uygulama kapanırken API süreci sonlandırılır (Windows’ta gerekirse zorla sonlandırma). Geliştirme modu (`npm run dev`) bu dosyaları değiştirmez.
 
 **Sorun giderme (Electron binary):** `Electron failed to install correctly` veya benzeri bir hata alırsanız `node_modules/electron` klasörünü silip proje kökünde `npm install` çalıştırın. Klasör kilitleniyorsa (OneDrive, antivirus, arka planda `npm`) ilgili süreçleri kapatıp tekrar deneyin.
