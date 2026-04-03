@@ -39,7 +39,7 @@ class ApiService {
       await res.text().catch(() => '');
       const backendHint =
         res.status === 502 || res.status === 503 || res.status === 504
-          ? ' Backend (port 3001) çalışmıyor olabilir — proje kökünde `npm run dev` ile hem sunucu hem istemciyi başlatın.'
+          ? ' API sunucusu çalışmıyor olabilir — geliştirme için `npm run dev`, production için `npm run start:prod` (önce `npm run build`).'
           : '';
       throw new Error(
         `Sunucudan JSON yanıt alınamadı (HTTP ${res.status}).${backendHint}`,

@@ -51,14 +51,52 @@ cd client && npm install && cd ..
 # 5. Veritabanını oluştur ve demo verileri yükle (migration bu adımda çalışır)
 npm run db:seed
 
-# 6. Uygulamayı başlat
+# 6. Geliştirme modunda çalıştır (Vite + API, iki süreç)
 npm run dev
 ```
 
-### Erişim
+### Geliştirme (dev)
 
-- **Frontend:** http://localhost:5173
+- **Frontend (Vite):** http://localhost:5173 — `/api` istekleri Vite proxy ile `http://localhost:3001` adresine yönlendirilir.
 - **Backend API:** http://localhost:3001
+
+Komut: proje kökünde `npm run dev` (veya Windows’ta `scripts/start-pos-dev.bat`).
+
+### Production (tek kapı — React build + Express)
+
+Aynı portta hem arayüz hem API servis edilir; tarayıcıdan tek origin kullanılır (`/api` göreli yollar).
+
+1. **Ön koşul:** Üretimde `JWT_SECRET` zorunludur. `server/.env` içinde tanımlayın (veya ortam değişkeni olarak verin). Varsayılan gizli anahtar production’da kabul edilmez.
+2. **Build ve başlatma (tek komut):**
+
+```bash
+npm run prod
+```
+
+Bu komut önce `client` için Vite production build alır, ardından `NODE_ENV=production` ile Express’i başlatır.
+
+3. **Ayrı adımlar:**
+
+```bash
+npm run build          # yalnızca client → client/dist
+npm run start:prod     # production sunucu (önce build alınmış olmalı)
+```
+
+4. **Erişim:** Varsayılan port `3001` — http://localhost:3001 (API: `/api/...`, SPA: `/`, `/login`, vb.).
+
+5. **İsteğe bağlı ortam değişkenleri:**
+   - `PORT` — dinleme portu (varsayılan `3001`).
+   - `CLIENT_DIST_PATH` — React build klasörü (varsayılan: proje kökünden `client/dist`).
+   - `DB_PATH` — SQLite dosyası; göreli yol verilirse `server/` dizinine göre çözülür; mutlak yol da kullanılabilir.
+
+**Store Bridge / Caller ID:** Bu süreçler HTTP ile API’ye bağlanmaya devam eder; varsayılan `API_BASE=http://127.0.0.1:3001/api` aynı kalır. Portu değiştirirseniz `API_BASE` ve script ortamlarını güncelleyin.
+
+### Erişim (özet)
+
+| Mod | Arayüz | API |
+|-----|--------|-----|
+| Geliştirme | http://localhost:5173 | http://localhost:3001 |
+| Production | http://localhost:3001 (tek sunucu) | aynı origin, `/api/...` |
 
 ### Windows: tek tık / kolay başlatma
 

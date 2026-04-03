@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'path';
+import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
 import config from './config/index.js';
@@ -23,7 +25,12 @@ const app = express();
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:3001'],
+  origin: [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3001',
+    'http://127.0.0.1:3001',
+  ],
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -58,7 +65,31 @@ app.use('/api', (req, res) => {
   });
 });
 
-// Error handler
+// Production: Vite build statik dosyalar + React Router için SPA fallback
+if (config.nodeEnv === 'production') {
+  const indexHtml = path.join(config.clientDist, 'index.html');
+  if (fs.existsSync(indexHtml)) {
+    app.use(
+      express.static(config.clientDist, {
+        index: false,
+      }),
+    );
+    app.get('*', (req, res, next) => {
+      if (req.path.startsWith('/api')) {
+        return next();
+      }
+      res.sendFile(indexHtml, (err) => {
+        if (err) next(err);
+      });
+    });
+  } else {
+    console.warn(
+      `[prod] React build bulunamadı (${config.clientDist}). Önce proje kökünde "npm run build" çalıştırın.`,
+    );
+  }
+}
+
+// Error handler (en sonda)
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Beklenmeyen bir hata oluştu' });

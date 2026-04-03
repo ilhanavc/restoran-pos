@@ -1,5 +1,23 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-dotenv.config();
+
+const configDir = path.dirname(fileURLToPath(import.meta.url));
+/** `server/` — çalışma dizininden bağımsız */
+const serverRoot = path.join(configDir, '..');
+
+dotenv.config({ path: path.join(serverRoot, '.env') });
+
+function resolveDbPath() {
+  const raw = process.env.DB_PATH;
+  if (!raw) {
+    return path.join(serverRoot, 'data', 'pos.db');
+  }
+  if (path.isAbsolute(raw)) {
+    return raw;
+  }
+  return path.resolve(serverRoot, raw);
+}
 
 const nodeEnv = process.env.NODE_ENV || 'development';
 const jwtSecret = process.env.JWT_SECRET || 'fallback-secret-change-me';
@@ -8,7 +26,15 @@ if (nodeEnv === 'production' && (!process.env.JWT_SECRET || jwtSecret === 'fallb
   throw new Error('Üretim ortamında JWT_SECRET ortam değişkeni zorunludur ve varsayılan gizli anahtar kullanılamaz.');
 }
 
+/** Vite client build (`npm run build` kökte veya client içinde) */
+const clientDist = process.env.CLIENT_DIST_PATH
+  ? path.resolve(process.env.CLIENT_DIST_PATH)
+  : path.join(serverRoot, '..', 'client', 'dist');
+
 export default {
+  /** Sunucu kodunun kökü; migrations/seeds ile cwd uyumu için dışa açık */
+  serverRoot,
+  clientDist,
   port: parseInt(process.env.PORT || '3001'),
   nodeEnv,
   jwt: {
@@ -16,7 +42,7 @@ export default {
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
   },
   db: {
-    path: process.env.DB_PATH || './data/pos.db',
+    path: resolveDbPath(),
   },
   defaultBusinessName: process.env.DEFAULT_BUSINESS_NAME || 'Demo Restoran',
 
