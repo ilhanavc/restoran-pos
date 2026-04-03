@@ -74,7 +74,7 @@ Dükkan bilgisayarında az komut kullanmak için `scripts` klasöründeki `.bat`
 | `scripts/start-callerid-helper.bat` | .NET Caller ID helper; varsayılan POST açık (`CALLERID_HELPER_POST_ENABLED` ile kapatılabilir). `BRIDGE_TOKEN` POST açıkken zorunlu. |
 | `scripts/start-callerid-sdk-helper.bat` | `start-callerid-helper.bat` ile aynı (eski kısayollar için). |
 
-**npm (kök dizinde):** `npm run app:start`, `npm run bridge:start`, `npm run callerid:start`, `npm run all:start` — mevcut script isimleri değişmedi; bunlar ek kolaylık komutlarıdır. `callerid:start` için `BRIDGE_TOKEN` ve `API_BASE` ortamda tanımlı olmalıdır. `all:start` Windows’ta `start-all.bat` çağırır.
+**npm (kök dizinde):** `npm run app:start`, `npm run bridge:start`, `npm run callerid:start`, `npm run all:start` — mevcut script isimleri değişmedi; bunlar ek kolaylık komutlarıdır. `callerid:start` için `BRIDGE_TOKEN` ve `API_BASE` ortamda tanımlı olmalıdır. `all:start` Windows’ta `start-all.bat` çağırır. Geliştirici için: `npm run debug:login` sabit demo kullanıcı ile JWT/audit zincirini terminalde dener (`server/test-login.js`).
 
 **Manuel fallback (değişmedi):**
 
@@ -111,11 +111,15 @@ restoran-pos/
 │   │   ├── customers.js       # Müşteri yönetimi
 │   │   ├── callerid.js        # Gelen arama
 │   │   ├── reports.js         # Raporlama
-│   │   └── printer.js         # Yazıcı servisi
+│   │   ├── printer.js         # Yazıcı (mock/legacy HTTP)
+│   │   ├── admin.js           # Yönetim uçları
+│   │   └── bridge.js          # StoreBridge (X-Bridge-Token)
 │   ├── migrations/            # Tablo oluşturma
 │   ├── seeds/                 # Demo veri
 │   ├── utils/                 # Yardımcı fonksiyonlar
 │   └── index.js               # Sunucu giriş noktası
+│
+├── store-bridge/              # Yerel yazıcı köprüsü; donanım CID (HID/clipboard) burada
 │
 ├── client/                    # Frontend
 │   └── src/

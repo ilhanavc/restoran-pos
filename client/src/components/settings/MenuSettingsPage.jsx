@@ -149,112 +149,6 @@ function CategoryModal({ item, categories, onClose, onSaved }) {
   );
 }
 
-function ProductModal({ item, categories, defaultCategoryId, onClose, onSaved }) {
-  const { success, error } = useToast();
-  const activeCats = categories.filter(
-    (c) => Number(c.is_active) === 1 || (item?.category_id && c.id === item.category_id),
-  );
-  const [name, setName] = useState(item?.name || '');
-  const [price, setPrice] = useState(item?.price != null ? String(item.price) : '');
-  const [categoryId, setCategoryId] = useState(
-    item?.category_id || defaultCategoryId || activeCats[0]?.id || '',
-  );
-  const [saving, setSaving] = useState(false);
-  const isEdit = !!item?.id;
-
-  useEffect(() => {
-    if (!item && defaultCategoryId) {
-      setCategoryId(defaultCategoryId);
-    }
-  }, [item, defaultCategoryId]);
-
-  const handleSave = async () => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      error('Ürün adı gerekli');
-      return;
-    }
-    const p = Number(price);
-    if (!Number.isFinite(p) || p <= 0) {
-      error('Geçerli bir fiyat girin');
-      return;
-    }
-    if (!categoryId) {
-      error('Kategori seçin');
-      return;
-    }
-    setSaving(true);
-    try {
-      if (isEdit) {
-        await api.patchProduct(item.id, {
-          name: trimmed,
-          price: p,
-          category_id: categoryId,
-        });
-      } else {
-        await api.postProduct({
-          name: trimmed,
-          price: p,
-          category_id: categoryId,
-        });
-      }
-      success(isEdit ? 'Ürün güncellendi' : 'Ürün eklendi');
-      onSaved();
-    } catch (e) {
-      error(e.message || 'Kayıt başarısız');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={() => !saving && onClose()}>
-      <div role="dialog" className="modal" style={{ maxWidth: 480, width: '100%' }} onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>{isEdit ? 'Ürün düzenle' : 'Yeni ürün'}</h2>
-          <button type="button" className="btn btn-ghost btn-icon" onClick={onClose} disabled={saving}>
-            ×
-          </button>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '0 4px 16px' }}>
-          <div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Ad</span>
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          </div>
-          <div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Fiyat (₺, KDV dahil)</span>
-            <input type="number" min="0.01" step="0.01" className="input" value={price} onChange={(e) => setPrice(e.target.value)} />
-          </div>
-          <div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Kategori</span>
-            {activeCats.length === 0 ? (
-              <div className="empty-state" style={{ padding: 12 }}>
-                Önce aktif kategori ekleyin
-              </div>
-            ) : (
-              <select className="input" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                {activeCats.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.icon || '🍽️'} {c.name}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
-              İptal
-            </button>
-            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || activeCats.length === 0}>
-              {saving ? 'Kaydediliyor…' : 'Kaydet'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ProductSortModal({ category, productsInCategory, onClose, onSaved }) {
   const { success, error } = useToast();
   const [order, setOrder] = useState(() =>
@@ -360,7 +254,6 @@ export default function MenuSettingsPage() {
   const [initialized, setInitialized] = useState(false);
 
   const [catModal, setCatModal] = useState(null);
-  const [prodModal, setProdModal] = useState(null);
   const [sortModalCategory, setSortModalCategory] = useState(null);
   const [bulkMode, setBulkMode] = useState(null);
   const [bulkSelected, setBulkSelected] = useState(() => new Set());
@@ -551,7 +444,7 @@ export default function MenuSettingsPage() {
       error('Önce aktif kategori ekleyin');
       return;
     }
-    setProdModal({ kind: 'new', defaultCategoryId: newProductDefaultCategoryId });
+    navigate('/settings/menu/product/new', { state: { defaultCategoryId: newProductDefaultCategoryId } });
   };
 
   const productsForSort = useMemo(() => {
@@ -806,7 +699,7 @@ export default function MenuSettingsPage() {
                           <div className="menu-settings-prod-actions">
                             {!prod.is_deleted ? (
                               <>
-                                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Düzenle" onClick={() => setProdModal({ kind: 'edit', product: prod })}>
+                                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Düzenle" onClick={() => navigate(`/settings/menu/product/${prod.id}`)}>
                                   <Pencil size={16} />
                                 </button>
                                 <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Kaldır" onClick={() => deleteProduct(prod.id)}>
@@ -899,7 +792,7 @@ export default function MenuSettingsPage() {
                 closeCategoryMenu();
                 setFilterMode('one');
                 setActiveCategoryId(cat.id);
-                setProdModal({ kind: 'new', defaultCategoryId: cat.id });
+                navigate('/settings/menu/product/new', { state: { defaultCategoryId: cat.id } });
               }}
             >
               <FilePlus size={16} />
@@ -943,18 +836,6 @@ export default function MenuSettingsPage() {
           onClose={() => setCatModal(null)}
           onSaved={async () => {
             setCatModal(null);
-            await load();
-          }}
-        />
-      )}
-      {prodModal && (
-        <ProductModal
-          item={prodModal.kind === 'edit' ? prodModal.product : null}
-          defaultCategoryId={prodModal.kind === 'new' ? prodModal.defaultCategoryId : undefined}
-          categories={categories}
-          onClose={() => setProdModal(null)}
-          onSaved={async () => {
-            setProdModal(null);
             await load();
           }}
         />

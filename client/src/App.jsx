@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
@@ -23,7 +23,9 @@ import PrinterDetailPage from './components/settings/PrinterDetailPage.jsx';
 import PrinterRoutingPage from './components/settings/PrinterRoutingPage.jsx';
 import DisplaySettingsPage from './components/settings/DisplaySettingsPage.jsx';
 import MenuSettingsPage from './components/settings/MenuSettingsPage.jsx';
+import MenuProductEditorPage from './components/settings/MenuProductEditorPage.jsx';
 import DiningAreasSettingsPage from './components/settings/DiningAreasSettingsPage.jsx';
+import CallerIdScreen from './components/callerid/CallerIdScreen.jsx';
 
 function ProtectedRoute({ children, requiredRoles }) {
   const { user, loading, hasRole } = useAuth();
@@ -42,9 +44,11 @@ export default function App() {
   const { user, loading, hasRole } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState(null);
+  const paymentAfterCompleteRef = useRef('back');
   const navigate = useNavigate();
   const location = useLocation();
   const isTablesPage = location.pathname.startsWith('/tables');
+  const isOrderScreen = location.pathname.startsWith('/order/');
   const canSeeTakeawayQuickButton = hasRole('admin', 'cashier');
   const defaultPath = hasRole('admin', 'cashier')
     ? '/home'
@@ -78,13 +82,29 @@ export default function App() {
   }, [navigate]);
 
   const handlePayment = useCallback((order) => {
+    paymentAfterCompleteRef.current = 'back';
+    setPaymentOrder(order);
+  }, []);
+
+  const handlePaymentFromTables = useCallback((order) => {
+    paymentAfterCompleteRef.current = 'tables';
     setPaymentOrder(order);
   }, []);
 
   const handlePaymentComplete = useCallback(() => {
     setPaymentOrder(null);
-    navigate(-1);
+    if (paymentAfterCompleteRef.current === 'tables') {
+      paymentAfterCompleteRef.current = 'back';
+      navigate('/tables', { replace: true, state: { refreshTables: Date.now() } });
+    } else {
+      navigate(-1);
+    }
   }, [navigate]);
+
+  const handlePaymentClose = useCallback(() => {
+    setPaymentOrder(null);
+    paymentAfterCompleteRef.current = 'back';
+  }, []);
 
   if (loading) {
     return (
@@ -112,14 +132,16 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen((prev) => !prev)}
-        onNavigate={() => setSidebarOpen(false)}
-        showTakeawayQuickButton={isTablesPage && canSeeTakeawayQuickButton}
-        onTakeawayQuickClick={() => navigate('/takeaway')}
-      />
-      <main className="app-content">
+      {!isOrderScreen && (
+        <Sidebar
+          isOpen={sidebarOpen}
+          onToggle={() => setSidebarOpen((prev) => !prev)}
+          onNavigate={() => setSidebarOpen(false)}
+          showTakeawayQuickButton={isTablesPage && canSeeTakeawayQuickButton}
+          onTakeawayQuickClick={() => navigate('/takeaway')}
+        />
+      )}
+      <main className={`app-content ${isOrderScreen ? 'no-sidebar' : ''}`}>
         <Routes>
           <Route path="/" element={<Navigate to={defaultPath} replace />} />
           <Route path="/home" element={
@@ -131,6 +153,7 @@ export default function App() {
             <ProtectedRoute requiredRoles={['admin', 'cashier', 'waiter']}>
               <TablesScreen
                 onOpenOrder={handleOpenOrder}
+                onPayment={handlePaymentFromTables}
                 showTakeawaySidebar={hasRole('admin', 'cashier')}
                 onOpenTakeawayOrder={handleOpenTakeawayFromTables}
               />
@@ -151,8 +174,10 @@ export default function App() {
               <Route path=":id" element={<PrinterDetailPage />} />
             </Route>
             <Route path="display" element={<DisplaySettingsPage />} />
+            <Route path="menu/product/:productId" element={<MenuProductEditorPage />} />
             <Route path="menu" element={<MenuSettingsPage />} />
             <Route path="dining-areas" element={<DiningAreasSettingsPage />} />
+            <Route path="caller-id" element={<CallerIdScreen />} />
           </Route>
           
           <Route path="/order/table/:id" element={
@@ -173,7 +198,7 @@ export default function App() {
       {paymentOrder && (
         <PaymentScreen
           order={paymentOrder}
-          onClose={() => setPaymentOrder(null)}
+          onClose={handlePaymentClose}
           onComplete={handlePaymentComplete}
         />
       )}
@@ -185,18 +210,23 @@ function OrderScreenWrapper({ onPayment }) {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state || {};
+  const orderType = state.orderType || 'dine_in';
+
+  const goToTables = useCallback(() => {
+    navigate('/tables', { state: { refreshTables: Date.now() } });
+  }, [navigate]);
 
   return (
     <OrderScreen
       table={state.table}
       existingOrderId={state.existingOrderId}
-      orderType={state.orderType || 'dine_in'}
+      orderType={orderType}
       customer={state.customer}
       prefillPhone={state.prefillPhone}
       callLogId={state.callLogId}
-      onBack={() => navigate(-1)}
+      onBack={() => (orderType === 'dine_in' ? goToTables() : navigate(-1))}
       onPayment={onPayment}
-      onNavigateToTables={() => navigate('/tables')}
+      onNavigateToTables={goToTables}
     />
   );
 }

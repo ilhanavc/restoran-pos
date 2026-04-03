@@ -4,12 +4,12 @@ import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, ORDER_ITEM_LINE_STATUS } from '../../constants/index.js';
-import { ORDER_QUICK_NOTES } from '../../constants/menuUi.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
   ArrowLeft, Search, Plus, Minus, Trash2, Save,
-  CreditCard, MessageSquare, X, ArrowRightLeft, Phone,
+  CreditCard, X, ArrowRightLeft, Phone, User,
 } from 'lucide-react';
+import OrderProductDetailModal from './OrderProductDetailModal.jsx';
 
 export default function OrderScreen({
   table,
@@ -28,14 +28,19 @@ export default function OrderScreen({
   const [searchQuery, setSearchQuery] = useState('');
   const [cartItems, setCartItems] = useState([]);
   const [existingOrder, setExistingOrder] = useState(null);
-  const [modifierModal, setModifierModal] = useState(null); // { product, modifiers }
-  const [noteModal, setNoteModal] = useState(null); // { kind: 'cart', index } | { kind: 'item', itemId }
-  const [noteText, setNoteText] = useState('');
+  const [modifierModal, setModifierModal] = useState(null); // { product, groups, pendingLine? }
+  /** Satır düzenleme: gridden açılmaz */
+  const [lineDetailModal, setLineDetailModal] = useState(null); // { kind: 'cart', index } | { kind: 'existing', itemId }
   const [saving, setSaving] = useState(false);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [emptyTables, setEmptyTables] = useState([]);
   const [takeawayPhone, setTakeawayPhone] = useState('');
+  const [selectedCustomer, setSelectedCustomer] = useState(customer ?? null);
+  const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerList, setCustomerList] = useState([]);
+  const [customerListLoading, setCustomerListLoading] = useState(false);
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
@@ -50,6 +55,23 @@ export default function OrderScreen({
     const oid = existingOrderId || table?.current_order_id;
     if (oid) loadExistingOrder(oid);
   }, [existingOrderId, table?.current_order_id]);
+
+  useEffect(() => {
+    if (!existingOrder?.id) return;
+    if (existingOrder.customer_id) {
+      setSelectedCustomer({
+        id: existingOrder.customer_id,
+        full_name: existingOrder.customer_name || '',
+      });
+    } else {
+      setSelectedCustomer(null);
+    }
+  }, [existingOrder?.id, existingOrder?.customer_id, existingOrder?.customer_name]);
+
+  useEffect(() => {
+    if (existingOrder?.id) return;
+    setSelectedCustomer(customer ?? null);
+  }, [customer, existingOrder?.id]);
 
   useEffect(() => {
     if (orderType !== 'takeaway') return;
@@ -115,40 +137,127 @@ export default function OrderScreen({
     }
   };
 
-  const addToCart = async (product) => {
-    // Check modifiers
+  const quickAddFromGrid = async (product) => {
     try {
+      const fullProduct = await api.getProduct(product.id);
+      const portions = fullProduct.portions || [];
+      let effectiveProduct = { ...fullProduct };
+      let portion_id = null;
+      let portion_label = null;
+      if (portions.length > 0) {
+        const def = portions.find((x) => Number(x.is_default)) || portions[0];
+        portion_id = def.id;
+        portion_label = def.label || '';
+        effectiveProduct = { ...fullProduct, price: Number(def.price) };
+      }
       const modGroups = await api.getModifiers(product.id);
       if (Object.keys(modGroups).length > 0) {
-        setModifierModal({ product, groups: modGroups, selected: {} });
+        setModifierModal({
+          product: effectiveProduct,
+          groups: modGroups,
+          pendingLine: { quantity: 1, note: '', portion_id, portion_label },
+        });
         return;
       }
-    } catch {}
-
-    addItemToCart(product, []);
+      addItemToCart(effectiveProduct, [], { quantity: 1, note: '', portion_id, portion_label });
+    } catch (e) {
+      toast.error(e.message || 'Ürün eklenemedi');
+    }
   };
 
-  const addItemToCart = (product, modifiers) => {
+  const applyCartLineEdit = (index, { quantity, note, effectiveProduct, portion_id, portion_label }) => {
+    setCartItems((prev) => {
+      const ci = prev[index];
+      if (!ci) return prev;
+      const modDelta = (ci.modifiers || []).reduce((s, m) => s + (m.price_delta || 0), 0);
+      const updated = {
+        ...ci,
+        quantity,
+        note,
+        portion_id: portion_id ?? null,
+        portion_label: portion_label ?? null,
+        unit_price: Number(effectiveProduct.price) + modDelta,
+        base_price: Number(effectiveProduct.price),
+      };
+      return prev.map((c, i) => (i === index ? updated : c));
+    });
+  };
+
+  const saveExistingLineFromModal = async (itemId, { quantity, note, portion_id }) => {
+    if (!existingOrder) return;
+    const item = (existingOrder.items || []).find((i) => i.id === itemId);
+    if (!item) return;
+    setSaving(true);
+    try {
+      const body = {};
+      const closed = existingOrder.status === 'closed';
+      const isNew = item.status === 'new';
+      if (!closed && !item.is_comped && isNew) {
+        body.quantity = quantity;
+        body.note = note != null && String(note).trim() !== '' ? note : null;
+        body.portion_id = portion_id ?? null;
+      } else if (!closed && !item.is_comped && !isNew) {
+        body.note = note != null && String(note).trim() !== '' ? note : null;
+      }
+      if (Object.keys(body).length === 0) {
+        return;
+      }
+      await api.updateOrderItem(existingOrder.id, itemId, body);
+      toast.success('Güncellendi');
+      await refreshOrder();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleLineDetailContinue = (payload) => {
+    const ctx = lineDetailModal;
+    setLineDetailModal(null);
+    if (!ctx) return;
+    if (ctx.kind === 'cart') {
+      applyCartLineEdit(ctx.index, payload);
+      return;
+    }
+    saveExistingLineFromModal(ctx.itemId, payload);
+  };
+
+  const addItemToCart = (product, modifiers, options = {}) => {
+    const quantity = options.quantity != null ? Math.max(1, Math.floor(Number(options.quantity)) || 1) : 1;
+    const note = options.note != null ? String(options.note) : '';
+    const portion_id = options.portion_id != null ? options.portion_id : null;
+    const portion_label = options.portion_label != null ? options.portion_label : null;
+
     const modDelta = modifiers.reduce((sum, m) => sum + (m.price_delta || 0), 0);
     const existing = cartItems.findIndex(
-      ci => ci.product_id === product.id &&
-        JSON.stringify(ci.modifiers) === JSON.stringify(modifiers) &&
-        !ci.note
+      (ci) =>
+        ci.product_id === product.id &&
+        (ci.portion_id || null) === (portion_id || null) &&
+        JSON.stringify(ci.modifiers || []) === JSON.stringify(modifiers) &&
+        (ci.note || '') === (note || ''),
     );
 
     if (existing >= 0) {
-      setCartItems(prev => prev.map((ci, i) => i === existing ? { ...ci, quantity: ci.quantity + 1 } : ci));
+      setCartItems((prev) =>
+        prev.map((ci, i) => (i === existing ? { ...ci, quantity: ci.quantity + quantity } : ci)),
+      );
     } else {
-      setCartItems(prev => [...prev, {
-        product_id: product.id,
-        product_name: product.name,
-        unit_price: product.price + modDelta,
-        base_price: product.price,
-        quantity: 1,
-        modifiers,
-        note: '',
-        category_name: product.category_name,
-      }]);
+      setCartItems((prev) => [
+        ...prev,
+        {
+          product_id: product.id,
+          product_name: product.name,
+          unit_price: product.price + modDelta,
+          base_price: product.price,
+          quantity,
+          modifiers,
+          note,
+          category_name: product.category_name,
+          portion_id,
+          portion_label,
+        },
+      ]);
     }
   };
 
@@ -161,7 +270,38 @@ export default function OrderScreen({
   };
 
   const removeItem = (index) => {
-    setCartItems(prev => prev.filter((_, i) => i !== index));
+    setLineDetailModal((m) => {
+      if (!m || m.kind !== 'cart') return m;
+      if (m.index === index) return null;
+      if (m.index > index) return { ...m, index: m.index - 1 };
+      return m;
+    });
+    setCartItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const getCartQtyForProduct = (productId) =>
+    cartItems
+      .filter((ci) => ci.product_id === productId)
+      .reduce((sum, ci) => sum + ci.quantity, 0);
+
+  const decrementProductInCart = (productId) => {
+    setCartItems((prev) => {
+      const simpleIdx = prev.findIndex(
+        (ci) => ci.product_id === productId &&
+          JSON.stringify(ci.modifiers || []) === JSON.stringify([]) &&
+          !ci.note &&
+          !ci.portion_id,
+      );
+      const idx = simpleIdx >= 0 ? simpleIdx : prev.findIndex((ci) => ci.product_id === productId);
+      if (idx < 0) return prev;
+      return prev
+        .map((ci, i) => {
+          if (i !== idx) return ci;
+          const newQty = ci.quantity - 1;
+          return newQty <= 0 ? null : { ...ci, quantity: newQty };
+        })
+        .filter(Boolean);
+    });
   };
 
   const handleSaveOrder = async ({ skipNavigate = false } = {}) => {
@@ -169,32 +309,40 @@ export default function OrderScreen({
     setSaving(true);
     try {
       if (existingOrder) {
-        const result = await api.addOrderItems(existingOrder.id, cartItems.map(ci => ({
+        const result = await api.addOrderItems(existingOrder.id, cartItems.map((ci) => ({
           product_id: ci.product_id,
           quantity: ci.quantity,
           modifiers: ci.modifiers,
           note: ci.note,
+          ...(ci.portion_id ? { portion_id: ci.portion_id } : {}),
         })));
         setExistingOrder(result);
         setCartItems([]);
         toast.success('Ürünler eklendi');
+        if (!skipNavigate && onNavigateToTables) onNavigateToTables();
         return { order: result, isNew: false };
       }
       const orderData = {
         table_id: table?.id || null,
         order_type: orderType,
-        customer_id: customer?.id || null,
+        customer_id: selectedCustomer?.id || null,
         guest_count: table?.guest_count || 0,
         delivery_address: customer?.selectedAddress || null,
-        items: cartItems.map(ci => ({
+        items: cartItems.map((ci) => ({
           product_id: ci.product_id,
           quantity: ci.quantity,
           modifiers: ci.modifiers,
           note: ci.note,
+          ...(ci.portion_id ? { portion_id: ci.portion_id } : {}),
         })),
       };
       const result = await api.createOrder(orderData);
-      setExistingOrder(result);
+      try {
+        const full = await api.getOrder(result.id);
+        setExistingOrder(full);
+      } catch {
+        setExistingOrder(result);
+      }
       setCartItems([]);
       toast.success('Sipariş kaydedildi');
       const logId = callLogId != null ? String(callLogId).trim() : '';
@@ -220,6 +368,9 @@ export default function OrderScreen({
       toast.success('Ürün iptal edildi');
       const updated = await api.getOrder(existingOrder.id);
       setExistingOrder(updated);
+      if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
+        onNavigateToTables();
+      }
     } catch (err) {
       toast.error(err.message);
     } finally {
@@ -244,7 +395,11 @@ export default function OrderScreen({
         setSaving(true);
         await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
         toast.success('Satır iptal edildi');
-        await refreshOrder();
+        const updated = await api.getOrder(existingOrder.id);
+        setExistingOrder(updated);
+        if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
+          onNavigateToTables();
+        }
       } catch (err) {
         toast.error(err.message);
       } finally {
@@ -300,6 +455,88 @@ export default function OrderScreen({
     }
   };
 
+  const loadCustomersForModal = async (q = '') => {
+    setCustomerListLoading(true);
+    try {
+      let data;
+      if (q.length >= 2) {
+        const isPhone = /\d/.test(q);
+        data = await api.getCustomers(isPhone ? { phone: q } : { search: q });
+      } else {
+        data = await api.getCustomers();
+      }
+      setCustomerList(data || []);
+    } catch {
+      toast.error('Müşteriler yüklenemedi');
+      setCustomerList([]);
+    } finally {
+      setCustomerListLoading(false);
+    }
+  };
+
+  const openCustomerModal = () => {
+    setCustomerModalOpen(true);
+    setCustomerSearchQuery('');
+    loadCustomersForModal('');
+  };
+
+  const handleCustomerSearchInput = (q) => {
+    setCustomerSearchQuery(q);
+    if (q.length >= 2) {
+      loadCustomersForModal(q);
+    } else if (q === '') {
+      loadCustomersForModal('');
+    }
+  };
+
+  const revertSelectedCustomerFromOrder = () => {
+    if (existingOrder?.customer_id) {
+      setSelectedCustomer({
+        id: existingOrder.customer_id,
+        full_name: existingOrder.customer_name || '',
+      });
+    } else {
+      setSelectedCustomer(null);
+    }
+  };
+
+  const handlePickCustomer = async (cust) => {
+    const next = { id: cust.id, full_name: cust.full_name };
+    setSelectedCustomer(next);
+    setCustomerModalOpen(false);
+    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
+      try {
+        setSaving(true);
+        const updated = await api.patchOrderCustomer(existingOrder.id, cust.id);
+        setExistingOrder(updated);
+        toast.success('Müşteri güncellendi');
+      } catch (err) {
+        toast.error(err.message);
+        revertSelectedCustomerFromOrder();
+      } finally {
+        setSaving(false);
+      }
+    }
+  };
+
+  const handleClearTableCustomer = async () => {
+    setSelectedCustomer(null);
+    setCustomerModalOpen(false);
+    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
+      try {
+        setSaving(true);
+        const updated = await api.patchOrderCustomer(existingOrder.id, null);
+        setExistingOrder(updated);
+        toast.success('Müşteri kaldırıldı');
+      } catch (err) {
+        toast.error(err.message);
+        revertSelectedCustomerFromOrder();
+      } finally {
+        setSaving(false);
+      }
+    }
+  };
+
   // Fiyatlar KDV dahil; grand_total = satır toplamı − indirim
   const cartSubtotal = cartItems.reduce((sum, ci) => sum + ci.unit_price * ci.quantity, 0);
   const savedTotal = Number(existingOrder?.grand_total) || 0;
@@ -339,68 +576,90 @@ export default function OrderScreen({
     <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* Sol: üst bar + arama + yatay kategoriler + ürün ızgarası */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 12,
-          padding: '12px 16px', borderBottom: '1px solid var(--border)',
-          background: 'var(--bg-secondary)', flexShrink: 0,
-        }}>
-          <button type="button" className="btn btn-ghost btn-icon" onClick={onBack}>
-            <ArrowLeft size={18} />
-          </button>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>
-              {table
-                ? (table.displayName || `Masa ${table.name}`)
-                : orderType === 'takeaway'
-                  ? 'Paket Sipariş'
-                  : 'Sipariş'}
-            </div>
-            {table?.area_name && (
-              <span style={{ display: 'inline-block', marginTop: 4, fontSize: 11, color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '3px 10px', borderRadius: 8 }}>
-                {table.area_name}
+        <div className="order-screen-topbar">
+          <button
+            type="button"
+            className="order-screen-back-zone"
+            onClick={onBack}
+            aria-label="Geri"
+          >
+            <span className="order-screen-back-zone-icon" aria-hidden>
+              <ArrowLeft size={22} strokeWidth={2.25} />
+            </span>
+            <span className="order-screen-back-zone-body">
+              <span className="order-screen-table-title">
+                {table
+                  ? (table.displayName || `Masa ${table.name}`)
+                  : orderType === 'takeaway'
+                    ? 'Paket Sipariş'
+                    : 'Sipariş'}
               </span>
-            )}
-            {customer && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{customer.full_name}</div>}
-            {orderType === 'takeaway' && (customer || (takeawayPhone && takeawayPhone.trim() !== '')) && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Phone size={12} />
-                <span>{(takeawayPhone && takeawayPhone.trim()) || (prefillPhone != null ? String(prefillPhone) : '') || customer?.phones?.[0]?.phone || ''}</span>
-              </div>
-            )}
-          </div>
-          {existingOrder && (
-            <span className="badge badge-info" style={{ fontSize: 11 }}>#{existingOrder.order_no}</span>
-          )}
-        </div>
+              {table?.area_name && (
+                <span className="order-screen-area-pill">{table.area_name}</span>
+              )}
+              {orderType === 'dine_in' && selectedCustomer?.full_name && (
+                <span className="order-screen-customer-line">{selectedCustomer.full_name}</span>
+              )}
+              {orderType === 'takeaway' && selectedCustomer?.full_name && (
+                <span className="order-screen-customer-line">{selectedCustomer.full_name}</span>
+              )}
+              {orderType === 'takeaway' && (customer || (takeawayPhone && takeawayPhone.trim() !== '')) && (
+                <span className="order-screen-customer-line order-screen-takeaway-phone">
+                  <Phone size={12} style={{ flexShrink: 0 }} />
+                  {(takeawayPhone && takeawayPhone.trim()) || (prefillPhone != null ? String(prefillPhone) : '') || customer?.phones?.[0]?.phone || ''}
+                </span>
+              )}
+            </span>
+          </button>
 
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div style={{ position: 'relative' }}>
-            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input
-              ref={searchRef}
-              className="input"
-              placeholder="Ürün ara..."
-              value={searchQuery}
-              onChange={(e) => handleSearch(e.target.value)}
-              lang="tr"
-              autoComplete="off"
-              spellCheck={false}
-              style={{ paddingLeft: 34, height: 38, fontSize: 13, width: '100%' }}
-            />
-            {searchQuery && (
+          {orderType === 'dine_in' && table && (
+            <>
+              <span className="order-screen-topbar-divider" aria-hidden />
               <button
                 type="button"
-                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                onClick={() => handleSearch('')}
+                className="order-screen-topbar-icon-btn"
+                onClick={openCustomerModal}
+                disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
+                title={selectedCustomer ? 'Müşteriyi değiştir' : 'Müşteri seç'}
               >
-                <X size={14} />
+                <User size={22} strokeWidth={2} />
               </button>
-            )}
+            </>
+          )}
+
+          {existingOrder && (
+            <span className="badge badge-info order-screen-order-badge" style={{ fontSize: 11 }}>#{existingOrder.order_no}</span>
+          )}
+
+          <div className="order-screen-topbar-search">
+            <div style={{ position: 'relative', width: '100%' }}>
+              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input
+                ref={searchRef}
+                className="input"
+                placeholder="Ürün ara..."
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                lang="tr"
+                autoComplete="off"
+                spellCheck={false}
+                style={{ paddingLeft: 34, height: 38, fontSize: 13, width: '100%' }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  className="order-screen-search-clear"
+                  onClick={() => handleSearch('')}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
         <div style={{
-          display: 'flex', gap: 6, padding: '10px 16px',
+          display: 'flex', gap: 10, padding: '14px 18px',
           overflowX: 'auto', flexShrink: 0,
           borderBottom: '1px solid var(--border)',
         }}>
@@ -410,13 +669,15 @@ export default function OrderScreen({
               type="button"
               onClick={() => handleCategorySelect(cat.id)}
               style={{
-                padding: '7px 14px', borderRadius: 'var(--radius-sm)',
+                padding: '12px 20px', borderRadius: 'var(--radius-sm)',
                 border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-                fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                fontSize: 15, fontWeight: 600, fontFamily: 'inherit',
+                lineHeight: 1.25,
+                minHeight: 46,
                 transition: 'all var(--transition-fast)',
                 background: activeCat === cat.id ? `${cat.color}22` : 'var(--bg-tertiary)',
                 color: activeCat === cat.id ? cat.color : 'var(--text-secondary)',
-                borderBottom: activeCat === cat.id ? `2px solid ${cat.color}` : '2px solid transparent',
+                borderBottom: activeCat === cat.id ? `3px solid ${cat.color}` : '3px solid transparent',
               }}
             >
               {cat.icon} {cat.name}
@@ -427,33 +688,119 @@ export default function OrderScreen({
         <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(135px, 1fr))',
-            gap: 10,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+            gap: 14,
           }}>
-            {products.map((prod) => (
-              <button
-                key={prod.id}
-                type="button"
-                onClick={() => addToCart(prod)}
-                style={{
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)', padding: '14px 10px',
-                  cursor: 'pointer', textAlign: 'left',
-                  transition: 'all var(--transition-fast)',
-                  fontFamily: 'inherit', display: 'flex', flexDirection: 'column',
-                  minHeight: 80,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.background = 'var(--bg-card-hover)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--bg-card)'; }}
-              >
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'auto', lineHeight: 1.3 }}>
-                  {prod.name}
+            {products.map((prod) => {
+              const qty = getCartQtyForProduct(prod.id);
+              return (
+                <div
+                  key={prod.id}
+                  style={{
+                    display: 'flex',
+                    position: 'relative',
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    minHeight: 104,
+                    overflow: 'hidden',
+                    transition: 'all var(--transition-fast)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--accent)';
+                    e.currentTarget.style.background = 'var(--bg-card-hover)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                    e.currentTarget.style.background = 'var(--bg-card)';
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => quickAddFromGrid(prod)}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      padding: '16px 14px',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      border: 'none',
+                      background: 'transparent',
+                      fontFamily: 'inherit',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 'auto', lineHeight: 1.35 }}>
+                      {prod.name}
+                    </div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--accent)', marginTop: 10 }}>
+                      {formatCurrency(prod.price)}
+                    </div>
+                  </button>
+                  {qty > 0 && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: 46,
+                        flexShrink: 0,
+                        background: 'var(--danger)',
+                        color: '#fff',
+                        padding: '8px 0',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          quickAddFromGrid(prod);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                          padding: 4,
+                          lineHeight: 1,
+                          fontSize: 18,
+                          fontWeight: 700,
+                          fontFamily: 'inherit',
+                        }}
+                        aria-label="Arttır"
+                      >
+                        +
+                      </button>
+                      <span style={{ fontSize: 17, fontWeight: 800, lineHeight: 1.2 }}>{qty}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          decrementProductInCart(prod.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'inherit',
+                          cursor: 'pointer',
+                          padding: 4,
+                          lineHeight: 1,
+                          fontSize: 18,
+                          fontWeight: 700,
+                          fontFamily: 'inherit',
+                        }}
+                        aria-label="Azalt"
+                      >
+                        −
+                      </button>
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)', marginTop: 8 }}>
-                  {formatCurrency(prod.price)}
-                </div>
-              </button>
-            ))}
+              );
+            })}
           </div>
 
           {products.length === 0 && (
@@ -470,7 +817,7 @@ export default function OrderScreen({
       </div>
 
       {/* ═══ Adisyon ═══ */}
-      <div style={{ width: 360, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', flexShrink: 0 }}>
+      <div style={{ width: 460, display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', flexShrink: 0 }}>
         <div style={{
           padding: '14px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
@@ -505,7 +852,7 @@ export default function OrderScreen({
         <div style={{ flex: 1, overflow: 'auto' }}>
           {allExistingItems.length > 0 && (
             <div style={{ padding: '8px 0' }}>
-              <div style={{ padding: '4px 16px', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              <div style={{ padding: '6px 18px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                 Mevcut Ürünler
               </div>
               {allExistingItems.filter((i) => i.status !== 'cancelled').map((item) => {
@@ -516,28 +863,39 @@ export default function OrderScreen({
                 return (
                   <div
                     key={item.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setLineDetailModal({ kind: 'existing', itemId: item.id })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setLineDetailModal({ kind: 'existing', itemId: item.id });
+                      }
+                    }}
                     style={{
-                      padding: '10px 16px',
+                      padding: '12px 18px',
                       display: 'flex',
                       alignItems: 'flex-start',
-                      gap: 8,
+                      gap: 10,
                       opacity: item.is_comped ? 0.5 : 1,
-                      fontSize: 13,
+                      fontSize: 15,
                       borderBottom: '1px solid var(--border)',
+                      cursor: 'pointer',
                     }}
+                    className="order-line-row-clickable"
                   >
                     {canEditQty ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-                        <button type="button" className="btn btn-ghost" style={{ padding: 4, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, -1)} disabled={saving}>
-                          <Minus size={12} />
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, -1)} disabled={saving}>
+                          <Minus size={14} />
                         </button>
-                        <span style={{ fontSize: 13, fontWeight: 700, minWidth: 22, textAlign: 'center' }}>{item.quantity}</span>
-                        <button type="button" className="btn btn-ghost" style={{ padding: 4, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, 1)} disabled={saving}>
-                          <Plus size={12} />
+                        <span style={{ fontSize: 15, fontWeight: 700, minWidth: 26, textAlign: 'center' }}>{item.quantity}</span>
+                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, 1)} disabled={saving}>
+                          <Plus size={14} />
                         </button>
                       </div>
                     ) : (
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', width: 28, textAlign: 'center', flexShrink: 0, paddingTop: 2 }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-muted)', width: 32, textAlign: 'center', flexShrink: 0, paddingTop: 2 }}>
                         {item.quantity}×
                       </span>
                     )}
@@ -553,12 +911,15 @@ export default function OrderScreen({
                           </span>
                         )}
                       </div>
+                      {item.portion_label && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{item.portion_label}</div>
+                      )}
                       {mods.length > 0 && (
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
                           {mods.map((m) => m.name).join(', ')}
                         </div>
                       )}
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                      <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
                         {item.is_comped ? (
                           <span style={{ color: 'var(--danger)' }}>İKRAM</span>
                         ) : (
@@ -568,25 +929,17 @@ export default function OrderScreen({
                           </>
                         )}
                       </div>
-                      {item.note && <div style={{ fontSize: 10, color: 'var(--warning)', marginTop: 2 }}>📝 {item.note}</div>}
+                      {item.note && <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 2 }}>📝 {item.note}</div>}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-                      <button
-                        type="button"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 3 }}
-                        onClick={() => { setNoteModal({ kind: 'item', itemId: item.id }); setNoteText(item.note || ''); }}
-                        title="Not"
-                      >
-                        <MessageSquare size={14} />
-                      </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
                       {!item.is_comped && item.status === 'new' && existingOrder.status !== 'closed' && (
-                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 3 }} onClick={() => handleVoidItem(item.id)} title="Satırı iptal">
-                          <Trash2 size={14} />
+                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }} onClick={() => handleVoidItem(item.id)} title="Satırı iptal">
+                          <Trash2 size={16} />
                         </button>
                       )}
                       {hasRole('admin', 'cashier') && existingOrder.status !== 'closed' && item.status !== 'new' && !item.is_comped && (
-                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 3 }} onClick={() => handleVoidItem(item.id)} title="İptal (void)">
-                          <Trash2 size={14} />
+                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }} onClick={() => handleVoidItem(item.id)} title="İptal (void)">
+                          <Trash2 size={16} />
                         </button>
                       )}
                     </div>
@@ -600,60 +953,70 @@ export default function OrderScreen({
           {cartItems.length > 0 && (
             <div style={{ padding: '8px 0' }}>
               {allExistingItems.length > 0 && (
-                <div style={{ padding: '4px 16px', fontSize: 10, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ padding: '6px 18px', fontSize: 11, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Yeni Eklenen
                 </div>
               )}
               {cartItems.map((item, idx) => {
                 const mods = item.modifiers || [];
                 return (
-                  <div key={idx} style={{
-                    padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 8,
-                    fontSize: 13, borderLeft: '3px solid var(--accent)',
-                    background: 'var(--accent-muted)',
-                    marginBottom: 1,
-                  }}>
+                  <div
+                    key={idx}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setLineDetailModal({ kind: 'cart', index: idx })}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setLineDetailModal({ kind: 'cart', index: idx });
+                      }
+                    }}
+                    style={{
+                      padding: '10px 18px', display: 'flex', alignItems: 'center', gap: 10,
+                      fontSize: 15, borderLeft: '3px solid var(--accent)',
+                      background: 'var(--accent-muted)',
+                      marginBottom: 1,
+                      cursor: 'pointer',
+                    }}
+                    className="order-line-row-clickable"
+                  >
                     {/* Quantity Controls */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <button className="btn btn-ghost" onClick={() => updateQuantity(idx, -1)}
-                        style={{ padding: 4, minHeight: 'auto', borderRadius: 4 }}>
-                        <Minus size={12} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} onClick={(e) => e.stopPropagation()}>
+                      <button type="button" className="btn btn-ghost" onClick={() => updateQuantity(idx, -1)}
+                        style={{ padding: 6, minHeight: 'auto', borderRadius: 4 }}>
+                        <Minus size={14} />
                       </button>
-                      <span style={{ fontSize: 13, fontWeight: 700, width: 22, textAlign: 'center' }}>{item.quantity}</span>
-                      <button className="btn btn-ghost" onClick={() => updateQuantity(idx, 1)}
-                        style={{ padding: 4, minHeight: 'auto', borderRadius: 4 }}>
-                        <Plus size={12} />
+                      <span style={{ fontSize: 15, fontWeight: 700, width: 28, textAlign: 'center' }}>{item.quantity}</span>
+                      <button type="button" className="btn btn-ghost" onClick={() => updateQuantity(idx, 1)}
+                        style={{ padding: 6, minHeight: 'auto', borderRadius: 4 }}>
+                        <Plus size={14} />
                       </button>
                     </div>
 
                     {/* Item Info */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, fontSize: 12 }} className="truncate">{item.product_name}</div>
+                      <div style={{ fontWeight: 600, fontSize: 15 }} className="truncate">{item.product_name}</div>
+                      {item.portion_label && (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.portion_label}</div>
+                      )}
                       {mods.length > 0 && (
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {mods.map(m => m.name).join(', ')}
                         </div>
                       )}
-                      {item.note && <div style={{ fontSize: 10, color: 'var(--warning)' }}>📝 {item.note}</div>}
+                      {item.note && <div style={{ fontSize: 12, color: 'var(--warning)' }}>📝 {item.note}</div>}
                     </div>
 
                     {/* Price */}
-                    <span style={{ fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontWeight: 700, fontSize: 15, whiteSpace: 'nowrap' }}>
                       {formatCurrency(item.unit_price * item.quantity)}
                     </span>
 
                     {/* Actions */}
-                    <div style={{ display: 'flex', gap: 2 }}>
-                      <button
-                        type="button"
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 3 }}
-                        onClick={() => { setNoteModal({ kind: 'cart', index: idx }); setNoteText(item.note || ''); }}
-                      >
-                        <MessageSquare size={12} />
-                      </button>
-                      <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 3 }}
+                    <div style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
+                      <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }}
                         onClick={() => removeItem(idx)}>
-                        <Trash2 size={12} />
+                        <Trash2 size={16} />
                       </button>
                     </div>
                   </div>
@@ -746,74 +1109,146 @@ export default function OrderScreen({
         </div>
       )}
 
+      {lineDetailModal?.kind === 'cart' && lineDetailModal.index != null && cartItems[lineDetailModal.index] != null && (() => {
+        const idx = lineDetailModal.index;
+        const item = cartItems[idx];
+        return (
+          <OrderProductDetailModal
+            key={`line-cart-${idx}`}
+            lineKey={`cart-${idx}`}
+            product={{ id: item.product_id, name: item.product_name }}
+            initialLine={{
+              quantity: item.quantity,
+              note: item.note,
+              portion_id: item.portion_id,
+              portion_label: item.portion_label,
+            }}
+            modifiersDisplay={item.modifiers?.length ? item.modifiers : null}
+            onClose={() => setLineDetailModal(null)}
+            onContinue={handleLineDetailContinue}
+          />
+        );
+      })()}
+      {lineDetailModal?.kind === 'existing' && existingOrder && (() => {
+        const item = (existingOrder.items || []).find((i) => i.id === lineDetailModal.itemId);
+        if (!item) return null;
+        let mods = [];
+        try {
+          mods = JSON.parse(item.modifiers || '[]');
+        } catch {
+          mods = [];
+        }
+        const isNew = item.status === 'new';
+        const closed = existingOrder.status === 'closed';
+        const comped = item.is_comped;
+        return (
+          <OrderProductDetailModal
+            key={`line-ex-${item.id}`}
+            lineKey={`existing-${item.id}`}
+            product={{ id: item.product_id, name: item.product_name }}
+            initialLine={{
+              quantity: item.quantity,
+              note: item.note || '',
+              portion_id: item.portion_id,
+              portion_label: item.portion_label,
+            }}
+            modifiersDisplay={mods.length ? mods : null}
+            readOnlyQuantity={closed || comped || !isNew}
+            readOnlyPortion={closed || comped || !isNew}
+            readOnlyNote={closed || comped}
+            isReadOnly={closed || comped}
+            subtitle={
+              closed
+                ? 'Sipariş kapalı — salt görüntüleme'
+                : comped
+                  ? 'İkram satırı — düzenlenemez'
+                  : undefined
+            }
+            onClose={() => setLineDetailModal(null)}
+            onContinue={handleLineDetailContinue}
+          />
+        );
+      })()}
+
       {/* ═══ Modifier Modal ═══ */}
       {modifierModal && (
         <ModifierModal
           product={modifierModal.product}
           groups={modifierModal.groups}
           onConfirm={(selectedMods) => {
-            addItemToCart(modifierModal.product, selectedMods);
+            if (modifierModal.pendingLine) {
+              const { quantity, note, portion_id, portion_label } = modifierModal.pendingLine;
+              addItemToCart(modifierModal.product, selectedMods, { quantity, note, portion_id, portion_label });
+            } else {
+              addItemToCart(modifierModal.product, selectedMods);
+            }
             setModifierModal(null);
           }}
           onClose={() => setModifierModal(null)}
         />
       )}
 
-      {/* ═══ Note Modal ═══ */}
-      {noteModal !== null && (
-        <div className="modal-overlay" onClick={() => setNoteModal(null)}>
-          <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
+      {customerModalOpen && orderType === 'dine_in' && (
+        <div className="modal-overlay" onClick={() => setCustomerModalOpen(false)}>
+          <div className="modal modal-md order-customer-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Ürün Notu</h2>
-              <button className="btn btn-ghost btn-icon" onClick={() => setNoteModal(null)}><X size={16} /></button>
+              <h2>Kayıtlı müşteri seç</h2>
+              <button type="button" className="btn btn-ghost btn-icon" onClick={() => setCustomerModalOpen(false)} title="Kapat">
+                <X size={16} />
+              </button>
             </div>
             <div className="modal-body">
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-                {ORDER_QUICK_NOTES.map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    style={{ fontSize: 11 }}
-                    onClick={() =>
-                      setNoteText((prev) => (prev && prev.trim() ? `${prev}, ${q}` : q))
-                    }
-                  >
-                    {q}
-                  </button>
-                ))}
+              <div className="order-customer-modal-search">
+                <Search size={15} className="order-customer-modal-search-icon" />
+                <input
+                  className="input"
+                  placeholder="Ad veya telefon ile ara..."
+                  value={customerSearchQuery}
+                  onChange={(e) => handleCustomerSearchInput(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
               </div>
-              <textarea className="input" rows={3} value={noteText} onChange={e => setNoteText(e.target.value)}
-                placeholder="Örn: Soğansız, az pişmiş..." autoFocus />
+              {selectedCustomer && (
+                <div className="order-customer-modal-selected">
+                  <span>
+                    Seçili: <strong>{selectedCustomer.full_name}</strong>
+                  </span>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={handleClearTableCustomer} disabled={saving}>
+                    Kaldır
+                  </button>
+                </div>
+              )}
+              <div className="order-customer-modal-list">
+                {customerListLoading ? (
+                  <div className="empty-state" style={{ padding: 24 }}>Yükleniyor...</div>
+                ) : (
+                  customerList.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      className={`order-customer-row ${selectedCustomer?.id === c.id ? 'is-active' : ''}`}
+                      onClick={() => handlePickCustomer(c)}
+                      disabled={saving}
+                    >
+                      <span className="order-customer-avatar">{c.full_name?.charAt(0) || '?'}</span>
+                      <span className="order-customer-row-text">
+                        <span className="order-customer-row-name">{c.full_name}</span>
+                        <span className="order-customer-row-phone">{c.phones?.map((p) => p.phone).join(' · ') || '—'}</span>
+                      </span>
+                      <span className="order-customer-row-meta">{c.total_orders ?? 0} sipariş</span>
+                    </button>
+                  ))
+                )}
+                {!customerListLoading && customerList.length === 0 && (
+                  <div className="empty-state" style={{ padding: 20 }}>
+                    <div className="empty-state-text">Müşteri bulunamadı</div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={() => setNoteModal(null)}>İptal</button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={saving}
-                onClick={async () => {
-                  if (!noteModal) return;
-                  if (noteModal.kind === 'cart') {
-                    setCartItems((prev) => prev.map((ci, i) => (i === noteModal.index ? { ...ci, note: noteText } : ci)));
-                    setNoteModal(null);
-                    return;
-                  }
-                  try {
-                    setSaving(true);
-                    await api.updateOrderItem(existingOrder.id, noteModal.itemId, { note: noteText });
-                    toast.success('Not kaydedildi');
-                    await refreshOrder();
-                    setNoteModal(null);
-                  } catch (err) {
-                    toast.error(err.message);
-                  } finally {
-                    setSaving(false);
-                  }
-                }}
-              >
-                Kaydet
-              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
             </div>
           </div>
         </div>

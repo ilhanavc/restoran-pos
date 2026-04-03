@@ -25,15 +25,18 @@ export default function PrinterListPage() {
   const navigate = useNavigate();
   const { success, error } = useToast();
   const [printers, setPrinters] = useState([]);
+  const [printerConfig, setPrinterConfig] = useState({});
   const [loading, setLoading] = useState(true);
   const [testingId, setTestingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [savingAdjRule, setSavingAdjRule] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.getPrinterSettings();
       setPrinters(data.printers || []);
+      setPrinterConfig(data.config || {});
     } catch (e) {
       error(e.message || 'Yazıcı listesi yüklenemedi');
     } finally {
@@ -56,6 +59,21 @@ export default function PrinterListPage() {
       error(e.message || 'Test başarısız');
     } finally {
       setTestingId(null);
+    }
+  };
+
+  const toggleKitchenAdjNew = async () => {
+    setSavingAdjRule(true);
+    try {
+      await api.patchPrinterSettings({
+        kitchenAdjustmentIncludeNew: !printerConfig.kitchenAdjustmentIncludeNew,
+      });
+      success('Yazıcı ayarı güncellendi');
+      await load();
+    } catch (e) {
+      error(e.message || 'Kayıt başarısız');
+    } finally {
+      setSavingAdjRule(false);
     }
   };
 
@@ -243,6 +261,33 @@ export default function PrinterListPage() {
             <strong style={{ color: 'var(--text-primary)', display: 'block', marginTop: 10 }}>3) Operasyon</strong>
             <div>Adisyon ve Muıtfak yazıcılarını ayrı rollerle yönetin.</div>
           </div>
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Mutfak iptal / azaltma</div>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+                lineHeight: 1.5,
+                cursor: savingAdjRule ? 'wait' : 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!!printerConfig.kitchenAdjustmentIncludeNew}
+                disabled={savingAdjRule || loading}
+                onChange={toggleKitchenAdjNew}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                Mutfağa henüz gönderilmemiş satırlarda da iptal/azaltma fişi basılsın (varsayılan: yalnız mutfağa giden
+                satırlar).
+              </span>
+            </label>
+          </div>
+
           <div
             style={{
               marginTop: 16,

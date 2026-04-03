@@ -35,9 +35,29 @@ export function getNextOrderNo(businessId) {
   return (result?.maxNo || 0) + 1;
 }
 
-/** Sunucu tarafında modifier fiyatları — sadece DB'deki product_modifiers kayıtları kullanılır */
-export function resolveOrderItemPrice(product, modifiersInput, businessId) {
-  let itemPrice = product.price;
+/**
+ * Sipariş satırı birim fiyatı: isteğe bağlı porsiyon tabanı + product_modifiers deltaları.
+ * @param {string|null|undefined} portionId - product_portions.id
+ */
+export function resolveOrderItemPrice(product, modifiersInput, businessId, portionId = null) {
+  let itemPrice = Number(product.price);
+  let portionLabel = null;
+
+  if (portionId) {
+    const prow = db
+      .prepare(
+        `SELECT * FROM product_portions WHERE id = ? AND product_id = ? AND business_id = ?`,
+      )
+      .get(portionId, product.id, businessId);
+    if (!prow) {
+      const err = new Error('Geçersiz veya bu ürüne ait olmayan porsiyon');
+      err.isBadRequest = true;
+      throw err;
+    }
+    itemPrice = Number(prow.price);
+    portionLabel = prow.label || null;
+  }
+
   const resolved = [];
   for (const mod of modifiersInput || []) {
     if (!mod || !mod.id) {
@@ -62,5 +82,5 @@ export function resolveOrderItemPrice(product, modifiersInput, businessId) {
       price_delta: row.price_delta,
     });
   }
-  return { itemPrice, resolved };
+  return { itemPrice, resolved, portionLabel };
 }

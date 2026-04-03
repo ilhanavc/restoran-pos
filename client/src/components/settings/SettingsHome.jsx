@@ -1,4 +1,4 @@
-import { Settings, Store, Users, Printer, Monitor } from 'lucide-react';
+import { Settings, Store, Users, Printer, Monitor, Phone } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const sections = [
@@ -6,6 +6,7 @@ const sections = [
   { icon: Users, label: 'Kullanıcı Yönetimi', desc: 'Personel ekleme, rol atama, yetkilendirme', to: '/settings/users' },
   { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller, kategori yönlendirme (Ayarlar > Yazıcılar)', to: '/settings/printers' },
   { icon: Monitor, label: 'Ekran Ayarları', desc: 'Tema, düzen, dil tercihleri', to: '/settings/display' },
+  { icon: Phone, label: 'Gelen arama (Caller ID)', desc: 'Arama geçmişi ve gelen arama simülasyonu (test)', to: '/settings/caller-id' },
 ];
 
 export default function SettingsHome() {

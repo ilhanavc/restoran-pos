@@ -1,14 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { TABLE_STATUS, formatCurrency, timeAgo } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
-  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2,
+  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard,
 } from 'lucide-react';
 
 export default function TablesScreen({
   onOpenOrder,
+  onPayment,
   showTakeawaySidebar = false,
   onOpenTakeawayOrder,
 }) {
@@ -23,6 +25,7 @@ export default function TablesScreen({
   const [now, setNow] = useState(Date.now());
   const [openMenuTableId, setOpenMenuTableId] = useState(null);
   const toast = useToast();
+  const location = useLocation();
 
   const loadTables = useCallback(async () => {
     try {
@@ -46,7 +49,10 @@ export default function TablesScreen({
     }
   }, [showTakeawaySidebar, toast]);
 
-  useEffect(() => { loadTables(); }, []);
+  useEffect(() => {
+    loadTables();
+    if (showTakeawaySidebar) loadTakeaway();
+  }, [location.key, location.state?.refreshTables, loadTables, loadTakeaway, showTakeawaySidebar]);
 
   useEffect(() => {
     if (!showTakeawaySidebar) {
@@ -114,6 +120,11 @@ export default function TablesScreen({
         return;
       }
       const sourceTable = areaTables.find((t) => t.id === transferMode);
+      if (!sourceTable?.current_order_id) {
+        toast.error('Taşıma için kaynak masada sipariş yok');
+        setTransferMode(null);
+        return;
+      }
       const fromLabel = masaLabelInArea(sourceTable, areaTables);
       const toLabel = masaLabelInArea(table, areaTables);
       if (!window.confirm(`${fromLabel} → ${toLabel} masasına taşınsın mı?`)) return;
@@ -137,8 +148,28 @@ export default function TablesScreen({
   const handleTableMenuAction = async (action, table, e) => {
     e.stopPropagation();
     if (action === 'transfer') {
+      if (!table.current_order_id) {
+        toast.error('Taşınacak sipariş yok');
+        return;
+      }
       setOpenMenuTableId(null);
       setTransferMode(table.id);
+      return;
+    }
+    if (action === 'payment') {
+      const orderId = table.current_order_id;
+      if (!orderId) {
+        toast.error('Sipariş bulunamadı');
+        return;
+      }
+      if (!onPayment) return;
+      setOpenMenuTableId(null);
+      try {
+        const order = await api.getOrder(orderId);
+        onPayment(order);
+      } catch (err) {
+        toast.error(err.message || 'Sipariş yüklenemedi');
+      }
       return;
     }
     if (action === 'cancel') {
@@ -576,11 +607,11 @@ export default function TablesScreen({
         }
         .table-action-sheet-grid {
           display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 14px;
         }
-        @media (max-width: 480px) {
-          .table-action-sheet-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        @media (min-width: 640px) {
+          .table-action-sheet-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
         }
       `}</style>
 
@@ -588,7 +619,7 @@ export default function TablesScreen({
         <div className="modal-overlay" onClick={() => setOpenMenuTableId(null)}>
           <div
             className="modal modal-md table-action-sheet-modal"
-            style={{ maxWidth: 440, width: '100%' }}
+            style={{ maxWidth: 560, width: '100%' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="modal-header" style={{ alignItems: 'flex-start' }}>
@@ -610,14 +641,26 @@ export default function TablesScreen({
             </div>
             <div className="modal-body" style={{ paddingTop: 8 }}>
               <div className="table-action-sheet-grid">
-                <button
-                  type="button"
-                  style={actionTileBase}
-                  onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
-                >
-                  <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
-                  Masayı Taşı
-                </button>
+                {actionTable.current_order_id && (
+                  <button
+                    type="button"
+                    style={actionTileBase}
+                    onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
+                  >
+                    <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
+                    Masayı Taşı
+                  </button>
+                )}
+                {onPayment && actionTable.current_order_id && (
+                  <button
+                    type="button"
+                    style={actionTileBase}
+                    onClick={(e) => handleTableMenuAction('payment', actionTable, e)}
+                  >
+                    <CreditCard size={26} color="var(--accent)" strokeWidth={2} />
+                    Ödeme al
+                  </button>
+                )}
                 <button
                   type="button"
                   style={{

@@ -1,5 +1,6 @@
 import db from '../config/database.js';
 import { normalizePhoneDigits } from '../utils/phoneNormalize.js';
+import { genId } from '../utils/helpers.js';
 
 const migrations = [
   // ── Businesses & Branches ──
@@ -127,6 +128,17 @@ const migrations = [
     price_delta REAL DEFAULT 0,
     sort_order INTEGER DEFAULT 0,
     is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS product_portions (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    price REAL NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    is_default INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   )`,
 
@@ -309,6 +321,7 @@ const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id)`,
   `CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_product_portions_product ON product_portions(product_id)`,
   `CREATE INDEX IF NOT EXISTS idx_categories_business ON categories(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_business ON customers(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_phones_customer ON customer_phones(customer_id)`,
@@ -430,6 +443,35 @@ function ensureColumnMigrations() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_customer_phones_normalized ON customer_phones(normalized_phone)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_business_created ON call_logs(business_id, created_at DESC)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_normalized ON call_logs(normalized_phone)`);
+
+  let oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+  if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'portion_id')) {
+    db.prepare('ALTER TABLE order_items ADD COLUMN portion_id TEXT').run();
+    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+  }
+  if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'portion_label')) {
+    db.prepare('ALTER TABLE order_items ADD COLUMN portion_label TEXT').run();
+  }
+}
+
+/** Mevcut ürünler için varsayılan Tam porsiyonu (ürün başına bir kez). */
+function ensureProductPortionsSeed() {
+  try {
+    const tbl = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='product_portions'`).get();
+    if (!tbl) return;
+    const products = db.prepare('SELECT id, business_id, price FROM products').all();
+    const countStmt = db.prepare('SELECT COUNT(*) as c FROM product_portions WHERE product_id = ?');
+    const insertStmt = db.prepare(
+      `INSERT INTO product_portions (id, business_id, product_id, label, price, sort_order, is_default)
+       VALUES (?, ?, ?, ?, ?, 0, 1)`,
+    );
+    for (const p of products) {
+      if (countStmt.get(p.id).c > 0) continue;
+      insertStmt.run(genId(), p.business_id, p.id, 'Tam', p.price);
+    }
+  } catch (e) {
+    console.error('ensureProductPortionsSeed:', e);
+  }
 }
 
 function backfillCustomerPhoneNormalized() {
@@ -458,6 +500,7 @@ export function runMigrations() {
   });
   migrate();
   migrateVatInclusivePricingOnce();
+  ensureProductPortionsSeed();
   backfillCustomerPhoneNormalized();
   console.log('✅ Migrations complete.');
 }

@@ -364,6 +364,7 @@ router.get('/printer-settings', (req, res) => {
       usageKitchenId: null,
       usagePaymentId: null,
       usageBeverageLabelId: null,
+      kitchenAdjustmentIncludeNew: false,
     };
     const stored = getJsonSetting(req.businessId, 'printer.config', {});
     const config = { ...defaults, ...stored };
@@ -484,6 +485,7 @@ router.patch('/printer-settings', (req, res) => {
       usageKitchenId: null,
       usagePaymentId: null,
       usageBeverageLabelId: null,
+      kitchenAdjustmentIncludeNew: false,
     };
     const stored = getJsonSetting(req.businessId, 'printer.config', {});
     const prev = { ...baseDefaults, ...stored };
@@ -501,6 +503,9 @@ router.patch('/printer-settings', (req, res) => {
       usageBeverageLabelId: Object.prototype.hasOwnProperty.call(body, 'usageBeverageLabelId')
         ? pick(body.usageBeverageLabelId)
         : pick(prev.usageBeverageLabelId),
+      kitchenAdjustmentIncludeNew: Object.prototype.hasOwnProperty.call(body, 'kitchenAdjustmentIncludeNew')
+        ? !!body.kitchenAdjustmentIncludeNew
+        : !!prev.kitchenAdjustmentIncludeNew,
     };
     upsertSetting(req.businessId, 'printer.config', config);
     auditLog(req.businessId, req.user.id, 'update_printer_settings', 'settings', 'printer.config');

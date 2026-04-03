@@ -9,6 +9,7 @@
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:migrate": "cd server && node migrations/run.js",
     "db:seed": "cd server && node seeds/run.js",
+    "debug:login": "cd server && node test-login.js",
     "setup": "npm install && cd server && npm install && cd ../client && npm install && cd .. && npm run db:seed",
     "bridge": "node ./store-bridge/index.js",
     "app:start": "npm run dev",

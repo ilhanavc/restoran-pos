@@ -11,7 +11,7 @@ try {
   // Önceleri mevcut verileri temizle
   const tablesToClear = ['call_logs', 'incoming_calls', 'audit_logs', 'settings', 'print_jobs', 'printer_routing', 'printers',
     'payments', 'order_items', 'orders', 'customer_addresses', 'customer_phones', 'customers',
-    'product_modifiers', 'products', 'categories', 'tables', 'dining_areas', 'users', 'roles', 'branches', 'businesses'];
+    'product_modifiers', 'product_portions', 'products', 'categories', 'tables', 'dining_areas', 'users', 'roles', 'branches', 'businesses'];
   
   for (const t of tablesToClear) {
     try { db.prepare(`DELETE FROM ${t}`).run(); } catch(e) { /* skip */ }

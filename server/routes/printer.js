@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import db from '../config/database.js';
+import config from '../config/index.js';
 import { authenticate, businessScope } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
 
@@ -35,8 +36,9 @@ router.post('/receipt', (req, res) => {
     
     auditLog(req.businessId, req.user.id, 'print_receipt', 'order', order_id);
     
-    // In production, this would send to ESC/POS printer
-    console.log('🖨️  [MOCK] Fiş yazdırılıyor:', order_id);
+    if (config.nodeEnv !== 'production') {
+      console.log('🖨️  [MOCK] Fiş yazdırılıyor:', order_id);
+    }
     
     res.json({ success: true, receiptData, message: 'Fiş yazdırma komutu gönderildi (mock)' });
   } catch (err) {
@@ -70,8 +72,10 @@ router.post('/kitchen', (req, res) => {
 
     auditLog(req.businessId, req.user.id, 'print_kitchen', 'order', order_id);
 
-    console.log('🖨️  [MOCK] Muıtfak fişi:', kitchenItems.length, 'ürün');
-    if (barItems.length) console.log('🖨️  [MOCK] Bar fişi:', barItems.length, 'ürün');
+    if (config.nodeEnv !== 'production') {
+      console.log('🖨️  [MOCK] Muıtfak fişi:', kitchenItems.length, 'ürün');
+      if (barItems.length) console.log('🖨️  [MOCK] Bar fişi:', barItems.length, 'ürün');
+    }
 
     res.json({ 
       success: true, 

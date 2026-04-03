@@ -94,6 +94,7 @@ class ApiService {
   deleteCategory(id) { return this.delete(`/categories/${id}`); }
 
   getProducts(params = {}) { return this.get(`/products${this.buildQuery(params)}`); }
+  getProduct(id) { return this.get(`/products/${id}`); }
   postProduct(body) { return this.post('/products', body); }
   patchProduct(id, body) { return this.patch(`/products/${id}`, body); }
   deleteProduct(id) { return this.delete(`/products/${id}`); }
@@ -106,6 +107,10 @@ class ApiService {
   createOrder(data) { return this.post('/orders', data); }
   addOrderItems(orderId, items) { return this.post(`/orders/${orderId}/items`, { items }); }
   updateOrderStatus(id, status) { return this.patch(`/orders/${id}/status`, { status }); }
+  /** Açık salon siparişinde müşteri ata veya kaldır (customer_id: string | null) */
+  patchOrderCustomer(orderId, customerId) {
+    return this.patch(`/orders/${orderId}/customer`, { customer_id: customerId });
+  }
   updateOrderItem(orderId, itemId, data) { return this.patch(`/orders/${orderId}/items/${itemId}`, data); }
   applyDiscount(orderId, data) { return this.patch(`/orders/${orderId}/discount`, data); }
   getTakeawayOpenOrders() { return this.get('/orders/takeaway/open'); }
