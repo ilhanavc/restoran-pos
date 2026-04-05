@@ -583,7 +583,10 @@ function createWindow(port) {
   });
 
   mainWindow.once('ready-to-show', () => {
-    if (mainWindow) mainWindow.show();
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.webContents.openDevTools();
+    }
   });
 
   mainWindow.on('closed', () => {
