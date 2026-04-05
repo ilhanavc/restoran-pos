@@ -73,10 +73,16 @@ function sanitizeDiscoveredPrinters(rawList) {
     .map((p) => {
       const name = String(p?.name || '').trim();
       if (!name) return null;
+      const connectionType = String(p?.connectionType || '').trim() || 'network';
+      const ipAddress = String(p?.ipAddress || '').trim();
+      const portName = String(p?.portName || '').trim();
       return {
         name,
         isDefault: p?.isDefault === true,
         isOnline: p?.isOnline !== false,
+        connectionType,
+        ipAddress,
+        portName,
         source: 'windows',
       };
     })
