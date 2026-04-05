@@ -3,25 +3,74 @@
  * 80 mm termal: sabit satır genişliği, hizalı metin; init + kesim korunur.
  */
 
-import iconv from 'iconv-lite';
-
 /** @type {number} 80 mm termal için tipik karakter genişliği (12 cpi civarı) */
 const DEFAULT_LINE_WIDTH = 42;
 const MIN_LINE_WIDTH = 32;
 const MAX_LINE_WIDTH = 64;
-const DEFAULT_ESC_T = 28; // WPC1254 (Turkish) - Epson compatible table index
 
 /**
- * CP1254 yedek eşlemesi (iconv başarısız olursa).
+ * Varsayılan ESC t kod sayfası: 12 = PC857 (IBM Turkish).
+ * Epson TM serisi ve çoğu termal yazıcı bu değeri destekler.
+ * pos-config.json bridge.printEscT veya BRIDGE_PRINT_ESC_T env ile override edilebilir.
  */
-const CP1254_TR_MAP = new Map([
-  ['Ğ', 0xd0],
-  ['ğ', 0xf0],
-  ['İ', 0xdd],
-  ['ı', 0xfd],
-  ['Ş', 0xde],
-  ['ş', 0xfe],
+const DEFAULT_ESC_T = 12; // PC857 (IBM Turkish)
+
+/**
+ * PC857 (IBM Code Page 857 — Turkish) manuel byte tablosu.
+ * ESC t 12 ile seçilir. iconv-lite bağımlılığı yok.
+ *
+ * Kaynak: https://en.wikipedia.org/wiki/Code_page_857
+ * 0x00–0x7F arası ASCII ile aynı; 0x80–0xAF özel karakterler.
+ */
+const PC857_MAP = new Map([
+  ['Ç', 0x80], ['ü', 0x81], ['é', 0x82], ['â', 0x83],
+  ['ä', 0x84], ['à', 0x85], ['å', 0x86], ['ç', 0x87],
+  ['ê', 0x88], ['ë', 0x89], ['è', 0x8a], ['ï', 0x8b],
+  ['î', 0x8c], ['ì', 0x8d], ['Ä', 0x8e], ['Å', 0x8f],
+  ['É', 0x90], ['æ', 0x91], ['Æ', 0x92], ['ô', 0x93],
+  ['ö', 0x94], ['ò', 0x95], ['û', 0x96], ['ù', 0x97],
+  ['İ', 0x98], ['Ö', 0x99], ['Ü', 0x9a], ['ş', 0x9b],
+  ['£', 0x9c], ['Ş', 0x9d], ['×', 0x9e], ['ğ', 0x9f],
+  ['á', 0xa0], ['í', 0xa1], ['ó', 0xa2], ['ú', 0xa3],
+  ['ñ', 0xa4], ['Ñ', 0xa5], ['Ğ', 0xa6], ['ı', 0xa7],
+  ['¿', 0xa8], ['®', 0xa9], ['¬', 0xaa], ['½', 0xab],
+  ['¼', 0xac], ['¡', 0xad], ['«', 0xae], ['»', 0xaf],
+  // ₺ sembolü PC857'de yok — "TL" olarak göster (caller tarafından değiştirilir)
 ]);
+
+/**
+ * Unicode metni PC857 byte dizisine çevirir (iconv-lite kullanmaz).
+ * - ASCII (0x00–0x7F): doğrudan geçer
+ * - PC857_MAP'te bulunan karakterler: tablodaki byte değeri kullanılır
+ * - ₺ → "TL" (iki byte)
+ * - Bilinmeyen karakterler → 0x3F ('?')
+ */
+function encodePC857(text) {
+  const src = String(text ?? '');
+  const bytes = [];
+  for (const ch of src) {
+    // ASCII aralığı — doğrudan geç
+    const cp = ch.codePointAt(0);
+    if (cp == null) continue;
+    if (cp <= 0x7f) {
+      bytes.push(cp);
+      continue;
+    }
+    // PC857 özel karakter tablosu
+    if (PC857_MAP.has(ch)) {
+      bytes.push(PC857_MAP.get(ch));
+      continue;
+    }
+    // ₺ → TL
+    if (ch === '₺') {
+      bytes.push(0x54, 0x4c); // 'T', 'L'
+      continue;
+    }
+    // Bilinmeyen → '?'
+    bytes.push(0x3f);
+  }
+  return Buffer.from(bytes);
+}
 
 function concat(buffers) {
   return Buffer.concat(buffers.filter(Boolean));
@@ -43,51 +92,9 @@ function resolveEscT() {
   return DEFAULT_ESC_T;
 }
 
-function resolveEncoding() {
-  const enc = String(process.env.BRIDGE_PRINT_ENCODING || 'cp1254').trim().toLowerCase();
-  if (enc === 'utf8' || enc === 'utf-8') return 'utf8';
-  return 'cp1254';
-}
-
-function encodeCp1254Fallback(text) {
-  const src = String(text ?? '');
-  const bytes = [];
-  for (const ch of src) {
-    if (CP1254_TR_MAP.has(ch)) {
-      bytes.push(CP1254_TR_MAP.get(ch));
-      continue;
-    }
-    const cp = ch.codePointAt(0);
-    if (cp == null) continue;
-    if (cp <= 0x7f) {
-      bytes.push(cp);
-      continue;
-    }
-    if (cp >= 0xa0 && cp <= 0xff) {
-      bytes.push(cp);
-      continue;
-    }
-    bytes.push(0x3f);
-  }
-  return Buffer.from(bytes);
-}
-
-/** Tam Windows-1254 kodlaması (ÇÖÜçöü ve Türkçe özel harfler için iconv). */
-function encodeCp1254(text) {
-  try {
-    return iconv.encode(String(text ?? ''), 'windows-1254');
-  } catch {
-    return encodeCp1254Fallback(text);
-  }
-}
-
 function textLine(s) {
   const line = s == null ? '' : String(s);
-  const enc = resolveEncoding();
-  if (enc === 'utf8') {
-    return Buffer.from(`${line}\n`, 'utf8');
-  }
-  return Buffer.concat([encodeCp1254(line), Buffer.from([0x0a])]);
+  return Buffer.concat([encodePC857(line), Buffer.from([0x0a])]);
 }
 
 /**
@@ -129,12 +136,7 @@ function emitLine(line) {
   else if (bodyEmphasis) chunks.push(resolveBodyCharacterSize());
   if (underline) chunks.push(Buffer.from([0x1b, 0x2d, 0x01]));
   if (bold) chunks.push(Buffer.from([0x1b, 0x45, 0x01]));
-  const enc = resolveEncoding();
-  if (enc === 'utf8') {
-    chunks.push(Buffer.from(t, 'utf8'));
-  } else {
-    chunks.push(encodeCp1254(t));
-  }
+  chunks.push(encodePC857(t));
   chunks.push(Buffer.from([0x0a]));
   if (bold) chunks.push(Buffer.from([0x1b, 0x45, 0x00]));
   if (underline) chunks.push(Buffer.from([0x1b, 0x2d, 0x00]));
@@ -733,7 +735,7 @@ function buildTestLines(p) {
   out.push({ text: centerLine('Türkçe Karakter Testi', w), bold: true });
   out.push(centerLine('ÇĞİÖŞÜ çğıöşü', w));
   out.push(centerLine('Çorba Göbek İmam Öküz Şeker Ücret', w));
-  out.push(centerLine(`ESC t: ${resolveEscT()} | ${resolveEncoding().toUpperCase()}`, w));
+  out.push(centerLine(`ESC t: ${resolveEscT()} | PC857`, w));
   out.push(sep);
   const lines = Array.isArray(p.lines) ? p.lines : [];
   for (const line of lines) {
