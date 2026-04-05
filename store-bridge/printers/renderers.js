@@ -723,9 +723,17 @@ function buildTestLines(p) {
   const out = [];
   const sep = separatorSpaced(w);
   out.push(sep);
-  out.push(centerLine('YAZICI TESTI', w));
+  out.push({ text: centerLine('YAZICI TESTI', w), bold: true });
   out.push(sep);
   out.push(alignLeftRight(fmtDateTime(p.created_at), `No: ${p.order_no || '-'}`, w));
+  out.push(alignLeftRight('Bağlantı:', String(p.connection_type || 'network'), w));
+  out.push(alignLeftRight('Adres:', String(p.address || '-'), w));
+  out.push(sep);
+  // Türkçe karakter encoding testi
+  out.push({ text: centerLine('Türkçe Karakter Testi', w), bold: true });
+  out.push(centerLine('ÇĞİÖŞÜ çğıöşü', w));
+  out.push(centerLine('Çorba Göbek İmam Öküz Şeker Ücret', w));
+  out.push(centerLine(`ESC t: ${resolveEscT()} | ${resolveEncoding().toUpperCase()}`, w));
   out.push(sep);
   const lines = Array.isArray(p.lines) ? p.lines : [];
   for (const line of lines) {

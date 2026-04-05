@@ -815,14 +815,15 @@ router.post('/printers/test', (req, res) => {
     const testPayload = {
       kind: 'test',
       printer_name: p.name,
+      connection_type: p.connection_type || 'network',
+      address: p.connection_type === 'usb'
+        ? (p.printer_name || p.name)
+        : `${p.ip_address || '-'}:${p.port || 9100}`,
       created_at: nowIso,
       order_no: `TEST-${Date.now().toString().slice(-6)}`,
       lines: [
-        'Restoran POS fiziksel yazıcı testi',
-        `Yazıcı: ${p.name}`,
-        `Bağlantı: ${p.connection_type || 'network'}`,
-        `Adres: ${p.ip_address || '-'}:${p.port || 9100}`,
-        'Bu çıktı StoreBridge print_jobs zinciriyle gönderilmiştir.',
+        'Restoran POS fiziksel yazici testi',
+        'Bu cikti StoreBridge print_jobs zinciriyle gonderilmistir.',
       ],
     };
     const jobId = genId();

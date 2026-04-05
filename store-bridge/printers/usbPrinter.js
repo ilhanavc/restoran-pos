@@ -108,19 +108,34 @@ export async function sendUsbPrint({ printerName, buffer, timeoutMs = 15000 }) {
           '-PrinterName', name,
           '-DataPath', tmpBin,
         ],
-        { windowsHide: true, maxBuffer: 256 * 1024 },
+        { windowsHide: true, maxBuffer: 512 * 1024 },
         (err, stdout, stderr) => {
           clearTimeout(timer);
           if (settled.done) return;
           settled.done = true;
+
+          const out = (stdout || '').trim();
+          const errOut = (stderr || '').trim();
+
+          console.log(`[usbPrinter] yazıcı="${name}" bytes=${buffer.length}`);
+          if (out) console.log(`[usbPrinter] stdout: ${out.slice(0, 300)}`);
+          if (errOut) console.warn(`[usbPrinter] stderr: ${errOut.slice(0, 300)}`);
+
           if (err) {
-            const detail = (stderr || '').trim() || err.message;
+            // exit code != 0: Write-Error veya exit N PowerShell'de hata olarak döner
+            const detail = errOut || out || err.message;
+            console.error(`[usbPrinter] HATA [${name}]: ${detail.slice(0, 500)}`);
             return reject(new Error(`USB baskı hatası [${name}]: ${detail.slice(0, 500)}`));
           }
-          const out = (stdout || '').trim();
-          if (out && !out.startsWith('OK')) {
-            return reject(new Error(`USB yazıcı beklenmedik yanıt [${name}]: ${out.slice(0, 300)}`));
+
+          // stdout'ta "OK" geçiyorsa başarılı (Add-Type uyarıları "OK"dan önce gelebilir)
+          if (out && !out.includes('OK')) {
+            const msg = `USB yazıcı beklenmedik yanıt [${name}]: ${out.slice(0, 300)}`;
+            console.error(`[usbPrinter] ${msg}`);
+            return reject(new Error(msg));
           }
+
+          console.log(`[usbPrinter] OK: yazıcı="${name}"`);
           resolve();
         },
       );

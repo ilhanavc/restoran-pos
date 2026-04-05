@@ -6,6 +6,7 @@ import {
   enqueueKitchenJobsForSentItems,
   processPendingJobsSync,
   enqueueKitchenAdjustmentJobs,
+  enqueueReceiptJobForClosedOrder,
 } from '../services/printJobs.js';
 
 const router = Router();
@@ -142,6 +143,8 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
         updated_at = datetime('now'), updated_by = ? WHERE id = ?
     `).run(req.user.id, req.params.id);
     auditLog(req.businessId, req.user.id, 'takeaway_delivered', 'order', req.params.id, {});
+    enqueueReceiptJobForClosedOrder(req.businessId, req.params.id, req.user.id);
+    processPendingJobsSync(req.businessId, req.user.id);
     return res.json({ ok: true });
   } catch (err) {
     console.error('Takeaway delivery error:', err);
@@ -475,6 +478,11 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
 
     if (status === 'in_kitchen' && sentItemIds.length) {
       enqueueKitchenJobsForSentItems(req.businessId, order.id, sentItemIds, req.user.id);
+      processPendingJobsSync(req.businessId, req.user.id);
+    }
+
+    if (status === 'closed') {
+      enqueueReceiptJobForClosedOrder(req.businessId, order.id, req.user.id);
       processPendingJobsSync(req.businessId, req.user.id);
     }
 
