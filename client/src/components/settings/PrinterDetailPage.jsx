@@ -244,6 +244,8 @@ export default function PrinterDetailPage() {
   const fetchDiscoveredPrinters = useCallback(async () => {
     const data = await api.getDiscoveredPrinters();
     const list = Array.isArray(data.printers) ? data.printers : [];
+    console.log('[PrinterDetailPage] discoveredPrinters:', list.length, 'adet');
+    list.forEach((p, i) => console.log(`  [${i}]`, JSON.stringify(p)));
     setDiscoveredPrinters(list);
     setDiscoveryUpdatedAt(data.updatedAt || '');
     setDiscoveryState(data.scanState || 'never_scanned');
