@@ -52,7 +52,9 @@ export default {
     businessId: process.env.BRIDGE_BUSINESS_ID || '',
   },
 
-  /** true ise processPendingJobsSync sunucu içi mock yazdırmayı yapmaz (StoreBridge kullanılır). */
+  /** true ise processPendingJobsSync sunucu içi mock yazdırmayı yapmaz (StoreBridge kullanılır).
+   *  Varsayılan: true (mock KAPALI, gerçek yazdırma AÇIK).
+   *  Geliştirme ortamında mock açmak için DISABLE_PRINT_JOB_MOCK=false veya =0 set et. */
   disablePrintJobMock:
-    process.env.DISABLE_PRINT_JOB_MOCK === '1' || process.env.DISABLE_PRINT_JOB_MOCK === 'true',
+    process.env.DISABLE_PRINT_JOB_MOCK !== '0' && process.env.DISABLE_PRINT_JOB_MOCK !== 'false',
 };

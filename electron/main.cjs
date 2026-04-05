@@ -123,6 +123,11 @@ function buildChildEnv(port, absoluteDbPath, codeRoot) {
   if (b.businessId != null) env.BRIDGE_BUSINESS_ID = String(b.businessId);
   console.log('[electron] buildChildEnv: BRIDGE_TOKEN =', env.BRIDGE_TOKEN || '(tanımsız)');
   console.log('[electron] buildChildEnv: BRIDGE_BUSINESS_ID =', env.BRIDGE_BUSINESS_ID || '(tanımsız)');
+  // Mock mod: pos-config.json bridge.disablePrintJobMock ile override edilebilir
+  // Varsayılan: true (mock KAPALI). Açmak için pos-config.json'a "disablePrintJobMock": false ekle.
+  if (b.disablePrintJobMock != null) {
+    env.DISABLE_PRINT_JOB_MOCK = b.disablePrintJobMock ? '1' : '0';
+  }
   return env;
 }
 

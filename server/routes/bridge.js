@@ -63,6 +63,8 @@ function mapPrinterRow(row) {
     ip_address: row.ip_address,
     port: row.port ?? 9100,
     is_active: row.is_active === 1 || row.is_active === true,
+    // USB yazıcı için Windows yazıcı adı — PrinterDetailPage'de fiziksel yazıcı seçiminden gelir
+    printer_name: String(print_options?.device?.physicalName || '').trim() || null,
     print_options,
   };
 }
