@@ -387,6 +387,9 @@ router.get('/printers/discovered', (req, res) => {
               name,
               isDefault: p?.isDefault === true,
               isOnline: p?.isOnline !== false,
+              connectionType: String(p?.connectionType || '').trim() || 'network',
+              ipAddress: String(p?.ipAddress || '').trim(),
+              portName: String(p?.portName || '').trim(),
               source: 'windows',
             };
           })
