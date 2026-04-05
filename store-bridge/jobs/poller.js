@@ -1,4 +1,5 @@
 import { sendEthernetPrint } from '../printers/ethernetPrinter.js';
+import { sendUsbPrint } from '../printers/usbPrinter.js';
 import { payloadToEscPosBuffer } from '../printers/renderers.js';
 
 export function startJobPoller({ api, cfg, log = console }) {
@@ -43,10 +44,27 @@ export function startJobPoller({ api, cfg, log = console }) {
           }
 
           const conn = (printer.connection_type || 'network').toLowerCase();
-          if (conn !== 'network' || !printer.ip_address) {
+
+          if (conn !== 'network' && conn !== 'usb') {
             await api.updateJob(activeId, {
               status: 'failed',
-              error_message: `Bu köprü sürümü yalnızca ağ yazıcısını destekler (connection=${conn})`,
+              error_message: `Desteklenmeyen bağlantı türü: connection=${conn} (network veya usb gerekli)`,
+            });
+            continue;
+          }
+
+          if (conn === 'network' && !printer.ip_address) {
+            await api.updateJob(activeId, {
+              status: 'failed',
+              error_message: 'Ağ yazıcısı için ip_address gerekli',
+            });
+            continue;
+          }
+
+          if (conn === 'usb' && !printer.printer_name) {
+            await api.updateJob(activeId, {
+              status: 'failed',
+              error_message: 'USB yazıcısı için printer_name (Windows yazıcı adı) gerekli',
             });
             continue;
           }
@@ -54,17 +72,26 @@ export function startJobPoller({ api, cfg, log = console }) {
           const buffer = payloadToEscPosBuffer(j);
 
           if (cfg.dryRun) {
-            log.log(`[bridge] DRY_RUN job=${activeId} bytes=${buffer.length}`);
+            log.log(`[bridge] DRY_RUN job=${activeId} conn=${conn} bytes=${buffer.length}`);
             await api.updateJob(activeId, { status: 'printed' });
             continue;
           }
 
-          await sendEthernetPrint({
-            host: printer.ip_address,
-            port: printer.port || 9100,
-            buffer,
-            timeoutMs: cfg.socketTimeoutMs,
-          });
+          if (conn === 'usb') {
+            await sendUsbPrint({
+              printerName: printer.printer_name,
+              buffer,
+              timeoutMs: cfg.socketTimeoutMs,
+            });
+          } else {
+            await sendEthernetPrint({
+              host: printer.ip_address,
+              port: printer.port || 9100,
+              buffer,
+              timeoutMs: cfg.socketTimeoutMs,
+            });
+          }
+
           await api.updateJob(activeId, { status: 'printed' });
         } catch (e) {
           const msg = e?.message || String(e);
