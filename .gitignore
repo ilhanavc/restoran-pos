@@ -51,10 +51,6 @@ caller_id/
 *.suo
 *.user
 
-# Vendor cid.dll — copy locally next to helper output; not committed
-tools/callerid-sdk-helper/cidshow_x64/
-tools/callerid-sdk-helper/cidshow_x86/
-
 # Local scratch / demo
 fisornek.txt
 
