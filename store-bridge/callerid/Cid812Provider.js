@@ -1,8 +1,10 @@
 /**
- * CID 812 / HID caller ID (deprecated experimental path).
+ * CID 812 / HID caller ID provider.
  *
- * Aktif ve önerilen üretim akışı clipboard script + bridge endpoint'tir.
- * Bu provider yalnızca CID812_MODE=hid-experimental ise çalıştırılır.
+ * Desteklenen modlar:
+ *   hid           — USB HID cihazdan doğrudan okuma (üretim modu)
+ *   hid-experimental — hid ile aynı davranış, geriye dönük uyumluluk için korunur
+ *   clipboard     — Pasif mod; numarayı harici araç /api/bridge/caller-id/incoming endpointine gönderir
  */
 
 function digitsKey(s) {
@@ -27,7 +29,6 @@ function parseHexCsvToIntList(str) {
 function bytesToAsciiSafe(buf) {
   try {
     const ascii = Buffer.from(buf).toString('ascii');
-    // Sadece yazdırılabilirleri bırak, kontrol karakterleri noktaya çevir.
     return ascii.replace(/[^\x20-\x7E]/g, '.');
   } catch {
     return '';
@@ -85,6 +86,7 @@ export class Cid812Provider {
 
     this._device = null;
     this._deviceInfo = null;
+    this._reconnectTimer = null;
 
     this._debounce = { key: '', at: 0 };
     this._phoneRegex = null;
@@ -97,7 +99,6 @@ export class Cid812Provider {
     this._idleScoreEma = null;
     this._currentMode = 'idleLike';
 
-    // Parse gated: ilk sürümde varsayılan kapalı.
     this._shouldParse = Boolean(this.cfg.cid812EnableParse) || Boolean(String(this.cfg.cid812PhoneRegex || '').trim());
     this._traceMode = Boolean(this.cfg.cid812TraceMode);
     this._traceRanges = parseTraceRanges(this.cfg.cid812TraceOffsets);
@@ -113,6 +114,7 @@ export class Cid812Provider {
     this._candidateCounts = new Array(64).fill(0);
     this._candidateDeltaSums = new Array(64).fill(0);
     this._transitionReportCount = 0;
+
     const reStr = String(this.cfg.cid812PhoneRegex || '');
     if (this._shouldParse && reStr.trim()) {
       try {
@@ -125,29 +127,71 @@ export class Cid812Provider {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Başlat / durdur
+  // ---------------------------------------------------------------------------
+
   start() {
     if (this._started) return;
     this._started = true;
     this._stopped = false;
 
     if (!this.cfg.cid812Enabled) {
-      this.log.log?.('[cid812][hid] devre dışı (CID812_ENABLED=0 veya false)');
+      this.log.log?.('[cid812] devre dışı (CID812_ENABLED=0 veya false)');
       return;
     }
-    if (String(this.cfg.cid812Mode || 'clipboard') !== 'hid-experimental') {
+
+    const mode = String(this.cfg.cid812Mode || 'hid').toLowerCase();
+
+    if (mode === 'clipboard') {
       this.log.log?.(
-        '[cid812] mode=clipboard: HID provider pasif. Numarayı clipboard watcher script ile /api/bridge/caller-id/incoming endpointine gönderin.',
+        '[cid812] mode=clipboard: HID provider pasif. Numarayı harici script ile /api/bridge/caller-id/incoming endpointine gönderin.',
       );
       return;
     }
-    this.log.warn?.('[cid812][hid] DEPRECATED: hid-experimental mod sadece analiz amaçlıdır.');
 
+    // 'hid' veya geriye dönük uyumluluk için 'hid-experimental'
+    if (mode !== 'hid' && mode !== 'hid-experimental') {
+      this.log.warn?.(`[cid812] Bilinmeyen mod: '${mode}'. 'hid' veya 'clipboard' kullanın.`);
+      return;
+    }
+
+    this.log.log?.(`[cid812][hid] başlatılıyor (mode=${mode})`);
     this._openHid().catch((e) => {
-      this.log.error?.('[cid812][hid] start: HID açılamadı:', e?.message || e);
+      this.log.error?.('[cid812][hid] HID açılamadı:', e?.message || e);
+      this._scheduleReconnect();
     });
   }
 
+  stop() {
+    this._stopped = true;
+    this._clearReconnectTimer();
+    try {
+      if (this._device) {
+        try {
+          this._device.close();
+        } catch {
+          // ignore
+        }
+        this._device = null;
+      }
+    } catch (e) {
+      this.log.error?.('[cid812][hid] stop:', e?.message || e);
+    }
+    this._pendingTransitions = [];
+    this._frames = [];
+    this._traceSample = [];
+    this._lastFrameBytes = null;
+    this._idleScoreEma = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // HID bağlantısı
+  // ---------------------------------------------------------------------------
+
   async _openHid() {
+    if (this._stopped) return;
+
     let HID;
     try {
       const mod = await import('node-hid');
@@ -176,13 +220,12 @@ export class Cid812Provider {
 
     if (!matches.length) {
       this.log.warn?.(
-        '[cid812][hid] eşleşen cihaz bulunamadı. vid/pid/serial filtresi: ',
+        '[cid812][hid] eşleşen cihaz bulunamadı. Filtre:',
         { hidVids, hidPids, hidSerial, devicesCount: devices.length },
       );
       return;
     }
 
-    // İlk eşleşeni aç.
     const selected = matches[0];
     this._deviceInfo = {
       path: selected.path,
@@ -194,12 +237,12 @@ export class Cid812Provider {
     const openPath = selected.path || '';
     this.log.log?.('[cid812][hid] cihaz açılıyor:', this._deviceInfo);
 
-    // node-hid genelde path ile açılabiliyor; path yoksa vid/pid denenecek.
     try {
       if (openPath) this._device = new HID.HID(openPath);
       else this._device = new HID.HID(selected.vendorId, selected.productId);
     } catch (e) {
       this.log.error?.('[cid812][hid] cihaz açma hatası:', e?.message || e);
+      this._device = null;
       return;
     }
 
@@ -210,14 +253,20 @@ export class Cid812Provider {
     });
 
     this._device.on?.('error', (err) => {
-      if (!this._stopped) this.log.error?.('[cid812][hid] device error:', err?.message || err);
+      if (this._stopped) return;
+      this.log.error?.('[cid812][hid] device error:', err?.message || err);
+      this._device = null;
+      this._scheduleReconnect();
     });
 
     this._device.on?.('close', () => {
-      if (!this._stopped) this.log.warn?.('[cid812][hid] device close');
+      if (this._stopped) return;
+      this.log.warn?.('[cid812][hid] device close — yeniden bağlanma planlanıyor');
+      this._device = null;
+      this._scheduleReconnect();
     });
 
-    this.log.log?.('[cid812][hid] parse:', this._shouldParse ? 'AÇIK(gated)' : 'KAPALI');
+    this.log.log?.('[cid812][hid] bağlandı. parse:', this._shouldParse ? 'AÇIK' : 'KAPALI');
     if (this._transitionMode) {
       this.log.log?.(
         `[cid812][transition] mode=ON window=${this._transitionWindow} minGapMs=${this._transitionMinGapMs} topN=${this._transitionTopN} verbose=${this._transitionVerboseTable ? 1 : 0}`,
@@ -230,6 +279,38 @@ export class Cid812Provider {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Otomatik yeniden bağlanma
+  // ---------------------------------------------------------------------------
+
+  _clearReconnectTimer() {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+  }
+
+  _scheduleReconnect() {
+    if (this._stopped) return;
+    this._clearReconnectTimer();
+    const intervalMs = this.cfg.cid812ReconnectIntervalMs ?? 5000;
+    this.log.log?.(`[cid812][hid] ${intervalMs} ms sonra yeniden bağlanılacak...`);
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      if (this._stopped) return;
+      this.log.log?.('[cid812][hid] yeniden bağlanılıyor...');
+      this._openHid().catch((e) => {
+        this.log.error?.('[cid812][hid] yeniden bağlanma başarısız:', e?.message || e);
+        this._scheduleReconnect();
+      });
+    }, intervalMs);
+    this._reconnectTimer.unref?.();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Rapor işleme
+  // ---------------------------------------------------------------------------
+
   _handleReport(buf) {
     this._frameCount += 1;
     const ts = new Date().toISOString();
@@ -237,7 +318,6 @@ export class Cid812Provider {
     const ascii = bytesToAsciiSafe(buf);
     const info = this._deviceInfo || {};
 
-    // Ham log (ilk sürüm)
     const maybeTrunc = hex.length > 2000 ? `${hex.slice(0, 2000)}…` : hex;
     const asciiSnippet = ascii.length > 300 ? `${ascii.slice(0, 300)}…` : ascii;
     this.log.log?.(
@@ -253,7 +333,6 @@ export class Cid812Provider {
       this._captureFrameAndAnalyze(ts, buf, info);
     }
 
-    // Parse kapalıyken POST etmiyoruz.
     if (!this._shouldParse || !this._phoneRegex || !this.api?.postCallerIdIncoming) return;
 
     const m = ascii.match(this._phoneRegex);
@@ -302,7 +381,6 @@ export class Cid812Provider {
     }
     this._lastFrameBytes = bytes;
 
-    // Basit mode detector: idle score ema'nın üstüne çıkarsa event-like
     if (this._idleScoreEma == null) this._idleScoreEma = score;
     const isEvent = score > Math.max(22, this._idleScoreEma * 2.2);
     const nextMode = isEvent ? 'eventLike' : 'idleLike';
@@ -324,7 +402,6 @@ export class Cid812Provider {
       this._frames.splice(0, this._frames.length - keep);
     }
 
-    // Önce pending transition'ları tamamlamayı dene.
     this._flushPendingTransitions();
 
     if (nextMode !== this._currentMode) {
@@ -470,7 +547,6 @@ export class Cid812Provider {
       this._traceSample.shift();
     }
 
-    // Özet: pencere içinde kaç farklı imza var (idle/event geçişini fark etmeyi kolaylaştırır)
     if (this._frameCount % this._traceWindow === 0) {
       const uniq = new Set(this._traceSample.map((x) => x.signature)).size;
       this.log.log?.(
@@ -486,27 +562,6 @@ export class Cid812Provider {
       source_type: 'cid812',
     });
     this.log.log?.(`[cid812][hid] gönderildi: ${phone}`);
-  }
-
-  stop() {
-    this._stopped = true;
-    try {
-      if (this._device) {
-        try {
-          this._device.close();
-        } catch {
-          // ignore
-        }
-        this._device = null;
-      }
-    } catch (e) {
-      this.log.error?.('[cid812][hid] stop:', e?.message || e);
-    }
-    this._pendingTransitions = [];
-    this._frames = [];
-    this._traceSample = [];
-    this._lastFrameBytes = null;
-    this._idleScoreEma = null;
   }
 
   get started() {

@@ -1,0 +1,37 @@
+{
+  "_talimat": "Bu dosyayı 'pos-config.json' olarak kopyalayın ve değerleri doldurun. Electron açılışında otomatik okunur.",
+
+  "port": 3001,
+  "jwtSecret": "GIZLI_JWT_ANAHTARI_BURAYA_DEGISTIRIN",
+
+  "bridge": {
+    "_aciklama": "Store Bridge (yazıcı + arayanı tanıma) ayarları",
+    "token": "BRIDGE_TOKEN_BURAYA",
+    "businessId": 1,
+    "dryRun": false,
+    "pollIntervalMs": 2000,
+    "socketTimeoutMs": 8000,
+    "claimId": "store-bridge"
+  },
+
+  "callerid": {
+    "_aciklama": "CID812 arayanı tanıma cihazı ayarları",
+    "enabled": true,
+    "mode": "hid",
+    "_mode_secenekleri": "hid | clipboard",
+    "_mode_hid": "USB HID cihazdan doğrudan okuma (önerilen)",
+    "_mode_clipboard": "Pasif mod — harici script numarayı /api/bridge/caller-id/incoming endpointine gönderir",
+
+    "enableParse": true,
+    "phoneRegex": "(?:0|\\+90)?\\s*(5\\d{2}[\\s\\-]?\\d{3}[\\s\\-]?\\d{2}[\\s\\-]?\\d{2})",
+    "debounceMs": 3500,
+
+    "hid": {
+      "_aciklama": "USB HID filtre — scan-hid-devices.js ile bulunur",
+      "vid": "C0F4",
+      "pid": "01F5",
+      "serial": "",
+      "reconnectIntervalMs": 5000
+    }
+  }
+}
