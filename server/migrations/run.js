@@ -262,7 +262,7 @@ const migrations = [
   `CREATE TABLE IF NOT EXISTS print_jobs (
     id TEXT PRIMARY KEY,
     business_id TEXT NOT NULL REFERENCES businesses(id),
-    order_id TEXT NOT NULL REFERENCES orders(id),
+    order_id TEXT REFERENCES orders(id),
     printer_id TEXT REFERENCES printers(id),
     job_type TEXT NOT NULL,
     payload TEXT NOT NULL,
@@ -422,6 +422,33 @@ function ensureColumnMigrations() {
   pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_by')) {
     db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_by TEXT').run();
+  }
+
+  // order_id NOT NULL → nullable (test job'ları için gerekli; SQLite tablo recreation gerektirir)
+  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  const pjOrderIdCol = pjCols.find((c) => c.name === 'order_id');
+  if (pjOrderIdCol && pjOrderIdCol.notnull === 1) {
+    const colNames = pjCols.map((c) => c.name).join(', ');
+    db.exec(`CREATE TABLE print_jobs_new (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id),
+      order_id TEXT REFERENCES orders(id),
+      printer_id TEXT REFERENCES printers(id),
+      job_type TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','printed','failed','cancelled')),
+      error_message TEXT,
+      idempotency_key TEXT UNIQUE,
+      created_at TEXT DEFAULT (datetime('now')),
+      printed_at TEXT,
+      claimed_at TEXT,
+      claimed_by TEXT
+    )`);
+    db.exec(`INSERT INTO print_jobs_new (${colNames}) SELECT ${colNames} FROM print_jobs`);
+    db.exec(`DROP TABLE print_jobs`);
+    db.exec(`ALTER TABLE print_jobs_new RENAME TO print_jobs`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`);
+    console.log('✅ print_jobs.order_id NOT NULL kısıtı kaldırıldı (nullable yapıldı)');
   }
 
   ensurePrinterRoutingUniqueIndex();
