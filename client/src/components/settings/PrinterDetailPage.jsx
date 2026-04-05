@@ -616,6 +616,29 @@ export default function PrinterDetailPage() {
                 <option value="usb">USB</option>
               </select>
             </label>
+            {connectionType === 'network' && (
+              <>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>IP Adresi</span>
+                  <input
+                    className="input"
+                    value={ip}
+                    onChange={(e) => setIp(e.target.value)}
+                    placeholder="192.168.1.100"
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Port</span>
+                  <input
+                    className="input"
+                    type="number"
+                    value={port}
+                    onChange={(e) => setPort(e.target.value)}
+                    placeholder="9100"
+                  />
+                </label>
+              </>
+            )}
             <ToggleRow label="Aktif" checked={isActive} onChange={setIsActive} />
             <ToggleRow label="Varsayılan yazıcı" checked={isDefault} onChange={setIsDefault} />
 
@@ -660,7 +683,15 @@ export default function PrinterDetailPage() {
                 <select
                   className="input"
                   value={physicalName}
-                  onChange={(e) => setDevicePhysical(e.target.value)}
+                  onChange={(e) => {
+                    const selectedName = e.target.value;
+                    setDevicePhysical(selectedName);
+                    const found = discoveredPrinters.find((p) => p.name === selectedName);
+                    if (found) {
+                      if (found.connectionType) setConnectionType(found.connectionType);
+                      if (found.ipAddress) setIp(found.ipAddress);
+                    }
+                  }}
                   disabled={discoveryLoading}
                   style={{ cursor: 'pointer' }}
                 >
@@ -671,6 +702,8 @@ export default function PrinterDetailPage() {
                   {discoveredPrinters.map((p) => (
                     <option key={p.name} value={p.name}>
                       {p.name}
+                      {p.connectionType === 'network' && p.ipAddress ? ` — ${p.ipAddress}` : ''}
+                      {p.connectionType === 'usb' ? ' [USB]' : ''}
                       {p.isDefault ? ' (Varsayılan)' : ''}
                       {p.isOnline === false ? ' (Pasif)' : ''}
                     </option>
