@@ -12,6 +12,8 @@ client/dist/
 
 dist/
 
+dist-electron/
+
 release/
 
 build/

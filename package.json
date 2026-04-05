@@ -24,9 +24,10 @@
     "rebuild:server-native": "npm run clean:server-sqlite-build && node scripts/rebuild-server-native.cjs",
     "rebuild:server-native:source": "cross-env FORCE_SQLITE_BUILD_FROM_SOURCE=1 npm run rebuild:server-native",
     "smoke:electron-sqlite": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/smoke-electron-sqlite.cjs",
+    "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never",
     "dist:prepare": "npm run build && npm install --prefix server --omit=dev && npm run rebuild:server-native && npm run smoke:electron-sqlite && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --dir --publish never",
-    "dist:nsis": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged release/win-unpacked --win nsis --publish never",
-    "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged release/win-unpacked --win portable --publish never",
+    "dist:nsis": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged dist-electron/win-unpacked --win nsis --publish never",
+    "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged dist-electron/win-unpacked --win portable --publish never",
     "dist:win": "npm run dist:prepare && npm run dist:nsis && npm run dist:portable",
     "dist:win:dir": "npm run dist:prepare",
     "dist:win:nsis": "npm run dist:nsis",
@@ -36,7 +37,7 @@
     "appId": "com.restoranpos.desktop",
     "productName": "Restoran POS",
     "directories": {
-      "output": "release",
+      "output": "dist-electron",
       "buildResources": "resources"
     },
     "files": [
@@ -63,12 +64,35 @@
           "!**/node_modules/**/README*",
           "!**/*.map"
         ]
+      },
+      {
+        "from": "store-bridge",
+        "to": "store-bridge",
+        "filter": [
+          "**/*",
+          "!**/node_modules/**/*.md",
+          "!**/node_modules/**/LICENSE",
+          "!**/node_modules/**/LICENSE.*",
+          "!**/node_modules/**/CHANGELOG*",
+          "!**/node_modules/**/README*",
+          "!**/*.map"
+        ]
+      },
+      {
+        "from": "tools",
+        "to": "tools",
+        "filter": [
+          "**/*",
+          "!**/bin/",
+          "!**/obj/"
+        ]
       }
     ],
     "publish": null,
     "nsis": {
       "differentialPackage": false,
-      "oneClick": true,
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
       "warningsAsErrors": false
     },
     "win": {

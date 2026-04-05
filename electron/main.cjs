@@ -37,8 +37,13 @@ let posConfig = {};
 // ---------------------------------------------------------------------------
 
 function readPosConfig() {
-  // app.whenReady öncesi de çağrılabilir — __dirname tabanlı sabit yol kullan
-  const cfgPath = path.join(__dirname, '..', 'pos-config.json');
+  // Packaged modda: %APPDATA%\Restoran POS\pos-config.json (yazılabilir kullanıcı dizini).
+  // Geliştirmede: repo kökündeki pos-config.json.
+  // app.getPath('userData') app.whenReady öncesinde de kullanılabilir.
+  const cfgPath = app.isPackaged
+    ? path.join(app.getPath('userData'), 'pos-config.json')
+    : path.join(__dirname, '..', 'pos-config.json');
+  console.log('[electron] pos-config.json aranıyor:', cfgPath);
   if (!fs.existsSync(cfgPath)) return {};
   try {
     const raw = fs.readFileSync(cfgPath, 'utf8');
@@ -69,6 +74,26 @@ function getCodeRoot() {
  */
 function getPackagedServerRoot() {
   return path.join(process.resourcesPath, 'server');
+}
+
+/**
+ * Store Bridge kök dizini — paketli: resources/store-bridge, geliştirme: repo/store-bridge.
+ */
+function getStoreBridgeRoot() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'store-bridge');
+  }
+  return path.join(getCodeRoot(), 'store-bridge');
+}
+
+/**
+ * Tools kök dizini — paketli: resources/tools, geliştirme: repo/tools.
+ */
+function getToolsRoot() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'tools');
+  }
+  return path.join(getCodeRoot(), 'tools');
 }
 
 /** Backend giriş dosyası — modül çözümlemesi server/node_modules ile aynı dizin ağacında olmalı */
@@ -447,7 +472,8 @@ function startServerAndWaitForHealth(absoluteDbPath) {
  * @param {number} port
  */
 function startStoreBridge(port) {
-  const bridgeEntry = path.join(getCodeRoot(), 'store-bridge', 'index.js');
+  const bridgeRoot = getStoreBridgeRoot();
+  const bridgeEntry = path.join(bridgeRoot, 'index.js');
 
   if (!fs.existsSync(bridgeEntry)) {
     console.warn('[electron] Store Bridge bulunamadı, atlanıyor:', bridgeEntry);
@@ -467,9 +493,16 @@ function startStoreBridge(port) {
 
   const env = buildBridgeEnv(port);
 
-  const child = spawn('node', [bridgeEntry], {
-    cwd: getCodeRoot(),
-    env,
+  // Packaged modda sistem Node yok — Electron ikilisini Node olarak kullan
+  const useElectronAsNode = app.isPackaged;
+  const spawnCmd = useElectronAsNode ? process.execPath : 'node';
+  const childEnv = useElectronAsNode ? { ...env, ELECTRON_RUN_AS_NODE: '1' } : env;
+
+  console.log('[electron] Store Bridge cmd:', spawnCmd, bridgeEntry);
+
+  const child = spawn(spawnCmd, [bridgeEntry], {
+    cwd: bridgeRoot,
+    env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -502,7 +535,7 @@ function startStoreBridge(port) {
 function startCallerIdHelper(port) {
   if (callerIdHelperStopped) return;
 
-  const csprojPath = path.join(getCodeRoot(), 'tools', 'callerid-sdk-helper', 'CallerIdSdkHelper.csproj');
+  const csprojPath = path.join(getToolsRoot(), 'callerid-sdk-helper', 'CallerIdSdkHelper.csproj');
   if (!fs.existsSync(csprojPath)) {
     console.warn('[electron] CallerIdSdkHelper bulunamadı, atlanıyor:', csprojPath);
     return;
