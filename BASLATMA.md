@@ -12,4 +12,4 @@
 
 Ayrıntılı tablo ve manuel komutlar için ana `README.md` dosyasındaki “Windows: tek tık” bölümüne bakın.
 
-**Electron masaüstü:** Uygulamayı `npm run electron` / `electron:prod` ile açtığınızda SQLite verisi proje klasöründe değil, Electron **userData** altında saklanır (ör. `%APPDATA%\restoran-pos\`). Geliştirme için `npm run dev` kullanmaya devam edin; o modda veri yolu eskisi gibi `server/data` ile uyumludur.
+**Electron masaüstü:** Uygulamayı `npm run electron` veya `npm run electron:prod` ile açtığınızda SQLite verisi proje klasöründe değil, Electron **userData** altında saklanır (ör. `%APPDATA%\restoran-pos\`). Geliştirme için `npm run dev` kullanmaya devam edin; o modda veri yolu eskisi gibi `server/data` ile uyumludur.

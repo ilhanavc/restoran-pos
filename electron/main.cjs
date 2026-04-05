@@ -9,10 +9,6 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 
-const PROJECT_ROOT = path.join(__dirname, '..');
-const SERVER_ENTRY = path.join(PROJECT_ROOT, 'server', 'index.js');
-/** Eski (proje altı) SQLite — yalnızca Electron ilk açılışında userData boşsa tek seferlik kopya kaynağı */
-const LEGACY_DB_MAIN = path.join(PROJECT_ROOT, 'server', 'data', 'pos.db');
 const DEFAULT_PORT = 3001;
 const HEALTH_HOST = '127.0.0.1';
 const HEALTH_PATH = '/api/health';
@@ -25,6 +21,40 @@ let serverProcess = null;
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 
+/**
+ * Kod kökü: client/dist (ve dev'de server) — paketli: app.asar içi kök.
+ */
+function getCodeRoot() {
+  if (app.isPackaged) {
+    return app.getAppPath();
+  }
+  return path.join(__dirname, '..');
+}
+
+/**
+ * Paketli modda backend `extraResources` ile resources/server altında (asar dışı, tam node_modules).
+ * Geliştirmede repo kökündeki server/.
+ */
+function getPackagedServerRoot() {
+  return path.join(process.resourcesPath, 'server');
+}
+
+/** Backend giriş dosyası — modül çözümlemesi server/node_modules ile aynı dizin ağacında olmalı */
+function getServerEntryPath() {
+  if (app.isPackaged) {
+    return path.join(getPackagedServerRoot(), 'index.js');
+  }
+  return path.join(getCodeRoot(), 'server', 'index.js');
+}
+
+/** Child spawn cwd */
+function getServerSpawnCwd() {
+  if (app.isPackaged) {
+    return getPackagedServerRoot();
+  }
+  return getCodeRoot();
+}
+
 function getTargetPort() {
   const p = process.env.POS_PORT || process.env.PORT || String(DEFAULT_PORT);
   return parseInt(String(p), 10);
@@ -33,39 +63,39 @@ function getTargetPort() {
 /**
  * @param {number} port
  * @param {string} absoluteDbPath — backend `resolveDbPath` ile uyumlu mutlak SQLite yolu (Electron: userData)
+ * @param {string} codeRoot — getCodeRoot() (asar veya repo kökü)
  */
-function buildChildEnv(port, absoluteDbPath) {
+function buildChildEnv(port, absoluteDbPath, codeRoot) {
   const env = { ...process.env };
   env.NODE_ENV = 'production';
   env.PORT = String(port);
   env.DB_PATH = absoluteDbPath;
-  const dist = path.join(PROJECT_ROOT, 'client', 'dist');
+  const dist = path.join(codeRoot, 'client', 'dist');
   if (!env.CLIENT_DIST_PATH) {
     env.CLIENT_DIST_PATH = dist;
   }
-  if (process.env.JWT_SECRET) {
-    env.JWT_SECRET = process.env.JWT_SECRET;
-  }
+  // JWT_SECRET: dışarıdan set edilmişse kullan, yoksa her başlangıçta güvenli rastgele üret
+  env.JWT_SECRET = process.env.JWT_SECRET || require('crypto').randomBytes(64).toString('hex');
   return env;
 }
 
 /**
- * userData’da pos.db yoksa ve proje altında legacy DB varsa, bir kez güvenli kopya.
- * userData’da pos.db varsa hiçbir şey yapılmaz (üzerine yazılmaz).
+ * userData'da pos.db yoksa ve proje altında legacy DB varsa, bir kez güvenli kopya.
+ * userData'da pos.db varsa hiçbir şey yapılmaz (üzerine yazılmaz).
  * Kopya başarısız olursa oluşturulan hedef dosyalar geri alınır.
  *
  * @param {string} userDataDbPath — örn. .../userData/pos.db
  */
-function copyLegacySqliteToUserDataIfNeeded(userDataDbPath) {
+function copyLegacySqliteToUserDataIfNeeded(userDataDbPath, legacyDbMain) {
   if (fs.existsSync(userDataDbPath)) {
     console.log('[electron] SQLite: userData veritabanı zaten mevcut, legacy taşınmadı:', userDataDbPath);
     return;
   }
 
-  if (!fs.existsSync(LEGACY_DB_MAIN)) {
+  if (!fs.existsSync(legacyDbMain)) {
     console.log(
       '[electron] SQLite: legacy bulunamadı (ilk çalıştırma); boş DB oluşturulacak. Kaynak:',
-      LEGACY_DB_MAIN,
+      legacyDbMain,
     );
     return;
   }
@@ -74,7 +104,7 @@ function copyLegacySqliteToUserDataIfNeeded(userDataDbPath) {
   fs.mkdirSync(userDataDir, { recursive: true });
 
   const suffixes = ['', '-wal', '-shm'];
-  const sources = suffixes.map((s) => (s === '' ? LEGACY_DB_MAIN : LEGACY_DB_MAIN + s));
+  const sources = suffixes.map((s) => (s === '' ? legacyDbMain : legacyDbMain + s));
   const copied = [];
 
   try {
@@ -202,8 +232,13 @@ function forceKillAfterTimeout(child) {
  */
 function startServerAndWaitForHealth(absoluteDbPath) {
   return new Promise((resolve, reject) => {
-    if (!fs.existsSync(SERVER_ENTRY)) {
-      reject(new Error(`Sunucu dosyası bulunamadı: ${SERVER_ENTRY}`));
+    const codeRoot = getCodeRoot();
+    const serverEntry = getServerEntryPath();
+    const spawnCwd = getServerSpawnCwd();
+    const serverDepsRoot = path.join(path.dirname(serverEntry), 'node_modules');
+
+    if (!fs.existsSync(serverEntry)) {
+      reject(new Error(`Sunucu dosyası bulunamadı: ${serverEntry}`));
       return;
     }
 
@@ -213,15 +248,31 @@ function startServerAndWaitForHealth(absoluteDbPath) {
       return;
     }
 
+    const env = buildChildEnv(port, absoluteDbPath, codeRoot);
+    const clientDistPath = env.CLIENT_DIST_PATH || path.join(codeRoot, 'client', 'dist');
+
+    console.log('[electron] runtime: packaged =', app.isPackaged);
+    console.log('[electron] paths: codeRoot (asar, client) =', codeRoot);
+    console.log('[electron] paths: resourcesPath =', app.isPackaged ? process.resourcesPath : '(n/a)');
+    console.log('[electron] paths: serverEntry =', serverEntry);
+    console.log('[electron] paths: server spawn cwd =', spawnCwd);
+    console.log('[electron] paths: server node_modules (beklenen) =', serverDepsRoot);
+    console.log('[electron] paths: CLIENT_DIST_PATH =', clientDistPath);
     console.log('[electron] SQLite: backend DB_PATH =', absoluteDbPath);
 
-    const env = buildChildEnv(port, absoluteDbPath);
     let stderrBuf = '';
 
-    const child = spawn('node', [SERVER_ENTRY], {
-      cwd: PROJECT_ROOT,
-      env,
+    /** Kurulumlu uygulamada sistem Node yok; Electron ikilisi Node olarak kullanılır */
+    const useElectronAsNode = app.isPackaged;
+    const spawnCmd = useElectronAsNode ? process.execPath : 'node';
+    const spawnArgs = [serverEntry];
+    const childEnv = useElectronAsNode ? { ...env, ELECTRON_RUN_AS_NODE: '1' } : env;
+
+    const child = spawn(spawnCmd, spawnArgs, {
+      cwd: spawnCwd,
+      env: childEnv,
       stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
     });
     serverProcess = child;
 
@@ -251,7 +302,14 @@ function startServerAndWaitForHealth(absoluteDbPath) {
     };
 
     child.on('error', (err) => {
-      fail(new Error(`API süreci başlatılamadı: ${err.message}`));
+      const detail = [
+        err.message,
+        `execPath=${spawnCmd}`,
+        `cwd=${spawnCwd}`,
+        `serverEntry=${serverEntry}`,
+        `CLIENT_DIST_PATH=${clientDistPath}`,
+      ].join(' | ');
+      fail(new Error(`API süreci başlatılamadı: ${detail}`));
     });
 
     child.on('exit', (code, signal) => {
@@ -308,7 +366,8 @@ function createWindow(port) {
 }
 
 app.whenReady().then(async () => {
-  const distIndex = path.join(PROJECT_ROOT, 'client', 'dist', 'index.html');
+  const codeRoot = getCodeRoot();
+  const distIndex = path.join(codeRoot, 'client', 'dist', 'index.html');
   if (!fs.existsSync(distIndex)) {
     dialog.showErrorBox(
       'Eksik build',
@@ -319,9 +378,12 @@ app.whenReady().then(async () => {
   }
 
   const userDataDbPath = path.join(app.getPath('userData'), 'pos.db');
+  const legacyDbMain = app.isPackaged
+    ? path.join(getPackagedServerRoot(), 'data', 'pos.db')
+    : path.join(codeRoot, 'server', 'data', 'pos.db');
 
   try {
-    copyLegacySqliteToUserDataIfNeeded(userDataDbPath);
+    copyLegacySqliteToUserDataIfNeeded(userDataDbPath, legacyDbMain);
     const port = await startServerAndWaitForHealth(userDataDbPath);
     createWindow(port);
   } catch (err) {

@@ -12,6 +12,8 @@ client/dist/
 
 dist/
 
+release/
+
 build/
 
 coverage/
@@ -55,3 +57,6 @@ tools/callerid-sdk-helper/cidshow_x86/
 
 # Local scratch / demo
 fisornek.txt
+
+# Yerel proje özeti (Word); isteğe bağlı paylaşım
+restoran-pos-v3-ozet.docx

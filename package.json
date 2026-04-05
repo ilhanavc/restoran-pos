@@ -3,29 +3,92 @@
   "version": "1.0.0",
   "private": true,
   "description": "Modern Restoran POS Sistemi",
+  "author": "Restoran POS",
   "main": "electron/main.cjs",
   "scripts": {
     "build": "npm run build --prefix client",
-    "start:prod": "cross-env NODE_ENV=production node server/index.js",
-    "prod": "npm run build && npm run start:prod",
     "server": "cd server && node index.js",
     "client": "cd client && npx vite --host",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "db:migrate": "cd server && node migrations/run.js",
     "db:seed": "cd server && node seeds/run.js",
-    "debug:login": "cd server && node test-login.js",
     "setup": "npm install && cd server && npm install && cd ../client && npm install && cd .. && npm run db:seed",
+    "prod": "npm run build && cross-env NODE_ENV=production node server/index.js",
+    "start:prod": "cross-env NODE_ENV=production node server/index.js",
+    "electron:prod": "npm run build && electron .",
     "bridge": "node ./store-bridge/index.js",
-    "app:start": "npm run dev",
-    "bridge:start": "npm run bridge",
     "callerid:start": "dotnet run --project ./tools/callerid-sdk-helper/CallerIdSdkHelper.csproj -- --post-enabled true",
     "all:start": "scripts\\start-all.bat",
     "electron": "electron .",
-    "electron:prod": "npm run build && electron ."
+    "clean:server-sqlite-build": "node scripts/clean-server-sqlite-build.cjs",
+    "rebuild:server-native": "npm run clean:server-sqlite-build && node scripts/rebuild-server-native.cjs",
+    "rebuild:server-native:source": "cross-env FORCE_SQLITE_BUILD_FROM_SOURCE=1 npm run rebuild:server-native",
+    "smoke:electron-sqlite": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/smoke-electron-sqlite.cjs",
+    "dist:prepare": "npm run build && npm install --prefix server --omit=dev && npm run rebuild:server-native && npm run smoke:electron-sqlite && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --dir --publish never",
+    "dist:nsis": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged release/win-unpacked --win nsis --publish never",
+    "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged release/win-unpacked --win portable --publish never",
+    "dist:win": "npm run dist:prepare && npm run dist:nsis && npm run dist:portable",
+    "dist:win:dir": "npm run dist:prepare",
+    "dist:win:nsis": "npm run dist:nsis",
+    "dist:win:portable": "npm run dist:portable"
+  },
+  "build": {
+    "appId": "com.restoranpos.desktop",
+    "productName": "Restoran POS",
+    "directories": {
+      "output": "release",
+      "buildResources": "resources"
+    },
+    "files": [
+      "electron/**/*",
+      "client/dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "server",
+        "to": "server",
+        "filter": [
+          "**/*",
+          "!data",
+          "!data/**/*",
+          "!.env",
+          "!.env.*",
+          "!.env.local",
+          "!test-login.js",
+          "!**/node_modules/**/*.md",
+          "!**/node_modules/**/LICENSE",
+          "!**/node_modules/**/LICENSE.*",
+          "!**/node_modules/**/CHANGELOG*",
+          "!**/node_modules/**/README*",
+          "!**/*.map"
+        ]
+      }
+    ],
+    "publish": null,
+    "nsis": {
+      "differentialPackage": false,
+      "oneClick": true,
+      "warningsAsErrors": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "compression": "store",
+      "signAndEditExecutable": false,
+      "signDlls": false
+    }
   },
   "devDependencies": {
     "concurrently": "^8.2.0",
     "cross-env": "^7.0.3",
-    "electron": "^34.0.0"
+    "electron": "^34.0.0",
+    "electron-builder": "^24.13.3"
   }
 }

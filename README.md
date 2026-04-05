@@ -66,8 +66,9 @@ Komut: proje kökünde `npm run dev` (veya Windows’ta `scripts/start-pos-dev.b
 
 Aynı portta hem arayüz hem API servis edilir; tarayıcıdan tek origin kullanılır (`/api` göreli yollar).
 
-1. **Ön koşul:** Üretimde `JWT_SECRET` zorunludur. `server/.env` içinde tanımlayın (veya ortam değişkeni olarak verin). Varsayılan gizli anahtar production’da kabul edilmez.
-2. **Build ve başlatma (tek komut):**
+1. **Ön koşul (tarayıcı / düz Node ile `node server`):** Üretimde `JWT_SECRET` zorunludur. `server/.env` içinde tanımlayın (veya ortam değişkeni olarak verin). Varsayılan gizli anahtar production’da kabul edilmez.
+2. **Electron masaüstü:** `electron/main.cjs` ortamda `JWT_SECRET` yoksa child süreç için rastgele bir değer üretir; kalıcı oturumlar için sistem ortamında veya `.env` ile **aynı** `JWT_SECRET` vermeniz önerilir.
+3. **Build ve başlatma (tek komut):**
 
 ```bash
 npm run prod
@@ -75,16 +76,16 @@ npm run prod
 
 Bu komut önce `client` için Vite production build alır, ardından `NODE_ENV=production` ile Express’i başlatır.
 
-3. **Ayrı adımlar:**
+4. **Ayrı adımlar:**
 
 ```bash
 npm run build          # yalnızca client → client/dist
 npm run start:prod     # production sunucu (önce build alınmış olmalı)
 ```
 
-4. **Erişim:** Varsayılan port `3001` — http://localhost:3001 (API: `/api/...`, SPA: `/`, `/login`, vb.).
+5. **Erişim:** Varsayılan port `3001` — http://localhost:3001 (API: `/api/...`, SPA: `/`, `/login`, vb.).
 
-5. **İsteğe bağlı ortam değişkenleri:**
+6. **İsteğe bağlı ortam değişkenleri:**
    - `PORT` — dinleme portu (varsayılan `3001`).
    - `CLIENT_DIST_PATH` — React build klasörü (varsayılan: proje kökünden `client/dist`).
    - `DB_PATH` — SQLite dosyası; göreli yol verilirse `server/` dizinine göre çözülür; mutlak yol da kullanılabilir.
@@ -103,8 +104,27 @@ Tarayıcı yerine **Electron** penceresi açılır; arka planda **ayrı bir Node
 |-------|----------|
 | `npm run electron:prod` | `npm run build` sonrası Electron’u başlatır (önerilen ilk deneme). |
 | `npm run electron` | `client/dist` zaten varsa yalnızca Electron’u başlatır. |
+| `npm run dist:prepare` | Client build → server prod deps → **`better-sqlite3` Electron ABI rebuild** → **smoke:electron-sqlite** → **`release/win-unpacked`** (`--publish never`). Her NSIS/portable öncesi çalıştırılmalı. |
+| `npm run dist:nsis` | Yalnızca **NSIS Setup.exe** — `release/win-unpacked` güncel olmalı. `--prepackaged release/win-unpacked`. |
+| `npm run dist:portable` | Taşınabilir **portable .exe** (ürün adı + sürüm; kurulum yok). Aynı önkoşul. |
+| `npm run dist:win` | Tam zincir: **`dist:prepare` → `dist:nsis` → `dist:portable`** (hem installer hem portable). |
+| `npm run dist:win:dir` | `dist:prepare` ile aynı (geriye dönük isim). |
+| `npm run dist:win:nsis` | `dist:nsis` ile aynı (geriye dönük isim). |
+| `npm run dist:win:portable` | `dist:portable` ile aynı (geriye dönük isim). |
 
-**Ön koşullar:** `server/.env` içinde üretim için geçerli `JWT_SECRET`; `npm run build` ile `client/dist` oluşmuş olmalı.
+**electron-builder sürümü:** Kök `package.json` içinde **24.13.3** sabitlenmiştir; 25.x’e yükseltmeyin (önceden raporlanan 7za / paketleme sorunları).
+
+**NSIS / Setup.exe:** `build.nsis.differentialPackage` kapalı, `win.compression` **store**. Sorun ayıklama: `$env:DEBUG='electron-builder'; npm run dist:nsis` veya `electron-builder:7z` — logda önce 7za arşivi, sonra makensis görünür.
+
+İsteğe bağlı **kurulum ikonu:** `resources/icon.ico` dosyasını ekleyip `package.json` içinde `build.win.icon` ile bu yolu belirtebilirsiniz; tanımlı değilse electron-builder varsayılan ikonu kullanır.
+
+İmzasız yerel derleme için `package.json` `build.win` altında `signAndEditExecutable` ve `signDlls` false tanımlıdır (aksi halde bazı Windows ortamlarında winCodeSign önbelleği symlink nedeniyle hata verebilir). Gerçek kod imzası eklemek ayrı yapılandırma gerektirir.
+
+**Paketli çalıştırma:** `server/` (prod `node_modules` dahil) electron-builder **`extraResources`** ile `resources/server/` altına kopyalanır (asar dışı); kök `package.json` dışı bağımlılıklar böylece pakete girer. `client/dist` asar içinde kalır; `CLIENT_DIST_PATH` `app.getAppPath()` ile verilir. Backend girişi `resources/server/index.js`, child `cwd` aynı klasördür (`electron/main.cjs`).
+
+**Native modül:** `dist:prepare` / `dist:win` öncesi `better-sqlite3` temizlenir; [`scripts/rebuild-server-native.cjs`](scripts/rebuild-server-native.cjs) kökten **`npx @electron/rebuild`** çalıştırır (ayrı `@electron/rebuild` devDependency tanımlı değildir). Ardından `smoke:electron-sqlite` — başarısızsa paketleme durur. Kaynaktan derleme: `npm run rebuild:server-native:source` — Visual Studio **Desktop development with C++** gerekir.
+
+**Ön koşullar:** Tarayıcı/production için `server/.env` içinde geçerli `JWT_SECRET` (veya ortam); `npm run build` ile `client/dist`. Electron’da JWT için yukarıdaki nota bakın.
 
 **Ortam:** Varsayılan port **3001** (`127.0.0.1`). Çakışmada hata mesajı gösterilir. Farklı port için `POS_PORT` (veya `PORT`) kullanın; Store Bridge / Caller ID için `API_BASE` örneğin `http://127.0.0.1:3001/api` aynı kalmalıdır.
 
