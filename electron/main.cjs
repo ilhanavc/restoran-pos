@@ -111,6 +111,12 @@ function buildChildEnv(port, absoluteDbPath, codeRoot) {
     (posConfig.jwtSecret ? String(posConfig.jwtSecret) : null) ||
     process.env.JWT_SECRET ||
     require('crypto').randomBytes(64).toString('hex');
+  // Sunucu bridge middleware'i BRIDGE_TOKEN + BRIDGE_BUSINESS_ID'yi kendi ortamında bekler
+  const b = posConfig.bridge || {};
+  if (b.token) env.BRIDGE_TOKEN = String(b.token);
+  if (b.businessId != null) env.BRIDGE_BUSINESS_ID = String(b.businessId);
+  console.log('[electron] buildChildEnv: BRIDGE_TOKEN =', env.BRIDGE_TOKEN || '(tanımsız)');
+  console.log('[electron] buildChildEnv: BRIDGE_BUSINESS_ID =', env.BRIDGE_BUSINESS_ID || '(tanımsız)');
   return env;
 }
 
@@ -340,6 +346,7 @@ function startServerAndWaitForHealth(absoluteDbPath) {
     console.log('[electron] paths: server node_modules (beklenen) =', serverDepsRoot);
     console.log('[electron] paths: CLIENT_DIST_PATH =', clientDistPath);
     console.log('[electron] SQLite: backend DB_PATH =', absoluteDbPath);
+    console.log('[electron] spawn öncesi env.BRIDGE_TOKEN =', env.BRIDGE_TOKEN || '(tanımsız)');
 
     let stderrBuf = '';
 
