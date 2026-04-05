@@ -36,7 +36,9 @@ async function fetchPortIpMap() {
   for (const r of rows) {
     const name = String(r?.Name || '').trim();
     const ip = String(r?.PrinterHostAddress || r?.HostAddress || '').trim();
-    if (name && ip) map.set(name, ip);
+    // PrinterHostAddress/HostAddress yoksa port adının kendisi IP formatındaysa onu kullan
+    const resolved = ip || (looksLikeIp(name) ? name : '');
+    if (name && resolved) map.set(name, resolved);
   }
   return map;
 }
