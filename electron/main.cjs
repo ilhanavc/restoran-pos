@@ -21,6 +21,12 @@ const KILL_FORCE_MS = 4000;
 let serverProcess = null;
 /** @type {import('child_process').ChildProcessWithoutNullStreams | null} */
 let bridgeProcess = null;
+/** @type {import('child_process').ChildProcessWithoutNullStreams | null} */
+let callerIdHelperProcess = null;
+/** @type {NodeJS.Timeout | null} */
+let callerIdHelperRestartTimer = null;
+/** @type {boolean} */
+let callerIdHelperStopped = false;
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
 /** @type {Record<string, unknown>} */
@@ -478,6 +484,85 @@ function startStoreBridge(port) {
 }
 
 // ---------------------------------------------------------------------------
+// Caller ID SDK Helper
+// ---------------------------------------------------------------------------
+
+/**
+ * CallerIdSdkHelper'ı dotnet run ile başlatır.
+ * Çökerse CALLER_ID_RESTART_MS (varsayılan 15 s) sonra yeniden başlatır.
+ * @param {number} port
+ */
+function startCallerIdHelper(port) {
+  if (callerIdHelperStopped) return;
+
+  const csprojPath = path.join(getCodeRoot(), 'tools', 'callerid-sdk-helper', 'CallerIdSdkHelper.csproj');
+  if (!fs.existsSync(csprojPath)) {
+    console.warn('[electron] CallerIdSdkHelper bulunamadı, atlanıyor:', csprojPath);
+    return;
+  }
+
+  const b = posConfig.bridge || {};
+  const token = b.token || process.env.BRIDGE_TOKEN;
+  if (!token) {
+    console.warn('[electron] CallerIdSdkHelper: bridge.token tanımsız, helper atlanıyor.');
+    return;
+  }
+
+  const restartMs = Math.max(
+    5000,
+    parseInt(String(posConfig.callerIdHelperRestartMs || process.env.CALLER_ID_RESTART_MS || '15000'), 10) || 15000,
+  );
+
+  const args = [
+    'run',
+    '--project', csprojPath,
+    '--',
+    '--bridge-token', token,
+    '--post-enabled', 'true',
+    '--api-base', `http://127.0.0.1:${port}/api`,
+  ];
+
+  console.log('[electron] CallerIdSdkHelper başlatılıyor...');
+
+  const child = spawn('dotnet', args, {
+    cwd: path.dirname(csprojPath),
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  callerIdHelperProcess = child;
+
+  child.stdout.on('data', (d) => process.stdout.write(`[callerid-helper] ${d}`));
+  child.stderr.on('data', (d) => process.stderr.write(`[callerid-helper] ${d}`));
+
+  child.on('error', (err) => {
+    console.error('[electron] CallerIdSdkHelper başlatılamadı:', err.message);
+    callerIdHelperProcess = null;
+    scheduleCallerIdHelperRestart(port, restartMs);
+  });
+
+  child.on('exit', (code) => {
+    callerIdHelperProcess = null;
+    console.log(`[electron] CallerIdSdkHelper kapandı (kod: ${code ?? 'null'})`);
+    if (!callerIdHelperStopped) {
+      scheduleCallerIdHelperRestart(port, restartMs);
+    }
+  });
+
+  console.log(`[electron] CallerIdSdkHelper başlatıldı pid=${child.pid}`);
+}
+
+function scheduleCallerIdHelperRestart(port, restartMs) {
+  if (callerIdHelperStopped) return;
+  if (callerIdHelperRestartTimer) clearTimeout(callerIdHelperRestartTimer);
+  console.log(`[electron] CallerIdSdkHelper ${restartMs / 1000} s sonra yeniden başlatılacak...`);
+  callerIdHelperRestartTimer = setTimeout(() => {
+    callerIdHelperRestartTimer = null;
+    startCallerIdHelper(port);
+  }, restartMs);
+  callerIdHelperRestartTimer.unref?.();
+}
+
+// ---------------------------------------------------------------------------
 // BrowserWindow
 // ---------------------------------------------------------------------------
 
@@ -537,6 +622,8 @@ app.whenReady().then(async () => {
     const port = await startServerAndWaitForHealth(userDataDbPath);
     createWindow(port);
     startStoreBridge(port);
+    const cidTimer = setTimeout(() => startCallerIdHelper(port), 3000);
+    cidTimer.unref?.();
   } catch (err) {
     const msg = err && err.message ? err.message : String(err);
     dialog.showErrorBox('POS sunucusu başlatılamadı', msg);
@@ -551,6 +638,15 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  callerIdHelperStopped = true;
+  if (callerIdHelperRestartTimer) {
+    clearTimeout(callerIdHelperRestartTimer);
+    callerIdHelperRestartTimer = null;
+  }
+  if (callerIdHelperProcess && !callerIdHelperProcess.killed) {
+    killProcess(callerIdHelperProcess);
+    forceKillAfterTimeout(callerIdHelperProcess);
+  }
   if (serverProcess && !serverProcess.killed) {
     killProcess(serverProcess);
     forceKillAfterTimeout(serverProcess);
