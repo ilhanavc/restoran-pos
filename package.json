@@ -24,7 +24,8 @@
     "rebuild:server-native": "npm run clean:server-sqlite-build && node scripts/rebuild-server-native.cjs",
     "rebuild:server-native:source": "cross-env FORCE_SQLITE_BUILD_FROM_SOURCE=1 npm run rebuild:server-native",
     "smoke:electron-sqlite": "cross-env ELECTRON_RUN_AS_NODE=1 electron scripts/smoke-electron-sqlite.cjs",
-    "dist": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never",
+    "postinstall": "node scripts/rebuild-server-native.cjs",
+    "dist": "npm install --prefix server && npm run rebuild:server-native && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never",
     "dist:prepare": "npm run build && npm install --prefix server --omit=dev && npm run rebuild:server-native && npm run smoke:electron-sqlite && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --dir --publish never",
     "dist:nsis": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged dist-electron/win-unpacked --win nsis --publish never",
     "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged dist-electron/win-unpacked --win portable --publish never",
@@ -89,6 +90,7 @@
       }
     ],
     "publish": null,
+    "npmRebuild": false,
     "nsis": {
       "differentialPackage": false,
       "oneClick": false,
@@ -110,6 +112,7 @@
     }
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
     "concurrently": "^8.2.0",
     "cross-env": "^7.0.3",
     "electron": "^34.0.0",
