@@ -540,7 +540,7 @@ function startCallerIdHelper(port) {
 
   // Packaged modda pre-built exe; dev modda dotnet run ile kaynak derleme
   const isPackaged = app.isPackaged;
-  const exePath = path.join(helperDir, 'CallerIdSdkHelper.exe');
+  const exePath = path.join(helperDir, 'bin', 'Release', 'net8.0', 'CallerIdSdkHelper.exe');
   const csprojPath = path.join(helperDir, 'CallerIdSdkHelper.csproj');
 
   const existenceTarget = isPackaged ? exePath : csprojPath;
