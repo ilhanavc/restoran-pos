@@ -36,13 +36,18 @@ let posConfig = {};
 // pos-config.json
 // ---------------------------------------------------------------------------
 
-function readPosConfig() {
-  // Packaged modda: %APPDATA%\Restoran POS\pos-config.json (yazılabilir kullanıcı dizini).
-  // Geliştirmede: repo kökündeki pos-config.json.
-  // app.getPath('userData') app.whenReady öncesinde de kullanılabilir.
-  const cfgPath = app.isPackaged
+/**
+ * pos-config.json dosya yolu — packaged: userData, dev: repo kökü.
+ * app.getPath('userData') app.whenReady öncesinde de kullanılabilir.
+ */
+function getPosConfigPath() {
+  return app.isPackaged
     ? path.join(app.getPath('userData'), 'pos-config.json')
     : path.join(__dirname, '..', 'pos-config.json');
+}
+
+function readPosConfig() {
+  const cfgPath = getPosConfigPath();
   console.log('[electron] pos-config.json aranıyor:', cfgPath);
   if (!fs.existsSync(cfgPath)) return {};
   try {
@@ -51,6 +56,34 @@ function readPosConfig() {
   } catch (e) {
     console.warn('[electron] pos-config.json okunamadı:', e && e.message ? e.message : String(e));
     return {};
+  }
+}
+
+const PLACEHOLDER_JWT = 'GIZLI_JWT_ANAHTARI_BURAYA_DEGISTIRIN';
+
+/**
+ * jwtSecret eksikse veya örnek değerdeyse güvenli rastgele secret üret ve pos-config.json'a yaz.
+ * Böylece Electron her yeniden başlatmada aynı secret'ı kullanır; aktif oturumlar kopmaz.
+ */
+function ensureJwtSecret() {
+  const isPlaceholder = !posConfig.jwtSecret || posConfig.jwtSecret === PLACEHOLDER_JWT;
+  if (!isPlaceholder) return;
+
+  const secret = require('crypto').randomBytes(64).toString('hex');
+  posConfig.jwtSecret = secret;
+  console.log('[electron] JWT secret üretildi, pos-config.json\'a kalıcı olarak kaydediliyor');
+
+  const cfgPath = getPosConfigPath();
+  try {
+    let cfg = {};
+    if (fs.existsSync(cfgPath)) {
+      try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (_) { /* bozuk JSON — temizden yaz */ }
+    }
+    cfg.jwtSecret = secret;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
+    console.log('[electron] JWT secret dosyaya yazıldı:', cfgPath);
+  } catch (e) {
+    console.warn('[electron] JWT secret dosyaya yazılamadı (bellek içi kullanılacak):', e && e.message ? e.message : String(e));
   }
 }
 
@@ -146,12 +179,20 @@ function buildChildEnv(port, absoluteDbPath, codeRoot) {
   const b = posConfig.bridge || {};
   if (b.token) env.BRIDGE_TOKEN = String(b.token);
   if (b.businessId != null) env.BRIDGE_BUSINESS_ID = String(b.businessId);
-  console.log('[electron] buildChildEnv: BRIDGE_TOKEN =', env.BRIDGE_TOKEN || '(tanımsız)');
+  console.log('[electron] buildChildEnv: BRIDGE_TOKEN =', env.BRIDGE_TOKEN ? '***' : '(tanımsız)');
   console.log('[electron] buildChildEnv: BRIDGE_BUSINESS_ID =', env.BRIDGE_BUSINESS_ID || '(tanımsız)');
   // Mock mod: pos-config.json bridge.disablePrintJobMock ile override edilebilir
   // Varsayılan: true (mock KAPALI). Açmak için pos-config.json'a "disablePrintJobMock": false ekle.
   if (b.disablePrintJobMock != null) {
     env.DISABLE_PRINT_JOB_MOCK = b.disablePrintJobMock ? '1' : '0';
+  }
+  // CORS: LAN'dan erişen tablet/cihazların origin'lerini virgülle gir
+  // Örnek: corsOrigins: ["http://192.168.1.50:3001"]
+  const corsOrigins = posConfig.corsOrigins;
+  if (Array.isArray(corsOrigins) && corsOrigins.length) {
+    env.CORS_ORIGINS = corsOrigins.join(',');
+  } else if (typeof corsOrigins === 'string' && corsOrigins) {
+    env.CORS_ORIGINS = corsOrigins;
   }
   return env;
 }
@@ -673,6 +714,7 @@ app.whenReady().then(async () => {
   if (Object.keys(posConfig).length) {
     console.log('[electron] pos-config.json yüklendi');
   }
+  ensureJwtSecret();
 
   const codeRoot = getCodeRoot();
   const distIndex = path.join(codeRoot, 'client', 'dist', 'index.html');

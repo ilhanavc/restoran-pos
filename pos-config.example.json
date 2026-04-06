@@ -4,6 +4,9 @@
   "port": 3001,
   "jwtSecret": "GIZLI_JWT_ANAHTARI_BURAYA_DEGISTIRIN",
 
+  "_corsAciklama": "LAN'dan erişen tablet/cihaz origin'lerini buraya ekleyin. Boş bırakılırsa sadece localhost kabul edilir.",
+  "corsOrigins": [],
+
   "bridge": {
     "_aciklama": "Store Bridge (yazıcı + arayanı tanıma) ayarları",
     "token": "BRIDGE_TOKEN_BURAYA",

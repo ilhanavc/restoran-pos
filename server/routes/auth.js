@@ -1,24 +1,25 @@
 import { Router } from 'express';
-import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
 import db from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { auditLog } from '../utils/helpers.js';
+import { validate } from '../middleware/validate.js';
 
 const router = Router();
 
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Çok fazla giriş denemesi. Lütfen bir süre sonra tekrar deneyin.' },
-});
+const loginSchema = {
+  body: z.object({
+    email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
+    password: z.string().min(1, 'Şifre gerekli').max(128),
+    business_id: z.number().int().positive().optional(),
+  }),
+};
 
 // POST /api/auth/login
-router.post('/login', loginLimiter, (req, res) => {
+router.post('/login', validate(loginSchema), (req, res) => {
   try {
     const { email, password, business_id } = req.body;
     if (!email || !password) {

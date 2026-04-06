@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import config from './config/index.js';
 import { runMigrations } from './migrations/run.js';
 
@@ -24,22 +25,57 @@ const app = express();
 
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
+// CORS_ORIGINS: virgülle ayrılmış ek origin'ler (LAN tablet/cihaz erişimi için)
+// Örnek: CORS_ORIGINS=http://192.168.1.50:3001,http://192.168.1.51:3001
+const extraOrigins = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://localhost:3001',
     'http://127.0.0.1:3001',
+    ...extraOrigins,
   ],
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
 
+// Rate limiting
+// Auth endpoint'leri: 15 dakikada 20 deneme (brute-force koruması)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Çok fazla istek. Lütfen 15 dakika sonra tekrar deneyin.' },
+});
+
+// Admin ve bridge endpoint'leri: 1 dakikada 60 istek
+const adminBridgeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'İstek limiti aşıldı. Lütfen bir dakika sonra tekrar deneyin.' },
+});
+
+// Yazıcı test endpoint'i: 1 dakikada 10 istek (kağıt tüketimini önle)
+const printerLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Yazıcı test limiti aşıldı. Lütfen bir dakika bekleyin.' },
+});
+
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
 // API Routes
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/tables', tablesRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/products', productsRoutes);
@@ -49,9 +85,9 @@ app.use('/api/customers', customersRoutes);
 app.use('/api/callerid', calleridRoutes);
 app.use('/api/caller-id', calleridRoutes);
 app.use('/api/reports', reportsRoutes);
-app.use('/api/print', printerRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/bridge', bridgeRoutes);
+app.use('/api/print', printerLimiter, printerRoutes);
+app.use('/api/admin', adminBridgeLimiter, adminRoutes);
+app.use('/api/bridge', adminBridgeLimiter, bridgeRoutes);
 
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {

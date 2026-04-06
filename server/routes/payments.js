@@ -1,26 +1,31 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
+import { validate } from '../middleware/validate.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { enqueueReceiptJobForClosedOrder, processPendingJobsSync } from '../services/printJobs.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
 
+const createPaymentSchema = {
+  body: z.object({
+    order_id: z.string().min(1, 'Sipariş kimliği gerekli'),
+    payment_type: z.enum(['cash', 'card', 'mixed', 'other'], {
+      errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card, mixed, other' }),
+    }),
+    amount: z.number().positive('Tutar sıfırdan büyük olmalıdır'),
+    cash_received: z.number().min(0).optional().nullable(),
+    note: z.string().max(500).optional().nullable(),
+  }),
+};
+
 // POST /api/payments
-router.post('/', authorize('admin', 'cashier'), (req, res) => {
+router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (req, res) => {
   try {
     const { order_id, payment_type, amount, cash_received, note } = req.body;
-
-    if (!order_id) return res.status(400).json({ error: 'Sipariş kimliği gerekli' });
-    const validTypes = ['cash', 'card', 'mixed', 'other'];
-    if (!payment_type || !validTypes.includes(payment_type)) {
-      return res.status(400).json({ error: 'Geçerli ödeme tipi gerekli' });
-    }
-    const amt = parseFloat(amount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      return res.status(400).json({ error: 'Tutar sıfırdan büyük olmalıdır' });
-    }
+    const amt = amount; // Zod already validated and coerced
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
@@ -29,13 +34,13 @@ router.post('/', authorize('admin', 'cashier'), (req, res) => {
     }
 
     const paymentId = genId();
-    const cashIn = cash_received != null && cash_received !== '' ? parseFloat(cash_received) : amt;
-    const changeAmount = payment_type === 'cash' ? Math.max(0, (Number.isFinite(cashIn) ? cashIn : amt) - amt) : 0;
+    const cashIn = cash_received != null ? cash_received : amt;
+    const changeAmount = payment_type === 'cash' ? Math.max(0, cashIn - amt) : 0;
 
     const txn = db.transaction(() => {
       db.prepare(`INSERT INTO payments (id, business_id, order_id, payment_type, amount, cash_received, change_amount, note, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        paymentId, req.businessId, order_id, payment_type, amt, Number.isFinite(cashIn) ? cashIn : amt, changeAmount, note || null, req.user.id
+        paymentId, req.businessId, order_id, payment_type, amt, cashIn, changeAmount, note || null, req.user.id
       );
 
       const totalPaid = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = ?').get(order_id);

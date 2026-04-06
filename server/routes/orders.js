@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
+import { validate } from '../middleware/validate.js';
 import { genId, auditLog, getNextOrderNo, resolveOrderItemPrice } from '../utils/helpers.js';
 import {
   enqueueKitchenJobsForSentItems,
@@ -11,6 +13,34 @@ import {
 
 const router = Router();
 router.use(authenticate, businessScope);
+
+const orderItemSchema = z.object({
+  product_id: z.string().min(1),
+  quantity: z.number().int().positive().max(999).default(1),
+  portion_id: z.string().optional().nullable(),
+  modifiers: z.array(z.any()).optional(),
+  note: z.string().max(500).optional().nullable(),
+});
+
+const createOrderSchema = {
+  body: z.object({
+    order_type: z.enum(['dine_in', 'takeaway', 'delivery']).optional(),
+    table_id: z.string().optional().nullable(),
+    customer_id: z.string().optional().nullable(),
+    items: z.array(orderItemSchema).min(1, 'En az bir ürün gerekli'),
+    note: z.string().max(500).optional().nullable(),
+    guest_count: z.number().int().min(0).max(999).optional(),
+    delivery_address: z.string().max(500).optional().nullable(),
+    delivery_note: z.string().max(500).optional().nullable(),
+    courier_note: z.string().max(500).optional().nullable(),
+  }),
+};
+
+const addItemsSchema = {
+  body: z.object({
+    items: z.array(orderItemSchema).min(1, 'En az bir ürün gerekli'),
+  }),
+};
 
 const staff = authorize('admin', 'cashier', 'waiter');
 const staffAndKitchen = authorize('admin', 'cashier', 'waiter', 'kitchen');
@@ -253,7 +283,7 @@ router.patch('/:id/customer', staff, (req, res) => {
 });
 
 // POST /api/orders
-router.post('/', staff, (req, res) => {
+router.post('/', staff, validate(createOrderSchema), (req, res) => {
   try {
     const { table_id, order_type, customer_id, items, note, guest_count, delivery_address, delivery_note, courier_note } = req.body;
 
@@ -351,7 +381,7 @@ router.post('/', staff, (req, res) => {
 });
 
 // POST /api/orders/:id/items - add items to existing order
-router.post('/:id/items', staff, (req, res) => {
+router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
   try {
     const { items } = req.body;
     if (!items || !Array.isArray(items) || items.length === 0) {
@@ -463,16 +493,18 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
     const updates = ['status = ?', `updated_at = datetime('now')`, 'updated_by = ?'];
     const params = [status, req.user.id];
 
-    if (status === 'in_kitchen' && sentItemIds.length) {
-      db.prepare(`UPDATE order_items SET status = 'sent', sent_to_kitchen_at = datetime('now') WHERE order_id = ? AND status = 'new'`)
-        .run(order.id);
-    }
     if (status === 'closed') {
       updates.push(`closed_at = datetime('now')`);
     }
-
     params.push(req.params.id, req.businessId);
-    db.prepare(`UPDATE orders SET ${updates.join(', ')} WHERE id = ? AND business_id = ?`).run(...params);
+
+    db.transaction(() => {
+      if (status === 'in_kitchen' && sentItemIds.length) {
+        db.prepare(`UPDATE order_items SET status = 'sent', sent_to_kitchen_at = datetime('now') WHERE order_id = ? AND status = 'new'`)
+          .run(order.id);
+      }
+      db.prepare(`UPDATE orders SET ${updates.join(', ')} WHERE id = ? AND business_id = ?`).run(...params);
+    })();
 
     auditLog(req.businessId, req.user.id, `order_${status}`, 'order', req.params.id);
 
