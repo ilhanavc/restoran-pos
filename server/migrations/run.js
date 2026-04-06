@@ -414,6 +414,9 @@ function ensureColumnMigrations() {
   if (printerCols.length && !printerCols.some((c) => c.name === 'print_options')) {
     db.prepare('ALTER TABLE printers ADD COLUMN print_options TEXT').run();
   }
+  if (printerCols.length && !printerCols.some((c) => c.name === 'line_width')) {
+    db.prepare('ALTER TABLE printers ADD COLUMN line_width INTEGER').run();
+  }
 
   let pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_at')) {

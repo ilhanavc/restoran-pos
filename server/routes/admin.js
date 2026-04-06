@@ -300,7 +300,7 @@ router.get('/business', (req, res) => {
 
 router.patch('/business', (req, res) => {
   try {
-    const { name, address, tax_id, receipt_header } = req.body;
+    const { name, address, tax_id, receipt_header, phone, receipt_footer } = req.body;
     const n = (name ?? '').trim();
     if (!n) return res.status(400).json({ error: 'İşletme adı boş olamaz' });
     const tax = (tax_id ?? '').trim();
@@ -309,9 +309,17 @@ router.patch('/business', (req, res) => {
       return res.status(400).json({ error: 'Vergi numarası en az 5 karakter ve yalnızca harf/rakam olmalıdır' });
     }
     db.prepare(
-      `UPDATE businesses SET name = ?, address = ?, tax_id = ?, receipt_header = ?, updated_at = datetime('now')
+      `UPDATE businesses SET name = ?, address = ?, tax_id = ?, receipt_header = ?, phone = ?, receipt_footer = ?, updated_at = datetime('now')
        WHERE id = ?`,
-    ).run(n, (address ?? '').trim(), tax, (receipt_header ?? '').trim(), req.businessId);
+    ).run(
+      n,
+      (address ?? '').trim(),
+      tax,
+      (receipt_header ?? '').trim(),
+      (phone ?? '').trim() || null,
+      (receipt_footer ?? '').trim() || null,
+      req.businessId,
+    );
     auditLog(req.businessId, req.user.id, 'update_business', 'business', req.businessId);
     const b = db.prepare(
       `SELECT id, name, address, tax_id, receipt_header, phone, tax_office, receipt_footer FROM businesses WHERE id = ?`,
@@ -521,7 +529,7 @@ router.patch('/printer-settings', (req, res) => {
 
 router.post('/printers', (req, res) => {
   try {
-    const { name, type, connection_type, ip_address, port, is_active, print_options } = req.body;
+    const { name, type, connection_type, ip_address, port, is_active, line_width, print_options } = req.body;
     const n = (name ?? '').trim();
     if (!n) return res.status(400).json({ error: 'Yazıcı adı zorunludur' });
     const t = PRINTER_TYPES.has(type) ? type : 'receipt';
@@ -530,14 +538,16 @@ router.post('/printers', (req, res) => {
     if (Number.isNaN(portNum) || portNum < 1 || portNum > 65535) {
       return res.status(400).json({ error: 'Geçerli bir port girin' });
     }
+    const lwNum = line_width != null ? parseInt(line_width, 10) : null;
+    const lw = Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 64 ? lwNum : null;
     const branch = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId);
     const branchId = branch?.id || null;
     const id = genId();
     const mergedPo = mergePrintOptionsPatch(null, print_options, t);
     const active = is_active === false || is_active === 0 ? 0 : 1;
     db.prepare(
-      `INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active, print_options)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active, line_width, print_options)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       id,
       req.businessId,
@@ -548,6 +558,7 @@ router.post('/printers', (req, res) => {
       (ip_address ?? '').trim() || null,
       portNum,
       active,
+      lw,
       JSON.stringify(mergedPo),
     );
     auditLog(req.businessId, req.user.id, 'create_printer', 'printer', id);
@@ -592,7 +603,7 @@ router.patch('/printers/:id', (req, res) => {
       .get(req.params.id, req.businessId);
     if (!existing) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
 
-    const { name, type, connection_type, ip_address, port, is_active, print_options } = req.body;
+    const { name, type, connection_type, ip_address, port, is_active, line_width, print_options } = req.body;
     let nextName = existing.name;
     if (name !== undefined) {
       const n = String(name).trim();
@@ -630,10 +641,15 @@ router.patch('/printers/:id', (req, res) => {
       poJson = JSON.stringify(mergePrintOptions(existing.print_options, nextType));
     }
 
+    const lwNum = line_width != null ? parseInt(line_width, 10) : null;
+    const nextLw = line_width !== undefined
+      ? (Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 64 ? lwNum : null)
+      : (existing.line_width ?? null);
+
     db.prepare(
-      `UPDATE printers SET name = ?, type = ?, connection_type = ?, ip_address = ?, port = ?, is_active = ?, print_options = ?
+      `UPDATE printers SET name = ?, type = ?, connection_type = ?, ip_address = ?, port = ?, is_active = ?, line_width = ?, print_options = ?
        WHERE id = ? AND business_id = ?`,
-    ).run(nextName, nextType, nextConn, nextIp, nextPort, nextActive, poJson, req.params.id, req.businessId);
+    ).run(nextName, nextType, nextConn, nextIp, nextPort, nextActive, nextLw, poJson, req.params.id, req.businessId);
 
     let responseMessage = 'Yazıcı güncellendi';
     const wasActive = existing.is_active === 1 || existing.is_active === true;

@@ -189,6 +189,7 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
       station,
       routing_source: group.source,
       printer_name: group.printer.name,
+      line_width: group.printer.line_width || null,
       lines: group.lines.map((l) => ({
         order_item_id: l.orderItemId,
         product_name: l.productName,
@@ -415,7 +416,7 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
     .all(orderId);
   const payments = db.prepare(`SELECT * FROM payments WHERE order_id = ? ORDER BY created_at`).all(orderId);
 
-  const biz = db.prepare(`SELECT name, receipt_header, receipt_footer FROM businesses WHERE id = ?`).get(businessId);
+  const biz = db.prepare(`SELECT name, phone, address, receipt_header, receipt_footer FROM businesses WHERE id = ?`).get(businessId);
 
   const resolved = resolveReceiptPrinter(businessId);
   const payload = {
@@ -431,6 +432,8 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
     created_at: order.created_at,
     user_name: order.user_name || null,
     business_name: biz?.name || null,
+    business_phone: biz?.phone || null,
+    business_address: biz?.address || null,
     receipt_header: biz?.receipt_header || null,
     receipt_footer: biz?.receipt_footer || null,
     grand_total: order.grand_total,
@@ -469,6 +472,7 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
   }
 
   payload.printer_name = resolved.printer.name;
+  if (resolved.printer.line_width) payload.line_width = resolved.printer.line_width;
   const r = insertJob({
     businessId,
     orderId,

@@ -4,7 +4,7 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 
-const empty = { name: '', address: '', tax_id: '', receipt_header: '' };
+const empty = { name: '', address: '', tax_id: '', phone: '', receipt_header: '', receipt_footer: '' };
 
 export default function BusinessSettingsPage() {
   const navigate = useNavigate();
@@ -22,7 +22,9 @@ export default function BusinessSettingsPage() {
         name: business.name || '',
         address: business.address || '',
         tax_id: business.tax_id || '',
+        phone: business.phone || '',
         receipt_header: business.receipt_header || '',
+        receipt_footer: business.receipt_footer || '',
       };
       setForm(next);
       setLoaded(next);
@@ -52,7 +54,9 @@ export default function BusinessSettingsPage() {
         name: business.name || '',
         address: business.address || '',
         tax_id: business.tax_id || '',
+        phone: business.phone || '',
         receipt_header: business.receipt_header || '',
+        receipt_footer: business.receipt_footer || '',
       };
       setForm(next);
       setLoaded(next);
@@ -104,6 +108,15 @@ export default function BusinessSettingsPage() {
               />
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Telefon</span>
+              <input
+                className="input"
+                value={form.phone}
+                onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                placeholder="0212 000 00 00"
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Vergi numarası</span>
               <input
                 className="input"
@@ -117,6 +130,16 @@ export default function BusinessSettingsPage() {
                 className="input"
                 value={form.receipt_header}
                 onChange={(e) => setForm((f) => ({ ...f, receipt_header: e.target.value }))}
+                placeholder="Hoş geldiniz!"
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Fiş altı yazısı</span>
+              <input
+                className="input"
+                value={form.receipt_footer}
+                onChange={(e) => setForm((f) => ({ ...f, receipt_footer: e.target.value }))}
+                placeholder="Afiyet Olsun"
               />
             </label>
           </div>

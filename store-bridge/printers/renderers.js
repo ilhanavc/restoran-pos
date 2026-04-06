@@ -35,6 +35,31 @@ const PC857_MAP = new Map([
   ['ñ', 0xa4], ['Ñ', 0xa5], ['Ğ', 0xa6], ['ı', 0xa7],
   ['¿', 0xa8], ['®', 0xa9], ['¬', 0xaa], ['½', 0xab],
   ['¼', 0xac], ['¡', 0xad], ['«', 0xae], ['»', 0xaf],
+  // 0xB0–0xBF: Kutu çizgileri (box drawing) ve blok karakterleri
+  ['░', 0xb0], ['▒', 0xb1], ['▓', 0xb2], ['│', 0xb3],
+  ['┤', 0xb4], ['Á', 0xb5], ['Â', 0xb6], ['À', 0xb7],
+  ['©', 0xb8], ['╣', 0xb9], ['║', 0xba], ['╗', 0xbb],
+  ['╝', 0xbc], ['¢', 0xbd], ['¥', 0xbe], ['┐', 0xbf],
+  // 0xC0–0xCF
+  ['└', 0xc0], ['┴', 0xc1], ['┬', 0xc2], ['├', 0xc3],
+  ['─', 0xc4], ['┼', 0xc5], ['ã', 0xc6], ['Ã', 0xc7],
+  ['╚', 0xc8], ['╔', 0xc9], ['╩', 0xca], ['╦', 0xcb],
+  ['╠', 0xcc], ['═', 0xcd], ['╬', 0xce], ['¤', 0xcf],
+  // 0xD0–0xDF
+  ['º', 0xd0], ['ª', 0xd1], ['Ê', 0xd2], ['Ë', 0xd3],
+  ['È', 0xd4], ['€', 0xd5], ['Í', 0xd6], ['Î', 0xd7],
+  ['Ï', 0xd8], ['┘', 0xd9], ['┌', 0xda], ['█', 0xdb],
+  ['▄', 0xdc], ['¦', 0xdd], ['Ì', 0xde], ['▀', 0xdf],
+  // 0xE0–0xEF
+  ['Ó', 0xe0], ['ß', 0xe1], ['Ô', 0xe2], ['Ò', 0xe3],
+  ['õ', 0xe4], ['Õ', 0xe5], ['µ', 0xe6], ['×', 0xe7],
+  ['Ú', 0xe8], ['Û', 0xe9], ['Ù', 0xea], ['ý', 0xeb],
+  ['Ý', 0xec], ['¯', 0xed], ['´', 0xee], ['\u00ad', 0xef], // soft hyphen
+  // 0xF0–0xFF
+  ['≡', 0xf0], ['±', 0xf1], ['≥', 0xf2], ['≤', 0xf3],
+  ['¶', 0xf4], ['§', 0xf5], ['÷', 0xf6], ['≈', 0xf7],
+  ['°', 0xf8], ['∙', 0xf9], ['·', 0xfa], ['√', 0xfb],
+  ['ⁿ', 0xfc], ['²', 0xfd], ['■', 0xfe],
   // ₺ sembolü PC857'de yok — "TL" olarak göster (caller tarafından değiştirilir)
 ]);
 
@@ -192,6 +217,15 @@ function centerLine(s, width = DEFAULT_LINE_WIDTH) {
   const pad = width - t.length;
   const left = Math.floor(pad / 2);
   return ' '.repeat(left) + t + ' '.repeat(pad - left);
+}
+
+/**
+ * Uzun metinleri width'e göre sarar; her satırı ortalar.
+ * @returns {string[]}
+ */
+function centerLines(s, width = DEFAULT_LINE_WIDTH) {
+  const lines = wrapText(String(s ?? ''), width);
+  return lines.map((l) => centerLine(l, width));
 }
 
 /**
@@ -407,7 +441,7 @@ function trimFixed(s, max) {
   return t.slice(0, Math.max(0, max - 1)) + '…';
 }
 
-/** Kasa fişi: üç sütun (ürün | porsiyon-adet | tutar) */
+/** Kasa fişi: üç sütun (ürün | porsiyon-adet | tutar) — tek satır (başlık için) */
 function lineReceiptThreeCols(productName, midCol, price, width) {
   const c3 = 11;
   const c1 = Math.max(12, Math.floor((width - c3) * 0.55));
@@ -416,6 +450,30 @@ function lineReceiptThreeCols(productName, midCol, price, width) {
   const mid = trimFixed(midCol, c2).padEnd(c2);
   const right = trimFixed(price, c3).padStart(c3);
   return (left + mid + right).slice(0, width);
+}
+
+/**
+ * Kasa fişi ürün satırı — kelime kırılımlı çok satır desteği.
+ * Uzun ürün adlarını c1 genişliğinde sarar; adet/tutar ilk satırda gösterilir.
+ * @returns {string[]}
+ */
+function linesReceiptThreeCols(productName, midCol, price, width) {
+  const c3 = 11;
+  const c1 = Math.max(12, Math.floor((width - c3) * 0.55));
+  const c2 = width - c1 - c3;
+  const name = String(productName ?? '').trim();
+  const midStr = trimFixed(String(midCol ?? ''), c2).padEnd(c2);
+  const rightStr = trimFixed(String(price ?? ''), c3).padStart(c3);
+
+  if (name.length <= c1) {
+    return [name.padEnd(c1) + midStr + rightStr];
+  }
+
+  // Ad c1'den uzun: kelime sarmalama uygula, fiyat/adet ilk satırda
+  const nameLines = wrapText(name, c1);
+  const firstLine = nameLines[0].padEnd(c1) + midStr + rightStr;
+  const rest = nameLines.slice(1); // devam satırları (sadece ad)
+  return [firstLine, ...rest];
 }
 
 function itemSeparatorDotted(width) {
@@ -620,6 +678,14 @@ function buildReceiptLines(p) {
   if (p.business_name) {
     out.push({ text: centerLine(String(p.business_name), w), bold: true, large: true });
   }
+  if (p.business_address) {
+    for (const line of centerLines(String(p.business_address), w)) {
+      out.push(line);
+    }
+  }
+  if (p.business_phone) {
+    out.push(centerLine(String(p.business_phone), w));
+  }
   if (p.receipt_header) {
     for (const line of wrapText(String(p.receipt_header), w)) {
       out.push({ text: line, bold: true });
@@ -659,7 +725,10 @@ function buildReceiptLines(p) {
     const mid = formatQtyLabel(qn, it.portion_label);
     const { total } = itemUnitAndTotal(it);
     const priceStr = total != null ? `${fmtMoney(total)} ₺` : '-';
-    out.push({ text: lineReceiptThreeCols(name, mid, priceStr, w), bold: true, bodyEmphasis: true });
+    const itemLines = linesReceiptThreeCols(name, mid, priceStr, w);
+    itemLines.forEach((ln, i) => {
+      out.push({ text: ln, bold: true, bodyEmphasis: i === 0 });
+    });
     const mods = parseModifiers(it.modifiers);
     for (const m of mods) {
       const modName = String(m?.name || '').trim();

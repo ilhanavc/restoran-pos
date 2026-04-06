@@ -199,6 +199,7 @@ export default function PrinterDetailPage() {
   const [discoveredPrinters, setDiscoveredPrinters] = useState([]);
   const [isActive, setIsActive] = useState(true);
   const [isDefault, setIsDefault] = useState(false);
+  const [lineWidth, setLineWidth] = useState('');
   const [printOptions, setPrintOptions] = useState(() => normalizePrintOptions({}, 'receipt'));
 
   const showLegacyBar = type === 'bar';
@@ -212,14 +213,16 @@ export default function PrinterDetailPage() {
       port,
       isActive,
       isDefault,
+      lineWidth,
       printOptions,
     });
     return sig !== loadedSig;
-  }, [name, type, connectionType, ip, port, isActive, isDefault, printOptions, loadedSig]);
+  }, [name, type, connectionType, ip, port, isActive, isDefault, lineWidth, printOptions, loadedSig]);
 
   const snapshotState = useCallback((printer, cfg) => {
     const t = printer?.type || 'receipt';
     const po = normalizePrintOptions(printer?.print_options || {}, t);
+    const lw = printer?.line_width ? String(printer.line_width) : '';
     const sig = JSON.stringify({
       name: printer?.name ?? '',
       type: t,
@@ -228,6 +231,7 @@ export default function PrinterDetailPage() {
       port: String(printer?.port ?? 9100),
       isActive: printer?.is_active !== false,
       isDefault: cfg?.defaultPrinterId === printer?.id,
+      lineWidth: lw,
       printOptions: po,
     });
     setName(printer?.name ?? '');
@@ -237,6 +241,7 @@ export default function PrinterDetailPage() {
     setPort(String(printer?.port ?? 9100));
     setIsActive(printer?.is_active !== false);
     setIsDefault(!!cfg?.defaultPrinterId && cfg?.defaultPrinterId === printer?.id);
+    setLineWidth(lw);
     setPrintOptions(po);
     setLoadedSig(sig);
   }, []);
@@ -416,6 +421,7 @@ export default function PrinterDetailPage() {
       },
     };
 
+    const lwNum = parseInt(lineWidth, 10);
     const body = {
       name: n,
       type,
@@ -423,6 +429,7 @@ export default function PrinterDetailPage() {
       ip_address: ip.trim() || null,
       port: portNum,
       is_active: isActive,
+      line_width: Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 64 ? lwNum : null,
       print_options: poToSave,
     };
 
@@ -643,6 +650,21 @@ export default function PrinterDetailPage() {
             )}
             <ToggleRow label="Aktif" checked={isActive} onChange={setIsActive} />
             <ToggleRow label="Varsayılan yazıcı" checked={isDefault} onChange={setIsDefault} />
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                Satır genişliği (karakter) <span style={{ fontWeight: 400 }}>— boş bırakırsanız varsayılan (42) kullanılır</span>
+              </span>
+              <input
+                className="input"
+                type="number"
+                min="32"
+                max="64"
+                value={lineWidth}
+                onChange={(e) => setLineWidth(e.target.value)}
+                placeholder="42"
+                style={{ maxWidth: 120 }}
+              />
+            </label>
 
             <div
               style={{

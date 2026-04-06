@@ -21,6 +21,12 @@ const KILL_FORCE_MS = 4000;
 let serverProcess = null;
 /** @type {import('child_process').ChildProcessWithoutNullStreams | null} */
 let bridgeProcess = null;
+/** @type {NodeJS.Timeout | null} */
+let bridgeRestartTimer = null;
+/** @type {boolean} */
+let bridgeStopped = false;
+/** @type {number} */
+let bridgePort = 0;
 /** @type {import('child_process').ChildProcessWithoutNullStreams | null} */
 let callerIdHelperProcess = null;
 /** @type {NodeJS.Timeout | null} */
@@ -541,6 +547,11 @@ function startStoreBridge(port) {
 
   console.log('[electron] Store Bridge cmd:', spawnCmd, bridgeEntry);
 
+  const restartMs = Math.max(
+    5000,
+    parseInt(String(posConfig.bridgeRestartMs || process.env.BRIDGE_RESTART_MS || '10000'), 10) || 10000,
+  );
+
   const child = spawn(spawnCmd, [bridgeEntry], {
     cwd: bridgeRoot,
     env: childEnv,
@@ -548,6 +559,7 @@ function startStoreBridge(port) {
     windowsHide: true,
   });
   bridgeProcess = child;
+  bridgePort = port;
 
   child.stdout.on('data', (d) => process.stdout.write(`[store-bridge] ${d}`));
   child.stderr.on('data', (d) => process.stderr.write(`[store-bridge] ${d}`));
@@ -555,13 +567,30 @@ function startStoreBridge(port) {
   child.on('exit', (code) => {
     bridgeProcess = null;
     console.log(`[electron] Store Bridge kapandı (kod: ${code ?? 'null'})`);
+    if (!bridgeStopped) {
+      scheduleBridgeRestart(port, restartMs);
+    }
   });
   child.on('error', (err) => {
     console.error('[electron] Store Bridge başlatılamadı:', err.message);
     bridgeProcess = null;
+    if (!bridgeStopped) {
+      scheduleBridgeRestart(port, restartMs);
+    }
   });
 
   console.log(`[electron] Store Bridge başlatıldı pid=${child.pid} api=http://127.0.0.1:${port}/api`);
+}
+
+function scheduleBridgeRestart(port, restartMs) {
+  if (bridgeStopped) return;
+  if (bridgeRestartTimer) clearTimeout(bridgeRestartTimer);
+  console.log(`[electron] Store Bridge ${restartMs / 1000} s sonra yeniden başlatılacak...`);
+  bridgeRestartTimer = setTimeout(() => {
+    bridgeRestartTimer = null;
+    startStoreBridge(port);
+  }, restartMs);
+  bridgeRestartTimer.unref?.();
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +795,8 @@ app.on('before-quit', () => {
     killProcess(serverProcess);
     forceKillAfterTimeout(serverProcess);
   }
+  bridgeStopped = true;
+  if (bridgeRestartTimer) { clearTimeout(bridgeRestartTimer); bridgeRestartTimer = null; }
   if (bridgeProcess && !bridgeProcess.killed) {
     killProcess(bridgeProcess);
     forceKillAfterTimeout(bridgeProcess);
