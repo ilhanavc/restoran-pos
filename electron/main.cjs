@@ -535,9 +535,17 @@ function startStoreBridge(port) {
 function startCallerIdHelper(port) {
   if (callerIdHelperStopped) return;
 
-  const csprojPath = path.join(getToolsRoot(), 'callerid-sdk-helper', 'CallerIdSdkHelper.csproj');
-  if (!fs.existsSync(csprojPath)) {
-    console.warn('[electron] CallerIdSdkHelper bulunamadı, atlanıyor:', csprojPath);
+  const toolsRoot = getToolsRoot();
+  const helperDir = path.join(toolsRoot, 'callerid-sdk-helper');
+
+  // Packaged modda pre-built exe; dev modda dotnet run ile kaynak derleme
+  const isPackaged = app.isPackaged;
+  const exePath = path.join(helperDir, 'CallerIdSdkHelper.exe');
+  const csprojPath = path.join(helperDir, 'CallerIdSdkHelper.csproj');
+
+  const existenceTarget = isPackaged ? exePath : csprojPath;
+  if (!fs.existsSync(existenceTarget)) {
+    console.warn('[electron] CallerIdSdkHelper bulunamadı, atlanıyor:', existenceTarget);
     return;
   }
 
@@ -553,19 +561,39 @@ function startCallerIdHelper(port) {
     parseInt(String(posConfig.callerIdHelperRestartMs || process.env.CALLER_ID_RESTART_MS || '15000'), 10) || 15000,
   );
 
-  const args = [
-    'run',
-    '--project', csprojPath,
-    '--',
-    '--bridge-token', token,
-    '--post-enabled', 'true',
-    '--api-base', `http://127.0.0.1:${port}/api`,
-  ];
+  // Packaged: doğrudan exe; dev: dotnet run
+  let cmd, args, spawnCwd;
+  if (isPackaged) {
+    // DLL yolu: resources/tools/callerid-sdk-helper/cidshow_x64/cid.dll
+    const dllPath = path.join(process.resourcesPath, 'tools', 'callerid-sdk-helper', 'cidshow_x64', 'cid.dll');
+    cmd = exePath;
+    args = [
+      '--bridge-token', token,
+      '--post-enabled', 'true',
+      '--api-base', `http://127.0.0.1:${port}/api`,
+      '--dll-path', dllPath,
+    ];
+    spawnCwd = helperDir;
+  } else {
+    cmd = 'dotnet';
+    args = [
+      'run',
+      '--project', csprojPath,
+      '--',
+      '--bridge-token', token,
+      '--post-enabled', 'true',
+      '--api-base', `http://127.0.0.1:${port}/api`,
+    ];
+    spawnCwd = helperDir;
+  }
 
   console.log('[electron] CallerIdSdkHelper başlatılıyor...');
+  if (isPackaged) {
+    console.log('[electron] CallerIdSdkHelper exe:', exePath);
+  }
 
-  const child = spawn('dotnet', args, {
-    cwd: path.dirname(csprojPath),
+  const child = spawn(cmd, args, {
+    cwd: spawnCwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
@@ -636,6 +664,11 @@ function createWindow(port) {
 // ---------------------------------------------------------------------------
 
 app.whenReady().then(async () => {
+  // app.getName() varsayılan olarak package.json "name" alanını döndürür ("restoran-pos").
+  // app.getPath('userData') bunu kullandığı için %APPDATA%\restoran-pos\ olur.
+  // Kullanıcıya görünen doğru ad ("Restoran POS") ile userData yolunu garantile.
+  app.setName('Restoran POS');
+
   posConfig = readPosConfig();
   if (Object.keys(posConfig).length) {
     console.log('[electron] pos-config.json yüklendi');
