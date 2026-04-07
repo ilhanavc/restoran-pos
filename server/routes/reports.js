@@ -157,4 +157,34 @@ router.get('/range', authorize('admin', 'cashier'), (req, res) => {
   }
 });
 
+// GET /api/reports/hourly — seçilen gün saatlik sipariş ve ciro dağılımı
+router.get('/hourly', authorize('admin', 'cashier'), (req, res) => {
+  try {
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+
+    const rows = db.prepare(`
+      SELECT strftime('%H', created_at) as hour,
+             COUNT(*) as order_count,
+             COALESCE(SUM(amount), 0) as revenue
+      FROM payments
+      WHERE business_id = ? AND date(created_at) = ?
+      GROUP BY hour ORDER BY hour
+    `).all(req.businessId, targetDate);
+
+    // 0-23 tüm saatler için boş değerlerle doldur
+    const byHour = {};
+    for (const r of rows) byHour[r.hour] = r;
+    const data = Array.from({ length: 24 }, (_, i) => {
+      const h = String(i).padStart(2, '0');
+      return { hour: h, order_count: byHour[h]?.order_count || 0, revenue: byHour[h]?.revenue || 0 };
+    });
+
+    res.json({ date: targetDate, data });
+  } catch (err) {
+    console.error('Hourly report error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
 export default router;

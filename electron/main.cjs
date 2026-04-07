@@ -631,6 +631,74 @@ function scheduleCallerIdHelperRestart(port, restartMs) {
 }
 
 // ---------------------------------------------------------------------------
+// Otomatik DB Yedekleme
+// ---------------------------------------------------------------------------
+
+const BACKUP_KEEP_DAYS = 30;
+const BACKUP_HOUR = 2; // gece 02:00
+
+/** @type {NodeJS.Timeout | null} */
+let backupTimer = null;
+
+function performBackup(dbPath) {
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  try {
+    if (!fs.existsSync(dbPath)) {
+      console.warn('[backup] Veritabanı dosyası bulunamadı, yedekleme atlandı:', dbPath);
+      return;
+    }
+    if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const backupPath = path.join(backupsDir, `pos-${dateStr}.db`);
+    if (fs.existsSync(backupPath)) {
+      console.log('[backup] Bugünkü yedek zaten mevcut:', backupPath);
+      return;
+    }
+    fs.copyFileSync(dbPath, backupPath);
+    console.log('[backup] ✅ Veritabanı yedeklendi:', backupPath);
+    cleanOldBackups(backupsDir);
+  } catch (e) {
+    console.error('[backup] Yedekleme hatası:', e && e.message ? e.message : String(e));
+  }
+}
+
+function cleanOldBackups(backupsDir) {
+  const cutoffMs = Date.now() - BACKUP_KEEP_DAYS * 24 * 60 * 60 * 1000;
+  let removed = 0;
+  for (const file of fs.readdirSync(backupsDir)) {
+    if (!file.startsWith('pos-') || !file.endsWith('.db')) continue;
+    const fp = path.join(backupsDir, file);
+    try {
+      if (fs.statSync(fp).mtimeMs < cutoffMs) {
+        fs.unlinkSync(fp);
+        removed++;
+      }
+    } catch {}
+  }
+  if (removed > 0) console.log(`[backup] ${removed} eski yedek silindi (>${BACKUP_KEEP_DAYS} gün).`);
+}
+
+function msUntilNextBackupHour() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(BACKUP_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
+function scheduleBackup(dbPath) {
+  performBackup(dbPath); // uygulama açılışında anlık kontrol
+  const msFirst = msUntilNextBackupHour();
+  console.log(`[backup] Sonraki otomatik yedek ${Math.round(msFirst / 3600000 * 10) / 10} saat sonra (${BACKUP_HOUR}:00).`);
+  backupTimer = setTimeout(() => {
+    performBackup(dbPath);
+    backupTimer = setInterval(() => performBackup(dbPath), 24 * 60 * 60 * 1000);
+    backupTimer?.unref?.();
+  }, msFirst);
+  backupTimer?.unref?.();
+}
+
+// ---------------------------------------------------------------------------
 // BrowserWindow
 // ---------------------------------------------------------------------------
 
@@ -695,6 +763,7 @@ app.whenReady().then(async () => {
     const port = await startServerAndWaitForHealth(userDataDbPath);
     createWindow(port);
     startStoreBridge(port);
+    scheduleBackup(userDataDbPath);
     const cidTimer = setTimeout(() => startCallerIdHelper(port), 3000);
     cidTimer.unref?.();
   } catch (err) {

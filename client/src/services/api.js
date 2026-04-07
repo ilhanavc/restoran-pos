@@ -142,6 +142,7 @@ class ApiService {
   getDailyReport(date) { return this.get(`/reports/daily${date ? '?date=' + date : ''}`); }
   getClosedOrders(date) { return this.get(`/reports/closed-orders${date ? '?date=' + encodeURIComponent(date) : ''}`); }
   getRangeReport(from, to) { return this.get(`/reports/range?from=${from}&to=${to}`); }
+  getHourlyReport(date) { return this.get(`/reports/hourly${date ? '?date=' + date : ''}`); }
 
   // Print — legacy mock HTTP uçları; aktif POS akışı print_jobs + StoreBridge. Manuel test/debug için.
   /** @deprecated POS ekranları kullanmıyor; /api/print/receipt */
