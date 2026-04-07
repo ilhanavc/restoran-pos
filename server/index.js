@@ -19,6 +19,8 @@ import reportsRoutes from './routes/reports.js';
 import printerRoutes from './routes/printer.js';
 import adminRoutes from './routes/admin.js';
 import bridgeRoutes from './routes/bridge.js';
+import reservationsRoutes from './routes/reservations.js';
+import stockRoutes from './routes/stock.js';
 
 const app = express();
 
@@ -52,6 +54,8 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/print', printerRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/bridge', bridgeRoutes);
+app.use('/api/reservations', reservationsRoutes);
+app.use('/api/stock', stockRoutes);
 
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {

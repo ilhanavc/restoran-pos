@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Home, LayoutGrid, Users, ChefHat, Package,
   BarChart3, Settings, LogOut, PanelLeftClose, PanelLeftOpen,
-  FolderTree, ChevronDown, ChevronRight
+  FolderTree, ChevronDown, ChevronRight, CalendarDays, Boxes
 } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import api from '../../services/api.js';
@@ -40,6 +40,8 @@ const NAV_ITEMS = [
   { id: 'tables', path: '/tables', label: 'Masalar', icon: LayoutGrid, roles: ['admin', 'cashier', 'waiter'] },
   { id: 'kitchen', path: '/kitchen', label: 'Muıtfak', icon: ChefHat, roles: ['admin', 'kitchen'] },
   { id: 'customers', path: '/customers', label: 'Müşteriler', icon: Users, roles: ['admin', 'cashier'] },
+  { id: 'reservations', path: '/reservations', label: 'Rezervasyonlar', icon: CalendarDays, roles: ['admin', 'cashier'] },
+  { id: 'stock', path: '/stock', label: 'Stok', icon: Boxes, roles: ['admin', 'cashier'] },
   { id: 'reports', path: '/reports', label: 'Raporlar', icon: BarChart3, roles: ['admin', 'cashier'] },
   { id: 'settings', path: '/settings', label: 'Ayarlar', icon: Settings, roles: ['admin'] },
 ];

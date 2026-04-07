@@ -26,6 +26,8 @@ import MenuSettingsPage from './components/settings/MenuSettingsPage.jsx';
 import MenuProductEditorPage from './components/settings/MenuProductEditorPage.jsx';
 import DiningAreasSettingsPage from './components/settings/DiningAreasSettingsPage.jsx';
 import CallerIdScreen from './components/callerid/CallerIdScreen.jsx';
+import ReservationsScreen from './components/reservations/ReservationsScreen.jsx';
+import StockScreen from './components/stock/StockScreen.jsx';
 
 function ProtectedRoute({ children, requiredRoles }) {
   const { user, loading, hasRole } = useAuth();
@@ -162,6 +164,8 @@ export default function App() {
           <Route path="/takeaway" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><TakeawayScreen onNewOrder={handleNewTakeawayOrder} /></ProtectedRoute>} />
           <Route path="/kitchen" element={<ProtectedRoute requiredRoles={['admin', 'kitchen']}><KitchenScreen /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><CustomersScreen /></ProtectedRoute>} />
+          <Route path="/reservations" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><ReservationsScreen /></ProtectedRoute>} />
+          <Route path="/stock" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><StockScreen /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><ReportsScreen /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute requiredRoles={['admin']}><SettingsLayout /></ProtectedRoute>}>
             <Route index element={<SettingsHome />} />
