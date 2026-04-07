@@ -230,6 +230,10 @@ export default function TablesScreen({
     total: allTables.length,
     empty: allTables.filter(t => t.status === 'empty').length,
     occupied: allTables.filter(t => t.status === 'occupied').length,
+    hot: allTables.filter(t => {
+      if (t.status !== 'occupied' || !t.order_started_at) return false;
+      return (now - new Date(t.order_started_at).getTime()) / 60000 > 90;
+    }).length,
   };
 
   const btnBase = {
@@ -274,6 +278,11 @@ export default function TablesScreen({
               <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{stats.occupied}</span> Dolu
               </span>
+              {stats.hot > 0 && (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{stats.hot}</span> Uzun Süre
+                </span>
+              )}
             </div>
           </div>
           <div className="tables-header-actions">
@@ -339,6 +348,12 @@ export default function TablesScreen({
                 const isTransferSource = transferMode === table.id;
                 const hasReady = isOccupied && (Number(table.has_ready_items) === 1 || table.has_ready_items === true);
 
+                // Masanın kaç dakikadır dolu olduğunu hesapla
+                const occupiedMinutes = isOccupied && table.order_started_at
+                  ? (now - new Date(table.order_started_at).getTime()) / 60000
+                  : 0;
+
+                // 5 renkli doluluk skalası
                 let borderColor = 'var(--border)';
                 let bg = 'var(--bg-card)';
                 if (isTransferSource) {
@@ -348,7 +363,16 @@ export default function TablesScreen({
                   if (hasReady) {
                     borderColor = 'var(--success)';
                     bg = 'var(--success-muted)';
+                  } else if (occupiedMinutes > 90) {
+                    // 90+ dk: kırmızı (yoğun kullanım)
+                    borderColor = 'var(--danger)';
+                    bg = 'rgba(239,68,68,0.07)';
+                  } else if (occupiedMinutes > 30) {
+                    // 30-90 dk: turuncu
+                    borderColor = '#f97316';
+                    bg = 'rgba(249,115,22,0.07)';
                   } else {
+                    // 0-30 dk: sarı (az dolu)
                     borderColor = 'var(--warning)';
                     bg = 'var(--warning-muted)';
                   }
@@ -376,11 +400,13 @@ export default function TablesScreen({
                     }}
                     onMouseEnter={e => {
                       if (!isTransferSource) {
-                        e.currentTarget.style.borderColor = hasReady && isOccupied ? 'var(--success)' : isOccupied && !isReserved ? 'var(--warning)' : st.color;
+                        e.currentTarget.style.borderColor = borderColor;
+                        e.currentTarget.style.opacity = '0.85';
                       }
                     }}
                     onMouseLeave={e => {
                       e.currentTarget.style.borderColor = borderColor;
+                      e.currentTarget.style.opacity = '1';
                     }}
                   >
                     <div

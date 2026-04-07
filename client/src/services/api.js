@@ -159,6 +159,18 @@ class ApiService {
   patchPrinterSettings(body) { return this.patch('/admin/printer-settings', body); }
   getDiscoveredPrinters() { return this.get('/admin/printers/discovered'); }
   refreshDiscoveredPrinters() { return this.post('/admin/printers/discovered/refresh', {}); }
+  /** Bridge erişilebilirlik kontrolü. scanState: 'ok' | 'bridge_unreachable' | 'bridge_unconfigured' | ... */
+  async getBridgeStatus() {
+    try {
+      const data = await this.get('/admin/printers/discovered');
+      const s = data.scanState || '';
+      if (s === 'bridge_unreachable' || s === 'auth_error') return 'down';
+      if (s === 'bridge_unconfigured') return 'unconfigured';
+      return 'ok';
+    } catch {
+      return 'down';
+    }
+  }
   getAdminPrinter(id) { return this.get(`/admin/printers/${encodeURIComponent(id)}`); }
   getAdminPrinterDeleteEligibility(id) {
     return this.get(`/admin/printers/${encodeURIComponent(id)}/delete-eligibility`);

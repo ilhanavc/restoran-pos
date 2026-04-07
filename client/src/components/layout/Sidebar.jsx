@@ -5,7 +5,35 @@ import {
   BarChart3, Settings, LogOut, PanelLeftClose, PanelLeftOpen,
   FolderTree, ChevronDown, ChevronRight
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import api from '../../services/api.js';
+
+const BRIDGE_POLL_MS = 30000;
+
+function useBridgeStatus() {
+  const [status, setStatus] = useState(null); // null=bilinmiyor, 'ok', 'down', 'unconfigured'
+  const { user } = useAuth();
+
+  const check = useCallback(async () => {
+    if (!user) return;
+    const s = await api.getBridgeStatus();
+    setStatus(s);
+  }, [user]);
+
+  useEffect(() => {
+    check();
+    const t = setInterval(check, BRIDGE_POLL_MS);
+    return () => clearInterval(t);
+  }, [check]);
+
+  return status;
+}
+
+const BRIDGE_DOT = {
+  ok:            { color: '#22c55e', title: 'Store Bridge bağlı' },
+  down:          { color: '#ef4444', title: 'Store Bridge erişilemiyor' },
+  unconfigured:  { color: '#f59e0b', title: 'Store Bridge yapılandırılmamış' },
+};
 
 const NAV_ITEMS = [
   { id: 'home', path: '/home', label: 'Anasayfa', icon: Home, roles: ['admin', 'cashier'] },
@@ -31,6 +59,7 @@ export default function Sidebar({
   onTakeawayQuickClick,
 }) {
   const { user, logout, hasRole } = useAuth();
+  const bridgeStatus = useBridgeStatus();
   const location = useLocation();
   const navigate = useNavigate();
   const definitionsVisible = hasRole('admin');
@@ -144,6 +173,7 @@ export default function Sidebar({
               padding: '8px 4px',
               borderRadius: 'var(--radius-sm)',
               background: 'var(--bg-tertiary)',
+              position: 'relative',
             }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>
                 {user?.fullName?.split(' ')[0]}
@@ -151,6 +181,14 @@ export default function Sidebar({
               <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 2 }}>
                 {user?.roleName}
               </div>
+              {bridgeStatus && BRIDGE_DOT[bridgeStatus] && (
+                <div title={BRIDGE_DOT[bridgeStatus].title} style={{
+                  position: 'absolute', top: 6, right: 6,
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: BRIDGE_DOT[bridgeStatus].color,
+                  boxShadow: bridgeStatus === 'ok' ? `0 0 4px ${BRIDGE_DOT.ok.color}` : 'none',
+                }} />
+              )}
             </div>
             <button className="sidebar-item" onClick={logout} title="Çıkış">
               <LogOut size={18} />

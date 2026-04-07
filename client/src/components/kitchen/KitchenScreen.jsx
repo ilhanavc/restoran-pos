@@ -1,17 +1,51 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatTime, timeAgo, ORDER_STATUS } from '../../constants/index.js';
 import { RefreshCw, Clock, Package, ChefHat, Check, AlertCircle } from 'lucide-react';
 
+/** Web Audio API ile kısa bip sesi çalar */
+function playBeep() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.4, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.4);
+    osc.onended = () => ctx.close();
+  } catch {}
+}
+
+/** Sipariş yaşına göre (dakika) renk döner */
+function ageColor(createdAt, now) {
+  if (!createdAt) return null;
+  const mins = (now - new Date(createdAt).getTime()) / 60000;
+  if (mins > 20) return { border: 'var(--danger)', bg: 'rgba(239,68,68,0.09)' };
+  if (mins > 10) return { border: '#f59e0b', bg: 'rgba(245,158,11,0.09)' };
+  return null;
+}
+
 export default function KitchenScreen() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(Date.now());
+  const prevOrderIds = useRef(new Set());
   const toast = useToast();
 
   const loadOrders = useCallback(async () => {
     try {
       const data = await api.getActiveOrders();
+      // Yeni sipariş geldi mi? → bip
+      const newIds = new Set(data.map(o => o.id));
+      const hasNew = data.some(o => !prevOrderIds.current.has(o.id));
+      if (prevOrderIds.current.size > 0 && hasNew) playBeep();
+      prevOrderIds.current = newIds;
       setOrders(data);
     } catch (err) {
       toast.error('Siparişler yüklenemedi');
@@ -21,6 +55,12 @@ export default function KitchenScreen() {
   }, [toast]);
 
   useEffect(() => { loadOrders(); }, []);
+
+  // Saniye sayacı — yaş renklerini canlı günceller
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 10000);
+    return () => clearInterval(t);
+  }, []);
 
   // Auto-refresh every 10s
   useEffect(() => {
@@ -89,18 +129,23 @@ export default function KitchenScreen() {
               const isNew = order.status === 'in_kitchen';
               const items = (order.items || []).filter(i => i.status !== 'cancelled');
               const allReady = items.every(i => i.status === 'ready' || i.status === 'served');
+              const age = ageColor(order.created_at, now);
+
+              // Renk önceliği: yaş > yeni sipariş > varsayılan
+              const cardBorder = age ? age.border : isNew ? 'var(--warning)' : 'var(--border)';
+              const headerBg = age?.bg ?? (isNew ? 'var(--warning-muted)' : 'var(--bg-tertiary)');
 
               return (
                 <div key={order.id} className="card" style={{
-                  borderColor: isNew ? 'var(--warning)' : 'var(--border)',
-                  borderWidth: isNew ? 2 : 1,
-                  animation: isNew ? 'pulse 2s ease-in-out 3' : 'none',
+                  borderColor: cardBorder,
+                  borderWidth: isNew || age ? 2 : 1,
+                  animation: isNew && !age ? 'pulse 2s ease-in-out 3' : 'none',
                 }}>
                   {/* Order Header */}
                   <div style={{
                     padding: '12px 16px',
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    background: isNew ? 'var(--warning-muted)' : 'var(--bg-tertiary)',
+                    background: headerBg,
                     borderBottom: '1px solid var(--border)',
                   }}>
                     <div>
@@ -113,9 +158,10 @@ export default function KitchenScreen() {
                       </span>
                       <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>#{order.order_no}</span>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: age ? age.border : 'var(--text-muted)', fontWeight: age ? 700 : 400 }}>
                       <Clock size={12} />
-                      {timeAgo(order.created_at)}
+                      {timeAgo(order.created_at, now)}
+                      {age && <AlertCircle size={12} />}
                     </div>
                   </div>
 
