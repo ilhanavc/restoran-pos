@@ -58,3 +58,5 @@ fisornek.txt
 
 # Yerel proje özeti (Word); isteğe bağlı paylaşım
 restoran-pos-v3-ozet.docx
+.claude/
+.tmp/
