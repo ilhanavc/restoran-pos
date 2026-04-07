@@ -142,6 +142,24 @@ class ApiService {
   getDailyReport(date) { return this.get(`/reports/daily${date ? '?date=' + date : ''}`); }
   getClosedOrders(date) { return this.get(`/reports/closed-orders${date ? '?date=' + encodeURIComponent(date) : ''}`); }
   getRangeReport(from, to) { return this.get(`/reports/range?from=${from}&to=${to}`); }
+  getHourlyReport(date) { return this.get(`/reports/hourly${date ? '?date=' + date : ''}`); }
+
+  // Reservations
+  getReservations(params = {}) {
+    const q = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null)).toString();
+    return this.get(`/reservations${q ? '?' + q : ''}`);
+  }
+  createReservation(body) { return this.post('/reservations', body); }
+  updateReservation(id, body) { return this.patch(`/reservations/${id}`, body); }
+  deleteReservation(id) { return this.delete(`/reservations/${id}`); }
+
+  // Stock
+  getStockItems() { return this.get('/stock'); }
+  createStockItem(body) { return this.post('/stock', body); }
+  updateStockItem(id, body) { return this.patch(`/stock/${id}`, body); }
+  deleteStockItem(id) { return this.delete(`/stock/${id}`); }
+  getStockMovements(itemId) { return this.get(`/stock/${itemId}/movements`); }
+  createStockMovement(body) { return this.post('/stock/movements', body); }
 
   // Print — legacy mock HTTP uçları; aktif POS akışı print_jobs + StoreBridge. Manuel test/debug için.
   /** @deprecated POS ekranları kullanmıyor; /api/print/receipt */
@@ -158,6 +176,18 @@ class ApiService {
   patchPrinterSettings(body) { return this.patch('/admin/printer-settings', body); }
   getDiscoveredPrinters() { return this.get('/admin/printers/discovered'); }
   refreshDiscoveredPrinters() { return this.post('/admin/printers/discovered/refresh', {}); }
+  /** Bridge erişilebilirlik kontrolü. scanState: 'ok' | 'bridge_unreachable' | 'bridge_unconfigured' | ... */
+  async getBridgeStatus() {
+    try {
+      const data = await this.get('/admin/printers/discovered');
+      const s = data.scanState || '';
+      if (s === 'bridge_unreachable' || s === 'auth_error') return 'down';
+      if (s === 'bridge_unconfigured') return 'unconfigured';
+      return 'ok';
+    } catch {
+      return 'down';
+    }
+  }
   getAdminPrinter(id) { return this.get(`/admin/printers/${encodeURIComponent(id)}`); }
   getAdminPrinterDeleteEligibility(id) {
     return this.get(`/admin/printers/${encodeURIComponent(id)}/delete-eligibility`);

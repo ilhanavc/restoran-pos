@@ -37,7 +37,8 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const change = paymentType === 'cash' ? Math.max(0, cashVal - totalDue) : 0;
   const payAmount = customAmount ? parseFloat(customAmount) : totalDue;
 
-  const quickCashAmounts = [50, 100, 200, 500, 1000].filter(a => a >= totalDue * 0.5);
+  const DENOMINATIONS = [10, 20, 50, 100, 200];
+  const quickExact = [50, 100, 200, 500, 1000].filter(a => a >= totalDue && a <= totalDue * 3).slice(0, 3);
 
   const handleApplyDiscount = async () => {
     try {
@@ -192,16 +193,40 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                 onChange={e => setCashReceived(e.target.value)}
                 placeholder={formatCurrency(totalDue)} style={{ fontSize: 20, fontWeight: 700, textAlign: 'center' }} autoFocus />
 
-              <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCashReceived(String(totalDue))}>
-                  Tam
-                </button>
-                {quickCashAmounts.map(amt => (
-                  <button key={amt} type="button" className="btn btn-ghost btn-sm"
-                    onClick={() => setCashReceived(String(amt))}>
-                    {formatCurrency(amt)}
+              {/* Hızlı tuş takımı */}
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Ekle
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {DENOMINATIONS.map(amt => (
+                    <button key={amt} type="button" className="btn btn-ghost btn-sm"
+                      style={{ fontWeight: 700, minWidth: 52 }}
+                      onClick={() => setCashReceived(String(Math.round(((parseFloat(cashReceived) || 0) + amt) * 100) / 100))}>
+                      +{amt}₺
+                    </button>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-ghost btn-sm"
+                    style={{ fontWeight: 700 }}
+                    onClick={() => setCashReceived(String(totalDue))}>
+                    Tam
                   </button>
-                ))}
+                  {quickExact.map(amt => (
+                    <button key={amt} type="button" className="btn btn-ghost btn-sm"
+                      onClick={() => setCashReceived(String(amt))}>
+                      {formatCurrency(amt)}
+                    </button>
+                  ))}
+                  {cashReceived && (
+                    <button type="button" className="btn btn-ghost btn-sm"
+                      style={{ color: 'var(--danger)' }}
+                      onClick={() => setCashReceived('')}>
+                      Sil
+                    </button>
+                  )}
+                </div>
               </div>
 
               {cashVal > 0 && cashVal >= totalDue && (

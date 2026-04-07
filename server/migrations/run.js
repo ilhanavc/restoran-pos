@@ -330,6 +330,52 @@ const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_incoming_calls_phone ON incoming_calls(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_business ON audit_logs(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`,
+
+  // ── Rezervasyonlar ──
+  `CREATE TABLE IF NOT EXISTS reservations (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    table_id TEXT REFERENCES tables(id),
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT,
+    party_size INTEGER DEFAULT 2,
+    reservation_date TEXT NOT NULL,
+    reservation_time TEXT NOT NULL,
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'confirmed',
+    created_by TEXT REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_reservations_business_date ON reservations(business_id, reservation_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_reservations_table ON reservations(table_id)`,
+
+  // ── Stok ──
+  `CREATE TABLE IF NOT EXISTS stock_items (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    name TEXT NOT NULL,
+    unit TEXT NOT NULL DEFAULT 'adet',
+    quantity REAL NOT NULL DEFAULT 0,
+    min_quantity REAL NOT NULL DEFAULT 0,
+    cost_price REAL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_items_business ON stock_items(business_id)`,
+
+  `CREATE TABLE IF NOT EXISTS stock_movements (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    stock_item_id TEXT NOT NULL REFERENCES stock_items(id),
+    movement_type TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    notes TEXT,
+    created_by TEXT REFERENCES users(id),
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id)`,
 ];
 
 /** Eski KDV eklemeli tutarları: ürün fiyatları KDV dahil kabul edilerek siparişleri yeniden hesaplar (bir kez). */
