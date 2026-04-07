@@ -2,13 +2,22 @@ import { useState, useEffect } from 'react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, formatDateTime } from '../../constants/index.js';
-import { Users, Search, Phone, MapPin, Plus, X, ShoppingBag } from 'lucide-react';
+import { Users, Search, Phone, X, FileUp, Download } from 'lucide-react';
 
 export default function CustomersScreen() {
   const [customers, setCustomers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importRows, setImportRows] = useState([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [importLoading, setImportLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importPage, setImportPage] = useState(1);
+  const [importPageSize, setImportPageSize] = useState(250);
   const toast = useToast();
 
   useEffect(() => { loadCustomers(); }, []);
@@ -43,6 +52,161 @@ export default function CustomersScreen() {
     }
   };
 
+  const handleFilePick = async (file) => {
+    if (!file) return;
+    setImportLoading(true);
+    setImportPreview(null);
+    setImportPage(1);
+    try {
+      const XLSX = await import('xlsx');
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const firstSheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: '' });
+      if (!rows.length) {
+        toast.error('Dosyada aktarılacak satır bulunamadı');
+        setImportRows([]);
+        return;
+      }
+      setImportRows(rows);
+      setImportFileName(file.name);
+      toast.success(`${rows.length} satır yüklendi`);
+    } catch (err) {
+      toast.error('Dosya okunamadı (xlsx/csv)');
+      setImportRows([]);
+      setImportFileName('');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handlePreviewImport = async () => {
+    if (!importRows.length) {
+      toast.error('Önce bir dosya seçin');
+      return;
+    }
+    setImportLoading(true);
+    try {
+      const preview = await api.previewCustomerImport({
+        rows: importRows,
+        page: 1,
+        page_size: importPageSize,
+      });
+      setImportPreview(preview);
+      setImportPage(preview.page || 1);
+      toast.success('Önizleme hazır');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const loadPreviewPage = async (nextPage, nextPageSize = importPageSize) => {
+    if (!importPreview?.preview_token) return;
+    setImportLoading(true);
+    try {
+      const preview = await api.previewCustomerImport({
+        preview_token: importPreview.preview_token,
+        page: nextPage,
+        page_size: nextPageSize,
+      });
+      setImportPreview((prev) => ({ ...prev, ...preview }));
+      setImportPage(preview.page || nextPage);
+      setImportPageSize(preview.page_size || nextPageSize);
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const handleCommitImport = async () => {
+    if (!importPreview?.preview_token) {
+      toast.error('Önce önizleme alın');
+      return;
+    }
+    setImportLoading(true);
+    try {
+      const result = await api.commitCustomerImport(importPreview.preview_token);
+      toast.success(`Aktarım tamamlandı: +${result.inserted} yeni, ${result.updated} güncellendi`);
+      setImportOpen(false);
+      setImportRows([]);
+      setImportFileName('');
+      setImportPreview(null);
+      setImportPage(1);
+      loadCustomers();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  const exportFileNameBase = () => {
+    const now = new Date();
+    const p2 = (n) => String(n).padStart(2, '0');
+    return `Musteriler_${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}_${p2(now.getHours())}${p2(now.getMinutes())}`;
+  };
+
+  const downloadBlob = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const toCsv = (rows) => {
+    if (!rows?.length) return '';
+    const headers = Object.keys(rows[0]);
+    const esc = (v) => {
+      const s = v == null ? '' : String(v);
+      const e = s.replace(/"/g, '""');
+      return /[",\n;]/.test(e) ? `"${e}"` : e;
+    };
+    const lines = [headers.join(',')];
+    for (const row of rows) {
+      lines.push(headers.map((h) => esc(row[h])).join(','));
+    }
+    return lines.join('\n');
+  };
+
+  const handleExport = async (format) => {
+    setExportLoading(true);
+    try {
+      const rows = await api.getCustomersExport();
+      if (!Array.isArray(rows) || rows.length === 0) {
+        toast.error('Dışa aktarılacak müşteri bulunamadı');
+        return;
+      }
+      const base = exportFileNameBase();
+      if (format === 'xlsx') {
+        const XLSX = await import('xlsx');
+        const ws = XLSX.utils.json_to_sheet(rows);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'data');
+        const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+        downloadBlob(
+          new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+          `${base}.xlsx`,
+        );
+      } else {
+        const csv = toCsv(rows);
+        downloadBlob(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' }), `${base}.csv`);
+      }
+      setExportOpen(false);
+      toast.success(`Dışa aktarıldı (${rows.length} müşteri)`);
+    } catch (err) {
+      toast.error(err.message || 'Dışa aktarma başarısız');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       {/* List */}
@@ -52,6 +216,16 @@ export default function CustomersScreen() {
             <Users size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
             Müşteriler
           </h1>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10, gap: 8 }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExportOpen(true)}>
+              <Download size={14} />
+              Dışa Aktar
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setImportOpen(true)}>
+              <FileUp size={14} />
+              Excel'den İçe Aktar
+            </button>
+          </div>
           <div style={{ position: 'relative' }}>
             <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input className="input" placeholder="Ad veya telefon ile ara..."
@@ -164,6 +338,132 @@ export default function CustomersScreen() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {importOpen && (
+        <div className="modal-overlay" onClick={() => !importLoading && setImportOpen(false)}>
+          <div className="modal modal-md" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Müşteri İçe Aktar (Excel)</h2>
+              <button type="button" className="btn btn-ghost btn-icon" onClick={() => !importLoading && setImportOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={(e) => handleFilePick(e.target.files?.[0])}
+                  disabled={importLoading}
+                />
+                {importFileName && (
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Dosya: <strong>{importFileName}</strong> ({importRows.length} satır)
+                  </div>
+                )}
+                {!importPreview && (
+                  <button type="button" className="btn btn-primary" onClick={handlePreviewImport} disabled={importLoading || !importRows.length}>
+                    {importLoading ? 'Hazırlanıyor...' : 'Önizleme Oluştur'}
+                  </button>
+                )}
+                {importPreview && (
+                  <div className="card card-padded" style={{ fontSize: 13 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      <div>Eklenecek: <strong>{importPreview.insert_count}</strong></div>
+                      <div>Güncellenecek: <strong>{importPreview.update_count}</strong></div>
+                      <div>Atlanacak: <strong>{importPreview.skip_count}</strong></div>
+                      <div>Hata: <strong>{importPreview.error_count}</strong></div>
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                      Gösterilen: {importPreview.rows?.length || 0} · Toplam: {importPreview.total_rows} · Sayfa {importPreview.page}/{importPreview.total_pages}
+                    </div>
+                    <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={importLoading || (importPreview.page || 1) <= 1}
+                        onClick={() => loadPreviewPage((importPreview.page || 1) - 1)}
+                      >
+                        Önceki
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        disabled={importLoading || (importPreview.page || 1) >= (importPreview.total_pages || 1)}
+                        onClick={() => loadPreviewPage((importPreview.page || 1) + 1)}
+                      >
+                        Sonraki
+                      </button>
+                      <select
+                        className="input"
+                        style={{ width: 120, minHeight: 32, padding: '4px 8px' }}
+                        value={importPageSize}
+                        onChange={(e) => {
+                          const size = parseInt(e.target.value, 10) || 250;
+                          setImportPageSize(size);
+                          if (importPreview?.preview_token) loadPreviewPage(1, size);
+                        }}
+                        disabled={importLoading}
+                      >
+                        <option value={250}>250 / sayfa</option>
+                        <option value={500}>500 / sayfa</option>
+                      </select>
+                    </div>
+                    <div style={{ marginTop: 10, maxHeight: 180, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+                      {(importPreview.rows || []).map((r) => (
+                        <div key={r.row_number} style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <span style={{ width: 52, color: 'var(--text-muted)' }}>Satır {r.row_number}</span>
+                          <span className={`badge ${r.action === 'insert' ? 'badge-success' : r.action === 'update' ? 'badge-info' : 'badge-warning'}`}>
+                            {r.action}
+                          </span>
+                          {r.normalized?.full_name && <span style={{ flex: 1, minWidth: 0 }} className="truncate">{r.normalized.full_name}</span>}
+                          {Array.isArray(r.issues) && r.issues.length > 0 && (
+                            <span style={{ color: 'var(--warning)', fontSize: 11 }}>
+                              {r.issues[0].message}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setImportOpen(false)} disabled={importLoading}>Kapat</button>
+              {importPreview && (
+                <button type="button" className="btn btn-success" onClick={handleCommitImport} disabled={importLoading}>
+                  {importLoading ? 'Aktarılıyor...' : 'İçe Aktar'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {exportOpen && (
+        <div className="modal-overlay" onClick={() => !exportLoading && setExportOpen(false)}>
+          <div className="modal modal-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Müşteri Dışa Aktar</h2>
+              <button type="button" className="btn btn-ghost btn-icon" onClick={() => !exportLoading && setExportOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ display: 'flex', gap: 8, flexDirection: 'column' }}>
+              <button type="button" className="btn btn-primary" onClick={() => handleExport('xlsx')} disabled={exportLoading}>
+                {exportLoading ? 'Hazırlanıyor...' : 'Excel (.xlsx) indir'}
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => handleExport('csv')} disabled={exportLoading}>
+                {exportLoading ? 'Hazırlanıyor...' : 'CSV indir'}
+              </button>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setExportOpen(false)} disabled={exportLoading}>Kapat</button>
+            </div>
           </div>
         </div>
       )}

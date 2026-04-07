@@ -1482,20 +1482,24 @@ body {
 }
 
 .order-screen-topbar-icon-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
+  width: 40px;
+  height: 40px;
   flex: 0 0 auto;
-  border: none;
-  background: transparent;
+  margin: 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
   color: var(--text-primary);
   cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .order-screen-topbar-icon-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
 }
 
 .order-screen-topbar-icon-btn:disabled {

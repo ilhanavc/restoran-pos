@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../services/api.js';
@@ -42,14 +41,6 @@ export default function OrderScreen({
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerList, setCustomerList] = useState([]);
   const [customerListLoading, setCustomerListLoading] = useState(false);
-  // Inline müşteri arama (paket telefon alanı + masa User ikonu)
-  const [inlineCustomerOpen, setInlineCustomerOpen] = useState(false);
-  const [inlineCustomerQuery, setInlineCustomerQuery] = useState('');
-  const [inlineCustomerList, setInlineCustomerList] = useState([]);
-  const [inlineCustomerLoading, setInlineCustomerLoading] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
-  const inlineSearchRef = useRef(null);
-  const customerBtnRef = useRef(null);
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
@@ -491,79 +482,6 @@ export default function OrderScreen({
     loadCustomersForModal('');
   };
 
-  const loadInlineCustomers = async (q) => {
-    setInlineCustomerLoading(true);
-    try {
-      const isPhone = /\d/.test(q);
-      const data = q.length >= 2
-        ? await api.getCustomers(isPhone ? { phone: q } : { search: q })
-        : await api.getCustomers({ limit: 8 });
-      setInlineCustomerList(data || []);
-    } catch {
-      setInlineCustomerList([]);
-    } finally {
-      setInlineCustomerLoading(false);
-    }
-  };
-
-  const openInlineCustomerSearch = () => {
-    if (customerBtnRef.current) {
-      const rect = customerBtnRef.current.getBoundingClientRect();
-      setDropdownPos({ top: rect.bottom + 6, left: rect.right - 280 });
-    }
-    setInlineCustomerOpen(true);
-    setInlineCustomerQuery('');
-    loadInlineCustomers('');
-    setTimeout(() => inlineSearchRef.current?.focus(), 50);
-  };
-
-  useEffect(() => {
-    if (!inlineCustomerOpen) return;
-    const recalc = () => {
-      if (customerBtnRef.current) {
-        const r = customerBtnRef.current.getBoundingClientRect();
-        setDropdownPos({ top: r.bottom + 6, left: r.right - 280 });
-      }
-    };
-    window.addEventListener('scroll', recalc, true);
-    window.addEventListener('resize', recalc);
-    return () => {
-      window.removeEventListener('scroll', recalc, true);
-      window.removeEventListener('resize', recalc);
-    };
-  }, [inlineCustomerOpen]);
-
-  useEffect(() => {
-    if (!inlineCustomerOpen) return;
-    const onMouseDown = (e) => {
-      if (customerBtnRef.current?.contains(e.target)) return;
-      if (e.target.closest('[data-inline-customer-dropdown]')) return;
-      setInlineCustomerOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    return () => document.removeEventListener('mousedown', onMouseDown);
-  }, [inlineCustomerOpen]);
-
-  const handleInlineCustomerInput = (q) => {
-    setInlineCustomerQuery(q);
-    loadInlineCustomers(q);
-  };
-
-  const handleInlinePickCustomer = async (cust) => {
-    setSelectedCustomer({ id: cust.id, full_name: cust.full_name });
-    setInlineCustomerOpen(false);
-    if (orderType === 'takeaway' && cust.phones?.length) {
-      const p = cust.phones.find(x => x.is_primary) || cust.phones[0];
-      setTakeawayPhone(String(p.phone || ''));
-    }
-    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
-      try {
-        setSaving(true);
-        await api.updateOrder(existingOrder.id, { customer_id: cust.id });
-      } catch { /* sessiz */ } finally { setSaving(false); }
-    }
-  };
-
   const handleCustomerSearchInput = (q) => {
     setCustomerSearchQuery(q);
     if (q.length >= 2) {
@@ -657,7 +575,7 @@ export default function OrderScreen({
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }} onClick={() => inlineCustomerOpen && setInlineCustomerOpen(false)}>
+    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
       {/* Sol: üst bar + arama + yatay kategoriler + ürün ızgarası */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
         <div className="order-screen-topbar">
@@ -699,85 +617,15 @@ export default function OrderScreen({
           {orderType === 'dine_in' && table && (
             <>
               <span className="order-screen-topbar-divider" aria-hidden />
-              <div style={{ position: 'relative' }}>
-                <button
-                  ref={customerBtnRef}
-                  type="button"
-                  className="order-screen-topbar-icon-btn"
-                  onClick={openInlineCustomerSearch}
-                  disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
-                  title={selectedCustomer ? 'Müşteriyi değiştir' : 'Müşteri seç'}
-                >
-                  <User size={22} strokeWidth={2} />
-                </button>
-                {inlineCustomerOpen && createPortal(
-                  <div
-                    data-inline-customer-dropdown=""
-                    style={{
-                      position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999,
-                      background: 'var(--bg-card)', border: '1px solid var(--border)',
-                      borderRadius: 'var(--radius-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
-                      width: 280, maxHeight: 340, display: 'flex', flexDirection: 'column',
-                    }}
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
-                      <input
-                        ref={inlineSearchRef}
-                        className="input"
-                        style={{ height: 34, fontSize: 13 }}
-                        placeholder="Ad veya telefon..."
-                        value={inlineCustomerQuery}
-                        onChange={e => handleInlineCustomerInput(e.target.value)}
-                        autoComplete="off"
-                      />
-                    </div>
-                    <div style={{ flex: 1, overflowY: 'auto', maxHeight: 260 }}>
-                      {inlineCustomerLoading ? (
-                        <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>Yükleniyor...</div>
-                      ) : inlineCustomerList.length === 0 ? (
-                        <div style={{ padding: 16, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>Bulunamadı</div>
-                      ) : (
-                        inlineCustomerList.map(c => (
-                          <button key={c.id} type="button"
-                            onClick={() => handleInlinePickCustomer(c)}
-                            style={{
-                              width: '100%', textAlign: 'left', padding: '9px 12px',
-                              border: 'none', background: selectedCustomer?.id === c.id ? 'var(--accent)12' : 'transparent',
-                              cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 10,
-                              borderBottom: '1px solid var(--border)',
-                            }}
-                          >
-                            <span style={{
-                              width: 28, height: 28, borderRadius: '50%', background: 'var(--accent)',
-                              color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                            }}>{c.full_name?.charAt(0) || '?'}</span>
-                            <span style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{c.full_name}</div>
-                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.phones?.[0]?.phone || '—'}</div>
-                            </span>
-                          </button>
-                        ))
-                      )}
-                    </div>
-                    <div style={{ padding: '6px 10px', borderTop: '1px solid var(--border)', display: 'flex', gap: 6 }}>
-                      {selectedCustomer && (
-                        <button type="button" className="btn btn-ghost btn-sm"
-                          style={{ fontSize: 11, color: 'var(--danger)' }}
-                          onClick={() => { setSelectedCustomer(null); setInlineCustomerOpen(false); }}>
-                          Kaldır
-                        </button>
-                      )}
-                      <button type="button" className="btn btn-ghost btn-sm"
-                        style={{ fontSize: 11, marginLeft: 'auto' }}
-                        onClick={() => setInlineCustomerOpen(false)}>
-                        Kapat
-                      </button>
-                    </div>
-                  </div>,
-                  document.body
-                )}
-              </div>
+              <button
+                type="button"
+                className="order-screen-topbar-icon-btn"
+                onClick={openCustomerModal}
+                disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
+                title={selectedCustomer ? 'Müşteriyi değiştir' : 'Müşteri seç'}
+              >
+                <User size={22} strokeWidth={2} />
+              </button>
             </>
           )}
 

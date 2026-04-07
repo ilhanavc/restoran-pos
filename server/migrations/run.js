@@ -456,6 +456,20 @@ function ensureColumnMigrations() {
     db.prepare('ALTER TABLE customer_phones ADD COLUMN normalized_phone TEXT').run();
   }
 
+  const customerCols = db.prepare('PRAGMA table_info(customers)').all();
+  if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_no')) {
+    db.prepare('ALTER TABLE customers ADD COLUMN legacy_no TEXT').run();
+  }
+  if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_balance')) {
+    db.prepare('ALTER TABLE customers ADD COLUMN legacy_balance REAL DEFAULT 0').run();
+  }
+  if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_total_amount')) {
+    db.prepare('ALTER TABLE customers ADD COLUMN legacy_total_amount REAL DEFAULT 0').run();
+  }
+  if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_discount_amount')) {
+    db.prepare('ALTER TABLE customers ADD COLUMN legacy_discount_amount REAL DEFAULT 0').run();
+  }
+
   const printerCols = db.prepare('PRAGMA table_info(printers)').all();
   if (printerCols.length && !printerCols.some((c) => c.name === 'print_options')) {
     db.prepare('ALTER TABLE printers ADD COLUMN print_options TEXT').run();
