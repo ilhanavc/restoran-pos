@@ -701,6 +701,92 @@ function scheduleCallerIdHelperRestart(port, restartMs) {
 }
 
 // ---------------------------------------------------------------------------
+// Otomatik DB Yedekleme
+// ---------------------------------------------------------------------------
+
+/** @type {NodeJS.Timeout | null} */
+let backupTimer = null;
+
+const BACKUP_KEEP_DAYS = 30;
+const BACKUP_HOUR = 2; // gece 02:00
+
+/**
+ * pos.db'yi userData/backups/pos-YYYY-MM-DD.db olarak kopyalar.
+ * Günde bir kez alır (aynı gün yedek varsa atlar).
+ * 30 günden eski yedekleri temizler.
+ */
+function performBackup(dbPath) {
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  try {
+    if (!fs.existsSync(dbPath)) {
+      console.warn('[backup] Veritabanı bulunamadı, yedek atlandı:', dbPath);
+      return;
+    }
+    if (!fs.existsSync(backupsDir)) {
+      fs.mkdirSync(backupsDir, { recursive: true });
+    }
+    const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const backupPath = path.join(backupsDir, `pos-${dateStr}.db`);
+    if (fs.existsSync(backupPath)) {
+      console.log('[backup] Bugünkü yedek zaten mevcut:', backupPath);
+      return;
+    }
+    fs.copyFileSync(dbPath, backupPath);
+    console.log('[backup] ✅ Veritabanı yedeklendi:', backupPath);
+    cleanOldBackups(backupsDir);
+  } catch (e) {
+    console.error('[backup] Yedekleme hatası:', e && e.message ? e.message : String(e));
+  }
+}
+
+function cleanOldBackups(backupsDir) {
+  try {
+    const cutoffMs = Date.now() - BACKUP_KEEP_DAYS * 24 * 60 * 60 * 1000;
+    for (const file of fs.readdirSync(backupsDir)) {
+      if (!file.startsWith('pos-') || !file.endsWith('.db')) continue;
+      const fp = path.join(backupsDir, file);
+      try {
+        if (fs.statSync(fp).mtimeMs < cutoffMs) {
+          fs.unlinkSync(fp);
+          console.log('[backup] Eski yedek silindi:', file);
+        }
+      } catch { /* dosya silinemezse atla */ }
+    }
+  } catch (e) {
+    console.warn('[backup] Eski yedek temizleme hatası:', e && e.message ? e.message : String(e));
+  }
+}
+
+/** Bir sonraki saat BACKUP_HOUR:00:00'e kadar kalan ms. */
+function msUntilNextBackupHour() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(BACKUP_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
+/**
+ * Uygulama başlarken çalışır:
+ * 1. Bugün yedek yoksa hemen alır.
+ * 2. Bir sonraki gece 02:00'de yedek alır, sonra her 24 saatte tekrar.
+ */
+function scheduleBackup(dbPath) {
+  // Başlangıçta hemen kontrol — bugün yedek yoksa al
+  performBackup(dbPath);
+
+  const msFirst = msUntilNextBackupHour();
+  console.log(`[backup] Sonraki otomatik yedek: ${Math.round(msFirst / 60000)} dakika sonra (gece ${BACKUP_HOUR}:00)`);
+
+  backupTimer = setTimeout(() => {
+    performBackup(dbPath);
+    backupTimer = setInterval(() => performBackup(dbPath), 24 * 60 * 60 * 1000);
+    backupTimer?.unref?.();
+  }, msFirst);
+  backupTimer?.unref?.();
+}
+
+// ---------------------------------------------------------------------------
 // BrowserWindow
 // ---------------------------------------------------------------------------
 
