@@ -789,6 +789,77 @@ function buildReceiptLines(p) {
   return out;
 }
 
+function buildTakeawayLabelLines(p) {
+  const w = resolveLineWidth(p);
+  const out = [];
+  const sep = separatorSpaced(w);
+  const sepStrong = separatorStrongSpaced(w);
+
+  out.push(sep);
+  if (p.business_name) {
+    out.push({ text: centerLine(String(p.business_name), w), bold: true });
+  }
+  out.push({ text: centerLine('PAKET ETİKETİ', w), bold: true, large: true });
+  out.push(sep);
+
+  out.push(alignLeftRight(fmtDateTimeCompact(p.created_at), String(p.order_no ?? ''), w));
+  if (p.user_name) out.push(alignLeftRight('Hazırlayan:', String(p.user_name), w));
+
+  out.push(sep);
+  if (p.customer_name) {
+    out.push({ text: alignLeftRight('Müşteri:', String(p.customer_name), w), bold: true });
+  }
+  if (p.customer_phone) {
+    out.push(alignLeftRight('Telefon:', String(p.customer_phone), w));
+  }
+  if (p.delivery_address && String(p.delivery_address).trim()) {
+    for (const line of wrapText(`Adres: ${String(p.delivery_address).trim()}`, w)) {
+      out.push(line);
+    }
+  }
+  if (p.delivery_note && String(p.delivery_note).trim()) {
+    for (const line of wrapText(`Teslimat Notu: ${String(p.delivery_note).trim()}`, w)) {
+      out.push(line);
+    }
+  }
+  if (p.courier_note && String(p.courier_note).trim()) {
+    for (const line of wrapText(`Kurye Notu: ${String(p.courier_note).trim()}`, w)) {
+      out.push(line);
+    }
+  }
+  if (p.note && String(p.note).trim()) {
+    for (const line of wrapText(`Not: ${String(p.note).trim()}`, w)) {
+      out.push(line);
+    }
+  }
+
+  out.push(sep);
+  out.push({ text: alignLeftRight('ÜRÜN', 'ADET', w), bold: true });
+  out.push(sep);
+
+  const items = Array.isArray(p.items) ? p.items : [];
+  items.forEach((it, idx) => {
+    const name = it.product_name || '';
+    const qty = formatQtyLabel(it.quantity, it.portion_label);
+    for (const row of linesProductQty(name, qty, w)) {
+      out.push({ text: row, bold: true, bodyEmphasis: true });
+    }
+    if (it.note) {
+      for (const nl of wrapText(`[ ${it.note} ]`, w - 4)) {
+        out.push(`  ${nl}`);
+      }
+    }
+    if (idx < items.length - 1) out.push(itemSeparatorDotted(w));
+  });
+
+  out.push(sepStrong);
+  const st = shortTicketNo(p.order_no);
+  out.push({ text: centerLine(st ? `- ${st} -` : String(p.order_no ?? ''), w), bold: true, large: true });
+  if (p.printer_name) out.push(centerLine(String(p.printer_name), w));
+
+  return out;
+}
+
 function buildTestLines(p) {
   const w = resolveLineWidth(p);
   const out = [];
@@ -831,6 +902,8 @@ export function payloadToEscPosBuffer(job) {
     flushStyledLines(parts, buildKitchenAdjustmentLines(p));
   } else if (p.kind === 'receipt') {
     flushStyledLines(parts, buildReceiptLines(p));
+  } else if (p.kind === 'takeaway_label') {
+    flushStyledLines(parts, buildTakeawayLabelLines(p));
   } else if (p.kind === 'test') {
     flushStyledLines(parts, buildTestLines(p));
   } else {

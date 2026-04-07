@@ -9,6 +9,7 @@ import {
   processPendingJobsSync,
   enqueueKitchenAdjustmentJobs,
   enqueueReceiptJobForClosedOrder,
+  enqueueTakeawayLabelJob,
 } from '../services/printJobs.js';
 
 const router = Router();
@@ -363,6 +364,10 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
     });
 
     txn();
+
+    if ((order_type || 'dine_in') === 'takeaway') {
+      enqueueTakeawayLabelJob(req.businessId, orderId, req.user.id);
+    }
 
     finalizeKitchenForNewItems(req.businessId, orderId, createdItemIds, req.user.id);
 

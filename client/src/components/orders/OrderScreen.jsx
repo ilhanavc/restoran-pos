@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../services/api.js';
@@ -46,7 +47,9 @@ export default function OrderScreen({
   const [inlineCustomerQuery, setInlineCustomerQuery] = useState('');
   const [inlineCustomerList, setInlineCustomerList] = useState([]);
   const [inlineCustomerLoading, setInlineCustomerLoading] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
   const inlineSearchRef = useRef(null);
+  const customerBtnRef = useRef(null);
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
@@ -504,11 +507,42 @@ export default function OrderScreen({
   };
 
   const openInlineCustomerSearch = () => {
+    if (customerBtnRef.current) {
+      const rect = customerBtnRef.current.getBoundingClientRect();
+      setDropdownPos({ top: rect.bottom + 6, left: rect.right - 280 });
+    }
     setInlineCustomerOpen(true);
     setInlineCustomerQuery('');
     loadInlineCustomers('');
     setTimeout(() => inlineSearchRef.current?.focus(), 50);
   };
+
+  useEffect(() => {
+    if (!inlineCustomerOpen) return;
+    const recalc = () => {
+      if (customerBtnRef.current) {
+        const r = customerBtnRef.current.getBoundingClientRect();
+        setDropdownPos({ top: r.bottom + 6, left: r.right - 280 });
+      }
+    };
+    window.addEventListener('scroll', recalc, true);
+    window.addEventListener('resize', recalc);
+    return () => {
+      window.removeEventListener('scroll', recalc, true);
+      window.removeEventListener('resize', recalc);
+    };
+  }, [inlineCustomerOpen]);
+
+  useEffect(() => {
+    if (!inlineCustomerOpen) return;
+    const onMouseDown = (e) => {
+      if (customerBtnRef.current?.contains(e.target)) return;
+      if (e.target.closest('[data-inline-customer-dropdown]')) return;
+      setInlineCustomerOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    return () => document.removeEventListener('mousedown', onMouseDown);
+  }, [inlineCustomerOpen]);
 
   const handleInlineCustomerInput = (q) => {
     setInlineCustomerQuery(q);
@@ -667,6 +701,7 @@ export default function OrderScreen({
               <span className="order-screen-topbar-divider" aria-hidden />
               <div style={{ position: 'relative' }}>
                 <button
+                  ref={customerBtnRef}
                   type="button"
                   className="order-screen-topbar-icon-btn"
                   onClick={openInlineCustomerSearch}
@@ -675,10 +710,11 @@ export default function OrderScreen({
                 >
                   <User size={22} strokeWidth={2} />
                 </button>
-                {inlineCustomerOpen && (
+                {inlineCustomerOpen && createPortal(
                   <div
+                    data-inline-customer-dropdown=""
                     style={{
-                      position: 'absolute', top: '110%', right: 0, zIndex: 200,
+                      position: 'fixed', top: dropdownPos.top, left: dropdownPos.left, zIndex: 9999,
                       background: 'var(--bg-card)', border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-md)', boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
                       width: 280, maxHeight: 340, display: 'flex', flexDirection: 'column',
@@ -738,7 +774,8 @@ export default function OrderScreen({
                         Kapat
                       </button>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             </>

@@ -491,6 +491,99 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
 }
 
 /**
+ * Paket sipariş etiketi: varsayılan yazıcıdan kurye kağıdı basar.
+ * Sadece order_type='takeaway' siparişlerde çağrılır.
+ */
+export function enqueueTakeawayLabelJob(businessId, orderId, userId) {
+  const idempotencyKey = `takeaway_label|${businessId}|${orderId}`;
+  const existing = db.prepare(`SELECT id FROM print_jobs WHERE idempotency_key = ?`).get(idempotencyKey);
+  if (existing) return { created: 0, skipped: 1, duplicate: true };
+
+  const order = db
+    .prepare(
+      `SELECT o.*, c.full_name AS customer_name, u.full_name AS user_name
+       FROM orders o
+       LEFT JOIN customers c ON o.customer_id = c.id
+       LEFT JOIN users u ON o.user_id = u.id
+       WHERE o.id = ? AND o.business_id = ?`,
+    )
+    .get(orderId, businessId);
+  if (!order || order.order_type !== 'takeaway') return { created: 0, skipped: 0 };
+
+  let customer_phone = null;
+  if (order.customer_id) {
+    const ph = db
+      .prepare(
+        `SELECT phone FROM customer_phones WHERE customer_id = ? ORDER BY is_primary DESC, created_at ASC LIMIT 1`,
+      )
+      .get(order.customer_id);
+    customer_phone = ph?.phone || null;
+  }
+
+  const items = db
+    .prepare(`SELECT * FROM order_items WHERE order_id = ? AND status != 'cancelled'`)
+    .all(orderId);
+
+  const biz = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
+  const resolved = resolveReceiptPrinter(businessId);
+
+  const payload = {
+    kind: 'takeaway_label',
+    order_id: orderId,
+    order_no: order.order_no,
+    customer_name: order.customer_name || null,
+    customer_phone,
+    delivery_address: order.delivery_address || null,
+    delivery_note: order.delivery_note || null,
+    courier_note: order.courier_note || null,
+    note: order.note || null,
+    business_name: biz?.name || null,
+    created_at: order.created_at,
+    user_name: order.user_name || null,
+    routing_source: resolved.source,
+    items: items.map((i) => ({
+      product_name: i.product_name,
+      quantity: i.quantity,
+      note: i.note,
+      portion_label: i.portion_label || null,
+    })),
+  };
+
+  if (!resolved.printer) {
+    insertJob({
+      businessId,
+      orderId,
+      printerId: null,
+      jobType: 'takeaway_label',
+      payload,
+      status: 'failed',
+      errorMessage: 'Paket etiketi yazıcısı bulunamadı (varsayılan veya type=receipt)',
+      idempotencyKey,
+    });
+    if (userId) auditLog(businessId, userId, 'print_job_failed', 'order', orderId, { kind: 'takeaway_label' });
+    return { created: 1, skipped: 0, failed: true };
+  }
+
+  payload.printer_name = resolved.printer.name;
+  if (resolved.printer.line_width) payload.line_width = resolved.printer.line_width;
+  const r = insertJob({
+    businessId,
+    orderId,
+    printerId: resolved.printer.id,
+    jobType: 'takeaway_label',
+    payload,
+    status: 'pending',
+    idempotencyKey,
+  });
+
+  if (r.inserted && userId) {
+    auditLog(businessId, userId, 'print_jobs_enqueued', 'order', orderId, { kind: 'takeaway_label' });
+  }
+
+  return { created: r.inserted ? 1 : 0, skipped: r.duplicate ? 1 : 0 };
+}
+
+/**
  * Pending job'ları mock işler: printed + printed_at.
  * DISABLE_PRINT_JOB_MOCK=true iken atlanır (StoreBridge gerçek yazdırır).
  * claimed_at dolu işler köprü tarafından alınmış sayılır; mock bunları işlemez.
