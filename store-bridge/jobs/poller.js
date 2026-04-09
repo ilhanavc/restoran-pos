@@ -69,7 +69,11 @@ export function startJobPoller({ api, cfg, log = console }) {
             continue;
           }
 
-          const buffer = payloadToEscPosBuffer(j);
+          const rawOpts = printer.print_options;
+          const printerOptions = rawOpts
+            ? (typeof rawOpts === 'string' ? JSON.parse(rawOpts) : rawOpts)
+            : {};
+          const buffer = payloadToEscPosBuffer(j, printerOptions);
 
           if (cfg.dryRun) {
             log.log(`[bridge] DRY_RUN job=${activeId} conn=${conn} bytes=${buffer.length}`);

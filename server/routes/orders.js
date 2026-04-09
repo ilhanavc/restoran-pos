@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
+import { emitToRoom } from '../socket.js';
 import { validate } from '../middleware/validate.js';
 import { genId, auditLog, getNextOrderNo, resolveOrderItemPrice } from '../utils/helpers.js';
 import {
@@ -174,8 +175,7 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
         updated_at = datetime('now'), updated_by = ? WHERE id = ?
     `).run(req.user.id, req.params.id);
     auditLog(req.businessId, req.user.id, 'takeaway_delivered', 'order', req.params.id, {});
-    enqueueReceiptJobForClosedOrder(req.businessId, req.params.id, req.user.id);
-    processPendingJobsSync(req.businessId, req.user.id);
+    emitToRoom(req.businessId, 'order:takeaway_delivery', { orderId: req.params.id, action });
     return res.json({ ok: true });
   } catch (err) {
     console.error('Takeaway delivery error:', err);
@@ -375,6 +375,7 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
     order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
+    emitToRoom(req.businessId, 'order:created', { order });
     res.status(201).json(order);
   } catch (err) {
     if (err.isBadRequest) {
@@ -441,6 +442,7 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
 
     const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     updated.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    emitToRoom(req.businessId, 'order:items_added', { order: updated });
     res.json(updated);
   } catch (err) {
     if (err.isBadRequest) {
@@ -518,13 +520,14 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
       processPendingJobsSync(req.businessId, req.user.id);
     }
 
-    if (status === 'closed') {
+    if (status === 'closed' && order.order_type !== 'takeaway') {
       enqueueReceiptJobForClosedOrder(req.businessId, order.id, req.user.id);
       processPendingJobsSync(req.businessId, req.user.id);
     }
 
     const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     updated.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    emitToRoom(req.businessId, 'order:updated', { order: updated });
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -615,6 +618,7 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.orderId);
     order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+    emitToRoom(req.businessId, 'order:item_updated', { order });
     res.json(order);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });

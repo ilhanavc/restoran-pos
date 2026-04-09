@@ -17,7 +17,7 @@ export function validate(schema) {
       if (err instanceof ZodError) {
         return res.status(400).json({
           error: 'Geçersiz istek verisi',
-          details: err.errors.map((e) => ({
+          details: (err.issues ?? err.errors ?? []).map((e) => ({
             field: e.path.join('.'),
             message: e.message,
           })),

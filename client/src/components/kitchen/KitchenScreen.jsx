@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import { useSocket } from '../../context/SocketContext.jsx';
 import { formatTime, timeAgo, ORDER_STATUS } from '../../constants/index.js';
 import { RefreshCw, Clock, Package, ChefHat, Check, AlertCircle } from 'lucide-react';
 
@@ -37,6 +38,7 @@ export default function KitchenScreen() {
   const [now, setNow] = useState(Date.now());
   const prevOrderIds = useRef(new Set());
   const toast = useToast();
+  const { isConnected, subscribe } = useSocket();
 
   const loadOrders = useCallback(async () => {
     try {
@@ -62,11 +64,19 @@ export default function KitchenScreen() {
     return () => clearInterval(t);
   }, []);
 
-  // Auto-refresh every 10s
+  // Socket: sipariş değişikliklerini anlık dinle
   useEffect(() => {
-    const interval = setInterval(loadOrders, 10000);
+    const events = ['order:created', 'order:updated', 'order:item_updated', 'order:items_added'];
+    const unsubs = events.map(ev => subscribe(ev, () => loadOrders()));
+    return () => unsubs.forEach(fn => fn());
+  }, [subscribe, loadOrders]);
+
+  // Fallback polling: socket kopuksa 30s'de bir
+  useEffect(() => {
+    if (isConnected) return;
+    const interval = setInterval(loadOrders, 30000);
     return () => clearInterval(interval);
-  }, [loadOrders]);
+  }, [isConnected, loadOrders]);
 
   const updateItemStatus = async (orderId, itemId, status) => {
     try {

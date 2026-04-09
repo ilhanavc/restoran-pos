@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import { useSocket } from '../../context/SocketContext.jsx';
 import { TABLE_STATUS, formatCurrency, timeAgo } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
@@ -26,6 +27,7 @@ export default function TablesScreen({
   const [openMenuTableId, setOpenMenuTableId] = useState(null);
   const toast = useToast();
   const location = useLocation();
+  const { isConnected, subscribe } = useSocket();
 
   const loadTables = useCallback(async () => {
     try {
@@ -62,13 +64,28 @@ export default function TablesScreen({
     loadTakeaway();
   }, [showTakeawaySidebar, loadTakeaway]);
 
+  // Socket: masa ve sipariş değişikliklerini anlık dinle
   useEffect(() => {
+    const events = [
+      'table:updated', 'table:transferred',
+      'order:created', 'order:updated', 'order:takeaway_delivery',
+    ];
+    const unsubs = events.map(ev => subscribe(ev, () => {
+      loadTables();
+      loadTakeaway();
+    }));
+    return () => unsubs.forEach(fn => fn());
+  }, [subscribe, loadTables, loadTakeaway]);
+
+  // Fallback polling: socket kopuksa 30s'de bir
+  useEffect(() => {
+    if (isConnected) return;
     const interval = setInterval(() => {
       loadTables();
       loadTakeaway();
-    }, 15000);
+    }, 30000);
     return () => clearInterval(interval);
-  }, [loadTables, loadTakeaway]);
+  }, [isConnected, loadTables, loadTakeaway]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);

@@ -2,7 +2,7 @@ import db from '../config/database.js';
 import { normalizePhoneDigits } from '../utils/phoneNormalize.js';
 import { genId } from '../utils/helpers.js';
 
-const migrations = [
+export const migrations = [
   // ── Businesses & Branches ──
   `CREATE TABLE IF NOT EXISTS businesses (
     id TEXT PRIMARY KEY,

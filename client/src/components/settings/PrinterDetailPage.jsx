@@ -200,6 +200,8 @@ export default function PrinterDetailPage() {
   const [isActive, setIsActive] = useState(true);
   const [isDefault, setIsDefault] = useState(false);
   const [lineWidth, setLineWidth] = useState('');
+  const [escT, setEscT] = useState('');
+  const [skipInit, setSkipInit] = useState(false);
   const [printOptions, setPrintOptions] = useState(() => normalizePrintOptions({}, 'receipt'));
 
   const showLegacyBar = type === 'bar';
@@ -214,15 +216,20 @@ export default function PrinterDetailPage() {
       isActive,
       isDefault,
       lineWidth,
+      escT,
+      skipInit,
       printOptions,
     });
     return sig !== loadedSig;
-  }, [name, type, connectionType, ip, port, isActive, isDefault, lineWidth, printOptions, loadedSig]);
+  }, [name, type, connectionType, ip, port, isActive, isDefault, lineWidth, escT, skipInit, printOptions, loadedSig]);
 
   const snapshotState = useCallback((printer, cfg) => {
     const t = printer?.type || 'receipt';
     const po = normalizePrintOptions(printer?.print_options || {}, t);
     const lw = printer?.line_width ? String(printer.line_width) : '';
+    const rawPo = printer?.print_options || {};
+    const et = rawPo.escT != null ? String(rawPo.escT) : '';
+    const si = !!rawPo.skipInit;
     const sig = JSON.stringify({
       name: printer?.name ?? '',
       type: t,
@@ -232,6 +239,8 @@ export default function PrinterDetailPage() {
       isActive: printer?.is_active !== false,
       isDefault: cfg?.defaultPrinterId === printer?.id,
       lineWidth: lw,
+      escT: et,
+      skipInit: si,
       printOptions: po,
     });
     setName(printer?.name ?? '');
@@ -242,6 +251,8 @@ export default function PrinterDetailPage() {
     setIsActive(printer?.is_active !== false);
     setIsDefault(!!cfg?.defaultPrinterId && cfg?.defaultPrinterId === printer?.id);
     setLineWidth(lw);
+    setEscT(et);
+    setSkipInit(si);
     setPrintOptions(po);
     setLoadedSig(sig);
   }, []);
@@ -413,12 +424,15 @@ export default function PrinterDetailPage() {
       portNum = 9100;
     }
 
+    const escTNum = parseInt(escT, 10);
     const poToSave = {
       ...printOptions,
       output: {
         ...printOptions.output,
         footerNote: printOptions.layout?.footerLine1 ?? printOptions.output?.footerNote ?? '',
       },
+      escT: Number.isFinite(escTNum) && escTNum >= 0 && escTNum <= 255 ? escTNum : undefined,
+      skipInit: skipInit || undefined,
     };
 
     const lwNum = parseInt(lineWidth, 10);
@@ -665,6 +679,32 @@ export default function PrinterDetailPage() {
                 style={{ maxWidth: 120 }}
               />
             </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                ESC t kod sayfası <span style={{ fontWeight: 400 }}>— boş = varsayılan (12 / PC857 Türkçe)</span>
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>12 = PC857 Türkçe &nbsp;·&nbsp; 0 = PC437 (US) &nbsp;·&nbsp; 33 = Windows-1254</span>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                max="255"
+                value={escT}
+                onChange={(e) => setEscT(e.target.value)}
+                placeholder="12"
+                style={{ maxWidth: 120 }}
+              />
+            </label>
+            <ToggleRow
+              label="ESC @ başlatmayı atla"
+              checked={skipInit}
+              onChange={setSkipInit}
+            />
+            {skipInit && (
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                Bazı network yazıcılar ESC @ (sıfırlama) komutu sonrasında kod sayfasını varsayılana döndürür. Bu seçenek sorunu giderir.
+              </p>
+            )}
 
             <div
               style={{

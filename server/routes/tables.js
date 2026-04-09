@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { auditLog } from '../utils/helpers.js';
+import { emitToRoom } from '../socket.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -70,6 +71,7 @@ router.patch('/:id/status', tableStaff, (req, res) => {
     auditLog(req.businessId, req.user.id, 'table_status_change', 'table', req.params.id, { status });
 
     const updated = db.prepare('SELECT * FROM tables WHERE id = ?').get(req.params.id);
+    emitToRoom(req.businessId, 'table:updated', { table: updated });
     res.json(updated);
   } catch (err) {
     console.error('Table update error:', err);
@@ -105,6 +107,7 @@ router.post('/:id/transfer', tableStaff, (req, res) => {
     txn();
 
     auditLog(req.businessId, req.user.id, 'table_transfer', 'table', req.params.id, { targetTableId });
+    emitToRoom(req.businessId, 'table:transferred', { sourceTableId: req.params.id, targetTableId });
     res.json({ success: true });
   } catch (err) {
     console.error('Table transfer error:', err);

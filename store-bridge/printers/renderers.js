@@ -70,7 +70,7 @@ const PC857_MAP = new Map([
  * - ₺ → "TL" (iki byte)
  * - Bilinmeyen karakterler → 0x3F ('?')
  */
-function encodePC857(text) {
+export function encodePC857(text) {
   const src = String(text ?? '');
   const bytes = [];
   for (const ch of src) {
@@ -890,11 +890,18 @@ function buildTestLines(p) {
 
 /**
  * @param {{ job_type: string, payload: object }} job
+ * @param {{ escT?: number, skipInit?: boolean }} [printerOptions]
  */
-export function payloadToEscPosBuffer(job) {
+export function payloadToEscPosBuffer(job, printerOptions = {}) {
   const p = job.payload || {};
   const width = resolveLineWidth(p);
-  const parts = [escInit(), escSelectCodePage(resolveEscT())];
+  const escT = (printerOptions.escT != null && Number.isFinite(Number(printerOptions.escT)))
+    ? Math.max(0, Math.min(255, Math.trunc(Number(printerOptions.escT))))
+    : resolveEscT();
+  const skipInit = !!printerOptions.skipInit;
+  const parts = [];
+  if (!skipInit) parts.push(escInit());
+  parts.push(escSelectCodePage(escT));
 
   if (p.kind === 'kitchen') {
     flushStyledLines(parts, buildKitchenLines(p));

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import { useSocket } from '../../context/SocketContext.jsx';
 import { formatCurrency, formatTime, timeAgo, TAKEAWAY_STATUS } from '../../constants/index.js';
 import { ArrowLeft, Package, Plus, Phone, Search, User, MapPin, Clock, RefreshCw } from 'lucide-react';
 
@@ -17,6 +18,7 @@ export default function TakeawayScreen({ onNewOrder }) {
   const [newCustomerMode, setNewCustomerMode] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', address_title: 'Ev' });
   const toast = useToast();
+  const { isConnected, subscribe } = useSocket();
 
   const loadOrders = useCallback(async () => {
     try {
@@ -31,10 +33,19 @@ export default function TakeawayScreen({ onNewOrder }) {
 
   useEffect(() => { loadOrders(); }, []);
 
+  // Socket: paket sipariş değişikliklerini anlık dinle
   useEffect(() => {
-    const interval = setInterval(loadOrders, 15000);
+    const events = ['order:created', 'order:updated', 'order:takeaway_delivery'];
+    const unsubs = events.map(ev => subscribe(ev, () => loadOrders()));
+    return () => unsubs.forEach(fn => fn());
+  }, [subscribe, loadOrders]);
+
+  // Fallback polling: socket kopuksa 30s'de bir
+  useEffect(() => {
+    if (isConnected) return;
+    const interval = setInterval(loadOrders, 30000);
     return () => clearInterval(interval);
-  }, [loadOrders]);
+  }, [isConnected, loadOrders]);
 
   const searchCustomer = async (query) => {
     setCustomerSearch(query);

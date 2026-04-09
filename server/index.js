@@ -1,3 +1,4 @@
+import { createServer } from 'http';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -6,6 +7,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import config from './config/index.js';
 import { runMigrations } from './migrations/run.js';
+import { initSocket } from './socket.js';
 
 // Routes
 import authRoutes from './routes/auth.js';
@@ -138,7 +140,10 @@ app.use((err, req, res, next) => {
 // Start
 runMigrations();
 
-app.listen(config.port, () => {
+const httpServer = createServer(app);
+initSocket(httpServer);
+
+httpServer.listen(config.port, () => {
   console.log(`
   ╔══════════════════════════════════════╗
   ║   🍽️  Restoran POS Server           ║
