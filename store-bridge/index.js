@@ -61,6 +61,8 @@ function startDiscoveryLoop({ api, log }) {
 
 async function main() {
   const cfg = loadConfig();
+  // Renderer tarafında tek mağaza saat dilimini deterministik kullan.
+  process.env.BRIDGE_STORE_TIMEZONE = cfg.storeTimezone;
   const api = createApiClient(cfg);
 
   const health = await api.health();

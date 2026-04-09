@@ -11,6 +11,9 @@ REM set "BRIDGE_BUSINESS_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
 REM Backend ve bridge icin API kok adresi (sonunda /api).
 REM set "API_BASE=http://127.0.0.1:3001/api"
 
+REM Fis saati gosterimi icin tek magazanin saat dilimi (or. Europe/Istanbul).
+REM set "STORE_TIMEZONE=Europe/Istanbul"
+
 REM Yazdirma: gercek yazici/store-bridge kullanirken genelde true. Sadece mock yazdirmak icin false veya 0.
 REM set "DISABLE_PRINT_JOB_MOCK=true"
 

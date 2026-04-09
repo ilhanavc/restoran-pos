@@ -47,6 +47,7 @@ export function loadConfig() {
   const dryRun = req('BRIDGE_DRY_RUN') === '1' || req('BRIDGE_DRY_RUN') === 'true';
   const claimId = req('BRIDGE_CLAIM_ID', 'store-bridge');
   const socketTimeoutMs = Math.max(1000, parseInt(req('PRINT_SOCKET_TIMEOUT_MS', '8000'), 10) || 8000);
+  const storeTimezone = req('STORE_TIMEZONE', req('BRIDGE_STORE_TIMEZONE', 'Europe/Istanbul'));
 
   if (!token) {
     throw new Error('BRIDGE_TOKEN gerekli');
@@ -116,6 +117,7 @@ export function loadConfig() {
     dryRun,
     claimId,
     socketTimeoutMs,
+    storeTimezone,
     cid812Enabled,
     cid812Mode,
     cid812HidVid,

@@ -6,7 +6,139 @@ import {
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency } from '../../constants/index.js';
-import { BarChart3, TrendingUp, CreditCard, ShoppingBag, Award, Calendar, Receipt, Clock, Search, ChevronDown } from 'lucide-react';
+import { BarChart3, TrendingUp, CreditCard, ShoppingBag, Award, Calendar, Receipt, Clock, Search, ChevronDown, Download, Printer } from 'lucide-react';
+
+// ── Export yardımcıları ──────────────────────────────────────────────────────
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportToExcel(report, closedOrders, selectedDate) {
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+
+  // Özet sayfası
+  const summaryData = [
+    ['Tarih', selectedDate],
+    ['Toplam Gelir', report.revenue],
+    ['Toplam Sipariş', report.orderStats?.total_orders || 0],
+    ['Ortalama Sipariş Tutarı', Math.round((report.avgOrderValue || 0) * 100) / 100],
+    ['Masa Siparişi', report.orderStats?.dine_in_count || 0],
+    ['Paket Sipariş', report.orderStats?.takeaway_count || 0],
+    ['İptal', report.orderStats?.cancelled_count || 0],
+    ['Toplam İndirim', report.orderStats?.total_discounts || 0],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData), 'Özet');
+
+  // Ödeme dağılımı
+  if (report.paymentBreakdown?.length) {
+    const paymentLabel = { cash: 'Nakit', card: 'Kart', mixed: 'Karışık', other: 'Diğer' };
+    const payRows = [['Ödeme Tipi', 'Adet', 'Tutar']];
+    for (const p of report.paymentBreakdown) {
+      payRows.push([paymentLabel[p.payment_type] || p.payment_type, p.count, p.total]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(payRows), 'Ödemeler');
+  }
+
+  // En çok satanlar
+  if (report.topProducts?.length) {
+    const prodRows = [['Ürün', 'Adet', 'Ciro']];
+    for (const p of report.topProducts) {
+      prodRows.push([p.product_name, p.total_qty, p.total_revenue]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(prodRows), 'Ürünler');
+  }
+
+  // Kapanan siparişler
+  if (closedOrders.length) {
+    const orderRows = [['No', 'Tür', 'Masa', 'Müşteri', 'Personel', 'Ödeme', 'Tutar', 'Kapanış']];
+    for (const o of closedOrders) {
+      orderRows.push([
+        `#${o.order_no}`,
+        o.order_type === 'takeaway' ? 'Paket' : 'Masa',
+        o.table_name || '',
+        o.customer_name || '',
+        o.user_name || '',
+        o.payment_type || '',
+        o.grand_total,
+        o.closed_at || '',
+      ]);
+    }
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(orderRows), 'Siparişler');
+  }
+
+  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  downloadBlob(
+    new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    `Rapor_${selectedDate}.xlsx`,
+  );
+}
+
+function printReport(report, closedOrders, selectedDate) {
+  const paymentLabel = { cash: 'Nakit', card: 'Kart', mixed: 'Karışık', other: 'Diğer' };
+  const fmt = (n) => Number(n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺';
+
+  const orderRows = closedOrders.map(o => `
+    <tr>
+      <td>#${o.order_no}</td>
+      <td>${o.order_type === 'takeaway' ? 'Paket' : (o.table_name || '—')}</td>
+      <td>${o.customer_name || '—'}</td>
+      <td>${o.user_name || '—'}</td>
+      <td>${paymentLabel[o.payment_type] || o.payment_type || '—'}</td>
+      <td style="text-align:right;font-weight:600">${fmt(o.grand_total)}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8">
+  <title>Günlük Rapor — ${selectedDate}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:20px}
+    h1{font-size:16px;margin-bottom:4px} h2{font-size:13px;margin:14px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px}
+    .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+    .card{border:1px solid #ddd;border-radius:4px;padding:10px;text-align:center}
+    .card-val{font-size:18px;font-weight:700;color:#4f46e5} .card-lbl{font-size:10px;color:#666;margin-top:2px}
+    table{width:100%;border-collapse:collapse;font-size:11px}
+    th{background:#4f46e5;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
+    td{padding:5px 8px;border-bottom:1px solid #eee} tr:nth-child(even) td{background:#f9f9f9}
+    @media print{body{margin:8px}}
+  </style></head><body>
+  <h1>Günlük Satış Raporu</h1>
+  <p style="color:#666;font-size:11px;margin-bottom:12px">Tarih: ${selectedDate}</p>
+  <div class="grid">
+    <div class="card"><div class="card-val">${fmt(report.revenue)}</div><div class="card-lbl">Toplam Gelir</div></div>
+    <div class="card"><div class="card-val">${report.orderStats?.total_orders || 0}</div><div class="card-lbl">Sipariş</div></div>
+    <div class="card"><div class="card-val">${fmt(report.avgOrderValue)}</div><div class="card-lbl">Ort. Tutar</div></div>
+    <div class="card"><div class="card-val">${fmt(report.orderStats?.total_discounts)}</div><div class="card-lbl">İndirim</div></div>
+  </div>
+  ${report.paymentBreakdown?.length ? `
+  <h2>Ödeme Dağılımı</h2>
+  <table><thead><tr><th>Tip</th><th>Adet</th><th>Tutar</th></tr></thead><tbody>
+  ${report.paymentBreakdown.map(p => `<tr><td>${paymentLabel[p.payment_type]||p.payment_type}</td><td>${p.count}</td><td>${fmt(p.total)}</td></tr>`).join('')}
+  </tbody></table>` : ''}
+  ${report.topProducts?.length ? `
+  <h2>En Çok Satan Ürünler</h2>
+  <table><thead><tr><th>Ürün</th><th>Adet</th><th>Ciro</th></tr></thead><tbody>
+  ${report.topProducts.slice(0,10).map(p=>`<tr><td>${p.product_name}</td><td>${p.total_qty}</td><td>${fmt(p.total_revenue)}</td></tr>`).join('')}
+  </tbody></table>` : ''}
+  ${closedOrders.length ? `
+  <h2>Kapanan Siparişler (${closedOrders.length})</h2>
+  <table><thead><tr><th>No</th><th>Tür</th><th>Müşteri</th><th>Personel</th><th>Ödeme</th><th>Tutar</th></tr></thead>
+  <tbody>${orderRows}</tbody></table>` : ''}
+  </body></html>`;
+
+  const w = window.open('', '_blank', 'width=900,height=700');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 300);
+}
 
 const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#14b8a6', '#a855f7'];
 
@@ -172,6 +304,28 @@ export default function ReportsScreen() {
           <input type="date" className="input" value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)}
             style={{ width: 180 }} />
+          {report && (
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => exportToExcel(report, closedOrders, selectedDate)}
+                title="Excel olarak indir"
+                style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+              >
+                <Download size={14} /> Excel
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => printReport(report, closedOrders, selectedDate)}
+                title="Yazdır / PDF kaydet"
+                style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+              >
+                <Printer size={14} /> Yazdır
+              </button>
+            </>
+          )}
         </div>
       </div>
 

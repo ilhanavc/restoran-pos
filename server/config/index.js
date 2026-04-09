@@ -51,6 +51,7 @@ export default {
     token: process.env.BRIDGE_TOKEN || '',
     businessId: process.env.BRIDGE_BUSINESS_ID || '',
   },
+  storeTimezone: process.env.STORE_TIMEZONE || 'Europe/Istanbul',
 
   /** true ise processPendingJobsSync sunucu içi mock yazdırmayı yapmaz (StoreBridge kullanılır).
    *  Varsayılan: true (mock KAPALI, gerçek yazdırma AÇIK).

@@ -7,6 +7,7 @@
 const DEFAULT_LINE_WIDTH = 42;
 const MIN_LINE_WIDTH = 32;
 const MAX_LINE_WIDTH = 64;
+const DEFAULT_STORE_TIMEZONE = 'Europe/Istanbul';
 
 /**
  * Varsayılan ESC t kod sayfası: 12 = PC857 (IBM Turkish).
@@ -71,7 +72,7 @@ const PC857_MAP = new Map([
  * - Bilinmeyen karakterler → 0x3F ('?')
  */
 export function encodePC857(text) {
-  const src = String(text ?? '');
+  const src = normalizePrintableText(String(text ?? ''));
   const bytes = [];
   for (const ch of src) {
     // ASCII aralığı — doğrudan geç
@@ -95,6 +96,58 @@ export function encodePC857(text) {
     bytes.push(0x3f);
   }
   return Buffer.from(bytes);
+}
+
+function normalizePrintableText(input) {
+  return String(input ?? '')
+    .replaceAll('…', '...')
+    .replaceAll('’', "'")
+    .replaceAll('‘', "'")
+    .replaceAll('“', '"')
+    .replaceAll('”', '"')
+    .replaceAll('–', '-')
+    .replaceAll('—', '-')
+    .replaceAll('•', '*')
+    .replaceAll('\u00a0', ' ');
+}
+
+function charDisplayWidth(ch) {
+  // TL simgesi byte seviyesinde "TL" olarak yazılır.
+  return ch === '₺' ? 2 : 1;
+}
+
+function displayWidth(text) {
+  const src = normalizePrintableText(String(text ?? ''));
+  let w = 0;
+  for (const ch of src) w += charDisplayWidth(ch);
+  return w;
+}
+
+function sliceByDisplayWidth(text, maxWidth) {
+  const src = normalizePrintableText(String(text ?? ''));
+  const lim = Math.max(0, Number(maxWidth) || 0);
+  if (lim <= 0) return '';
+  let out = '';
+  let w = 0;
+  for (const ch of src) {
+    const cw = charDisplayWidth(ch);
+    if (w + cw > lim) break;
+    out += ch;
+    w += cw;
+  }
+  return out;
+}
+
+function padEndDisplayWidth(text, width) {
+  const t = sliceByDisplayWidth(text, width);
+  const pad = Math.max(0, width - displayWidth(t));
+  return t + ' '.repeat(pad);
+}
+
+function padStartDisplayWidth(text, width) {
+  const t = sliceByDisplayWidth(text, width);
+  const pad = Math.max(0, width - displayWidth(t));
+  return ' '.repeat(pad) + t;
 }
 
 function concat(buffers) {
@@ -211,10 +264,11 @@ function separatorStrongSpaced(width = DEFAULT_LINE_WIDTH) {
 
 /** @param {string} s */
 function centerLine(s, width = DEFAULT_LINE_WIDTH) {
-  const t = String(s ?? '').trim();
+  const t = normalizePrintableText(String(s ?? '').trim());
   if (!t) return '';
-  if (t.length >= width) return t.slice(0, width);
-  const pad = width - t.length;
+  const tw = displayWidth(t);
+  if (tw >= width) return sliceByDisplayWidth(t, width);
+  const pad = width - tw;
   const left = Math.floor(pad / 2);
   return ' '.repeat(left) + t + ' '.repeat(pad - left);
 }
@@ -234,15 +288,18 @@ function centerLines(s, width = DEFAULT_LINE_WIDTH) {
  * @param {number} width
  */
 function alignLeftRight(left, right, width = DEFAULT_LINE_WIDTH) {
-  const L = String(left ?? '').trimEnd();
-  const R = String(right ?? '').trim();
-  if (!R) return L.slice(0, width);
-  const room = width - R.length;
-  if (room < 1) return R.slice(0, width);
-  if (L.length <= room) {
-    return L + ' '.repeat(room - L.length) + R;
+  const L = normalizePrintableText(String(left ?? '').trimEnd());
+  const R = normalizePrintableText(String(right ?? '').trim());
+  if (!R) return sliceByDisplayWidth(L, width);
+  const rightW = displayWidth(R);
+  const room = width - rightW;
+  if (room < 1) return sliceByDisplayWidth(R, width);
+  const leftW = displayWidth(L);
+  if (leftW <= room) {
+    return L + ' '.repeat(room - leftW) + R;
   }
-  return L.slice(0, Math.max(0, room - 1)) + '…' + R;
+  const cut = Math.max(0, room - 3);
+  return `${sliceByDisplayWidth(L, cut)}...${R}`;
 }
 
 /**
@@ -252,25 +309,28 @@ function alignLeftRight(left, right, width = DEFAULT_LINE_WIDTH) {
  * @returns {string[]}
  */
 function wrapText(text, maxWidth) {
-  const s = String(text ?? '').trim();
+  const s = normalizePrintableText(String(text ?? '').trim());
   if (!s) return [];
   const words = s.split(/\s+/).filter(Boolean);
   const lines = [];
   let cur = '';
   for (const w of words) {
     const test = cur ? `${cur} ${w}` : w;
-    if (test.length <= maxWidth) {
+    if (displayWidth(test) <= maxWidth) {
       cur = test;
       continue;
     }
     if (cur) lines.push(cur);
-    if (w.length <= maxWidth) {
+    if (displayWidth(w) <= maxWidth) {
       cur = w;
     } else {
-      for (let i = 0; i < w.length; i += maxWidth) {
-        lines.push(w.slice(i, i + maxWidth));
+      let rest = w;
+      while (displayWidth(rest) > maxWidth) {
+        const head = sliceByDisplayWidth(rest, maxWidth);
+        lines.push(head);
+        rest = rest.slice(head.length);
       }
-      cur = '';
+      cur = rest;
     }
   }
   if (cur) lines.push(cur);
@@ -285,26 +345,26 @@ function wrapText(text, maxWidth) {
  * @returns {string[]}
  */
 function linesProductQty(productName, qtyLabel, width = DEFAULT_LINE_WIDTH) {
-  const right = String(qtyLabel ?? '').trim() || '';
-  const name = String(productName ?? '').trim() || '-';
+  const right = normalizePrintableText(String(qtyLabel ?? '').trim()) || '';
+  const name = normalizePrintableText(String(productName ?? '').trim()) || '-';
   if (!right) return wrapText(name, width);
 
-  const spaceForName = width - right.length;
+  const spaceForName = width - displayWidth(right);
   if (spaceForName < 6) {
-    return [...wrapText(name, width), right.padStart(width)];
+    return [...wrapText(name, width), padStartDisplayWidth(right, width)];
   }
-  if (name.length <= spaceForName) {
+  if (displayWidth(name) <= spaceForName) {
     return [alignLeftRight(name, right, width)];
   }
 
   const wrapped = wrapText(name, width);
   const last = wrapped[wrapped.length - 1];
   const merged = `${last} ${right}`.trimEnd();
-  if (merged.length <= width) {
+  if (displayWidth(merged) <= width) {
     wrapped[wrapped.length - 1] = alignLeftRight(last, right, width);
     return wrapped;
   }
-  return [...wrapped, right.padStart(width)];
+  return [...wrapped, padStartDisplayWidth(right, width)];
 }
 
 function formatQty(q) {
@@ -334,59 +394,83 @@ function fmtMoney(n) {
   }).format(Number(n));
 }
 
+function resolveStoreTimeZone() {
+  return String(process.env.BRIDGE_STORE_TIMEZONE || process.env.STORE_TIMEZONE || DEFAULT_STORE_TIMEZONE).trim();
+}
+
+function parseUtcLikeTimestamp(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return new Date();
+  // SQLite datetime('now') -> "YYYY-MM-DD HH:mm:ss" (UTC)
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+    return new Date(raw.replace(' ', 'T') + 'Z');
+  }
+  // ISO ama timezone suffix yoksa UTC kabul et.
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
+    return new Date(raw + 'Z');
+  }
+  return new Date(raw);
+}
+
+function formatDateWithStoreTimezone(date, opts) {
+  return new Intl.DateTimeFormat('tr-TR', {
+    timeZone: resolveStoreTimeZone(),
+    ...opts,
+  }).format(date);
+}
+
 function fmtDateTime(iso) {
-  if (!iso) {
-    return new Date().toLocaleString('tr-TR');
-  }
-  try {
-    const raw = String(iso).trim();
-    const d = new Date(raw.includes('T') ? raw : raw.replace(' ', 'T'));
-    if (Number.isNaN(d.getTime())) return raw;
-    return d.toLocaleString('tr-TR');
-  } catch {
-    return String(iso);
-  }
+  const raw = String(iso ?? '').trim();
+  const d = parseUtcLikeTimestamp(raw);
+  if (Number.isNaN(d.getTime())) return raw || '-';
+  return formatDateWithStoreTimezone(d, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
 }
 
 function fmtDateTimeCompact(iso) {
-  try {
-    const raw = String(iso || '').trim();
-    const d = raw ? new Date(raw.includes('T') ? raw : raw.replace(' ', 'T')) : new Date();
-    if (Number.isNaN(d.getTime())) return fmtDateTime(iso);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  } catch {
-    return fmtDateTime(iso);
-  }
+  const raw = String(iso ?? '').trim();
+  const d = parseUtcLikeTimestamp(raw);
+  if (Number.isNaN(d.getTime())) return fmtDateTime(iso);
+  return formatDateWithStoreTimezone(d, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).replace(',', '');
 }
 
 function fmtWeekdayTime(iso) {
-  try {
-    const raw = String(iso || '').trim();
-    const d = raw ? new Date(raw.includes('T') ? raw : raw.replace(' ', 'T')) : new Date();
-    if (Number.isNaN(d.getTime())) return '';
-    const days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${days[d.getDay()]} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  } catch {
-    return '';
-  }
+  const raw = String(iso ?? '').trim();
+  const d = parseUtcLikeTimestamp(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return formatDateWithStoreTimezone(d, {
+    weekday: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).replace(',', '');
 }
 
 /** Örn. 21 Mart 2026 */
 function fmtDateTurkishLong(iso) {
-  try {
-    const raw = String(iso || '').trim();
-    const d = raw ? new Date(raw.includes('T') ? raw : raw.replace(' ', 'T')) : new Date();
-    if (Number.isNaN(d.getTime())) return '';
-    return new Intl.DateTimeFormat('tr-TR', {
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric',
-    }).format(d);
-  } catch {
-    return '';
-  }
+  const raw = String(iso ?? '').trim();
+  const d = parseUtcLikeTimestamp(raw);
+  if (Number.isNaN(d.getTime())) return '';
+  return formatDateWithStoreTimezone(d, {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
 function orderTypeTitle(orderType) {
@@ -436,9 +520,9 @@ function shortTicketNo(orderNo) {
 }
 
 function trimFixed(s, max) {
-  const t = String(s ?? '');
-  if (t.length <= max) return t;
-  return t.slice(0, Math.max(0, max - 1)) + '…';
+  const t = normalizePrintableText(String(s ?? ''));
+  if (displayWidth(t) <= max) return t;
+  return `${sliceByDisplayWidth(t, Math.max(0, max - 3))}...`;
 }
 
 /** Kasa fişi: üç sütun (ürün | porsiyon-adet | tutar) — tek satır (başlık için) */
@@ -446,9 +530,9 @@ function lineReceiptThreeCols(productName, midCol, price, width) {
   const c3 = 11;
   const c1 = Math.max(12, Math.floor((width - c3) * 0.55));
   const c2 = width - c1 - c3;
-  const left = trimFixed(productName, c1).padEnd(c1);
-  const mid = trimFixed(midCol, c2).padEnd(c2);
-  const right = trimFixed(price, c3).padStart(c3);
+  const left = padEndDisplayWidth(trimFixed(productName, c1), c1);
+  const mid = padEndDisplayWidth(trimFixed(midCol, c2), c2);
+  const right = padStartDisplayWidth(trimFixed(price, c3), c3);
   return (left + mid + right).slice(0, width);
 }
 
@@ -462,16 +546,16 @@ function linesReceiptThreeCols(productName, midCol, price, width) {
   const c1 = Math.max(12, Math.floor((width - c3) * 0.55));
   const c2 = width - c1 - c3;
   const name = String(productName ?? '').trim();
-  const midStr = trimFixed(String(midCol ?? ''), c2).padEnd(c2);
-  const rightStr = trimFixed(String(price ?? ''), c3).padStart(c3);
+  const midStr = padEndDisplayWidth(trimFixed(String(midCol ?? ''), c2), c2);
+  const rightStr = padStartDisplayWidth(trimFixed(String(price ?? ''), c3), c3);
 
-  if (name.length <= c1) {
-    return [name.padEnd(c1) + midStr + rightStr];
+  if (displayWidth(name) <= c1) {
+    return [padEndDisplayWidth(name, c1) + midStr + rightStr];
   }
 
   // Ad c1'den uzun: kelime sarmalama uygula, fiyat/adet ilk satırda
   const nameLines = wrapText(name, c1);
-  const firstLine = nameLines[0].padEnd(c1) + midStr + rightStr;
+  const firstLine = padEndDisplayWidth(nameLines[0], c1) + midStr + rightStr;
   const rest = nameLines.slice(1); // devam satırları (sadece ad)
   return [firstLine, ...rest];
 }
@@ -875,7 +959,7 @@ function buildTestLines(p) {
   out.push({ text: centerLine('Türkçe Karakter Testi', w), bold: true });
   out.push(centerLine('ÇĞİÖŞÜ çğıöşü', w));
   out.push(centerLine('Çorba Göbek İmam Öküz Şeker Ücret', w));
-  out.push(centerLine(`ESC t: ${resolveEscT()} | PC857`, w));
+  out.push(centerLine(`ESC t: ${p?.esc_t ?? resolveEscT()} | PC857`, w));
   out.push(sep);
   const lines = Array.isArray(p.lines) ? p.lines : [];
   for (const line of lines) {
@@ -899,24 +983,25 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
     ? Math.max(0, Math.min(255, Math.trunc(Number(printerOptions.escT))))
     : resolveEscT();
   const skipInit = !!printerOptions.skipInit;
+  const renderPayload = { ...p, esc_t: escT };
   const parts = [];
   if (!skipInit) parts.push(escInit());
   parts.push(escSelectCodePage(escT));
 
-  if (p.kind === 'kitchen') {
-    flushStyledLines(parts, buildKitchenLines(p));
-  } else if (p.kind === 'kitchen_adjustment') {
-    flushStyledLines(parts, buildKitchenAdjustmentLines(p));
-  } else if (p.kind === 'receipt') {
-    flushStyledLines(parts, buildReceiptLines(p));
-  } else if (p.kind === 'takeaway_label') {
-    flushStyledLines(parts, buildTakeawayLabelLines(p));
-  } else if (p.kind === 'test') {
-    flushStyledLines(parts, buildTestLines(p));
+  if (renderPayload.kind === 'kitchen') {
+    flushStyledLines(parts, buildKitchenLines(renderPayload));
+  } else if (renderPayload.kind === 'kitchen_adjustment') {
+    flushStyledLines(parts, buildKitchenAdjustmentLines(renderPayload));
+  } else if (renderPayload.kind === 'receipt') {
+    flushStyledLines(parts, buildReceiptLines(renderPayload));
+  } else if (renderPayload.kind === 'takeaway_label') {
+    flushStyledLines(parts, buildTakeawayLabelLines(renderPayload));
+  } else if (renderPayload.kind === 'test') {
+    flushStyledLines(parts, buildTestLines(renderPayload));
   } else {
     parts.push(textLine(separator(width)));
     parts.push(textLine(`İş: ${job.job_type || '?'}`));
-    parts.push(textLine(String(JSON.stringify(p)).slice(0, width * 2)));
+    parts.push(textLine(String(JSON.stringify(renderPayload)).slice(0, width * 2)));
   }
 
   if (process.env.BRIDGE_PRINT_DEBUG_TURKISH === '1') {

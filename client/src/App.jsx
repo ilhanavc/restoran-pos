@@ -8,7 +8,6 @@ import TablesScreen from './components/tables/TablesScreen.jsx';
 import OrderScreen from './components/orders/OrderScreen.jsx';
 import PaymentScreen from './components/payments/PaymentScreen.jsx';
 import KitchenScreen from './components/kitchen/KitchenScreen.jsx';
-import TakeawayScreen from './components/takeaway/TakeawayScreen.jsx';
 import CustomersScreen from './components/customers/CustomersScreen.jsx';
 import ReportsScreen from './components/reports/ReportsScreen.jsx';
 import api from './services/api.js';
@@ -140,7 +139,7 @@ export default function App() {
           onToggle={() => setSidebarOpen((prev) => !prev)}
           onNavigate={() => setSidebarOpen(false)}
           showTakeawayQuickButton={isTablesPage && canSeeTakeawayQuickButton}
-          onTakeawayQuickClick={() => navigate('/takeaway')}
+          onTakeawayQuickClick={() => handleNewTakeawayOrder()}
         />
       )}
       <main className={`app-content ${isOrderScreen ? 'no-sidebar' : ''}`}>
@@ -161,7 +160,6 @@ export default function App() {
               />
             </ProtectedRoute>
           } />
-          <Route path="/takeaway" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><TakeawayScreen onNewOrder={handleNewTakeawayOrder} /></ProtectedRoute>} />
           <Route path="/kitchen" element={<ProtectedRoute requiredRoles={['admin', 'kitchen']}><KitchenScreen /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><CustomersScreen /></ProtectedRoute>} />
           <Route path="/reservations" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><ReservationsScreen /></ProtectedRoute>} />

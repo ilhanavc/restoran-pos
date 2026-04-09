@@ -41,6 +41,9 @@ export default function OrderScreen({
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerList, setCustomerList] = useState([]);
   const [customerListLoading, setCustomerListLoading] = useState(false);
+  const [newCustomerMode, setNewCustomerMode] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', address_title: 'Ev' });
+  const [selectedTakeawayAddress, setSelectedTakeawayAddress] = useState(customer?.selectedAddress || '');
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
@@ -63,15 +66,21 @@ export default function OrderScreen({
         id: existingOrder.customer_id,
         full_name: existingOrder.customer_name || '',
       });
+      if (orderType === 'takeaway' && existingOrder.delivery_address) {
+        setSelectedTakeawayAddress(existingOrder.delivery_address);
+      }
     } else {
       setSelectedCustomer(null);
     }
-  }, [existingOrder?.id, existingOrder?.customer_id, existingOrder?.customer_name]);
+  }, [existingOrder?.id, existingOrder?.customer_id, existingOrder?.customer_name, existingOrder?.delivery_address, orderType]);
 
   useEffect(() => {
     if (existingOrder?.id) return;
     setSelectedCustomer(customer ?? null);
-  }, [customer, existingOrder?.id]);
+    if (orderType === 'takeaway') {
+      setSelectedTakeawayAddress(customer?.selectedAddress || '');
+    }
+  }, [customer, existingOrder?.id, orderType]);
 
   useEffect(() => {
     if (orderType !== 'takeaway') return;
@@ -84,6 +93,12 @@ export default function OrderScreen({
       setTakeawayPhone('');
     }
   }, [orderType, customer, prefillPhone]);
+
+  const normalizeCustomerList = (data) => {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.customers)) return data.customers;
+    return [];
+  };
 
   const loadCategories = async () => {
     setCategoriesLoading(true);
@@ -308,6 +323,11 @@ export default function OrderScreen({
 
   const handleSaveOrder = async ({ skipNavigate = false } = {}) => {
     if (cartItems.length === 0) { toast.error('Sipariş boş'); return null; }
+    if (orderType === 'takeaway' && !selectedCustomer?.id) {
+      openCustomerModal();
+      toast.error('Paket sipariş için müşteri seçimi zorunludur');
+      return null;
+    }
     setSaving(true);
     try {
       if (existingOrder) {
@@ -329,7 +349,7 @@ export default function OrderScreen({
         order_type: orderType,
         customer_id: selectedCustomer?.id || null,
         guest_count: table?.guest_count || 0,
-        delivery_address: customer?.selectedAddress || null,
+        delivery_address: selectedTakeawayAddress || customer?.selectedAddress || null,
         items: cartItems.map((ci) => ({
           product_id: ci.product_id,
           quantity: ci.quantity,
@@ -467,7 +487,7 @@ export default function OrderScreen({
       } else {
         data = await api.getCustomers();
       }
-      setCustomerList(data || []);
+      setCustomerList(normalizeCustomerList(data));
     } catch {
       toast.error('Müşteriler yüklenemedi');
       setCustomerList([]);
@@ -479,6 +499,8 @@ export default function OrderScreen({
   const openCustomerModal = () => {
     setCustomerModalOpen(true);
     setCustomerSearchQuery('');
+    setNewCustomerMode(false);
+    setNewCustomer({ full_name: '', phone: '', address: '', address_title: 'Ev' });
     loadCustomersForModal('');
   };
 
@@ -505,6 +527,10 @@ export default function OrderScreen({
   const handlePickCustomer = async (cust) => {
     const next = { id: cust.id, full_name: cust.full_name };
     setSelectedCustomer(next);
+    if (orderType === 'takeaway') {
+      const defaultAddr = cust.addresses?.find((a) => a.is_default) || cust.addresses?.[0];
+      setSelectedTakeawayAddress(defaultAddr?.address || '');
+    }
     setCustomerModalOpen(false);
     if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
       try {
@@ -522,6 +548,7 @@ export default function OrderScreen({
   };
 
   const handleClearTableCustomer = async () => {
+    if (orderType === 'takeaway') return;
     setSelectedCustomer(null);
     setCustomerModalOpen(false);
     if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
@@ -536,6 +563,20 @@ export default function OrderScreen({
       } finally {
         setSaving(false);
       }
+    }
+  };
+
+  const handleCreateCustomerFromModal = async () => {
+    try {
+      const cust = await api.createCustomer(newCustomer);
+      setSelectedCustomer({ id: cust.id, full_name: cust.full_name });
+      setSelectedTakeawayAddress(newCustomer.address || '');
+      setCustomerModalOpen(false);
+      setNewCustomerMode(false);
+      setNewCustomer({ full_name: '', phone: '', address: '', address_title: 'Ev' });
+      toast.success('Müşteri oluşturuldu');
+    } catch (err) {
+      toast.error(err.message || 'Müşteri oluşturulamadı');
     }
   };
 
@@ -1081,6 +1122,11 @@ export default function OrderScreen({
                 <Save size={15} /> Kaydet
               </button>
             )}
+            {orderType === 'takeaway' && !selectedCustomer?.id && cartItems.length > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--danger)', textAlign: 'center' }}>
+                Kaydetmeden önce müşteri seçimi zorunludur.
+              </div>
+            )}
             {existingOrder && cartItems.length === 0 && existingOrder.status !== 'closed' && (
               <button
                 type="button"
@@ -1207,11 +1253,11 @@ export default function OrderScreen({
         />
       )}
 
-      {customerModalOpen && orderType === 'dine_in' && (
+      {customerModalOpen && (
         <div className="modal-overlay" onClick={() => setCustomerModalOpen(false)}>
           <div className="modal modal-md order-customer-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Kayıtlı müşteri seç</h2>
+              <h2>{orderType === 'takeaway' ? 'Müşteri seçimi zorunlu' : 'Kayıtlı müşteri seç'}</h2>
               <button type="button" className="btn btn-ghost btn-icon" onClick={() => setCustomerModalOpen(false)} title="Kapat">
                 <X size={16} />
               </button>
@@ -1233,8 +1279,51 @@ export default function OrderScreen({
                   <span>
                     Seçili: <strong>{selectedCustomer.full_name}</strong>
                   </span>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={handleClearTableCustomer} disabled={saving}>
-                    Kaldır
+                  {orderType !== 'takeaway' && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={handleClearTableCustomer} disabled={saving}>
+                      Kaldır
+                    </button>
+                  )}
+                </div>
+              )}
+              {!selectedCustomer && (
+                <div style={{ marginBottom: 10 }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setNewCustomerMode((prev) => !prev)}
+                  >
+                    <Plus size={14} /> Yeni Müşteri
+                  </button>
+                </div>
+              )}
+              {newCustomerMode && !selectedCustomer && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  <input
+                    className="input"
+                    placeholder="Ad Soyad"
+                    value={newCustomer.full_name}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, full_name: e.target.value }))}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Telefon"
+                    value={newCustomer.phone}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, phone: e.target.value }))}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Adres"
+                    value={newCustomer.address}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, address: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleCreateCustomerFromModal}
+                    disabled={!newCustomer.full_name || !newCustomer.phone}
+                  >
+                    Müşteri Oluştur
                   </button>
                 </div>
               )}
@@ -1265,6 +1354,20 @@ export default function OrderScreen({
                   </div>
                 )}
               </div>
+              {orderType === 'takeaway' && selectedCustomer && (
+                <div style={{ marginTop: 10 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                    Teslimat Adresi
+                  </label>
+                  <textarea
+                    className="input"
+                    rows={2}
+                    value={selectedTakeawayAddress}
+                    onChange={(e) => setSelectedTakeawayAddress(e.target.value)}
+                    placeholder="Teslimat adresi..."
+                  />
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button type="button" className="btn btn-ghost" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
