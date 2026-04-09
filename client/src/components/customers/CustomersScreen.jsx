@@ -168,7 +168,7 @@ export default function CustomersScreen() {
   const exportFileNameBase = () => {
     const now = new Date();
     const p2 = (n) => String(n).padStart(2, '0');
-    return `Musteriler_${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}_${p2(now.getHours())}${p2(now.getMinutes())}`;
+    return `Müşteriler_${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}_${p2(now.getHours())}${p2(now.getMinutes())}`;
   };
 
   const downloadBlob = (blob, filename) => {

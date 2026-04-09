@@ -20,7 +20,7 @@ import { MENU_ICON_OPTIONS, MENU_COLOR_OPTIONS } from '../../constants/menuUi.js
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 
 const PRINTER_OPTIONS = [
-  { value: 'kitchen', label: 'Muıtfak' },
+  { value: 'kitchen', label: 'Mutfak' },
   { value: 'bar', label: 'Bar' },
 ];
 

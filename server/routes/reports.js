@@ -1,9 +1,55 @@
 import { Router } from 'express';
 import db from '../config/database.js';
+import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
+
+function toSqliteUtcDateTime(ms) {
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function getTimeZoneOffsetMs(utcMs, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(utcMs));
+  const map = Object.fromEntries(parts.filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
+  const asUtc = Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+    Number(map.hour),
+    Number(map.minute),
+    Number(map.second),
+  );
+  return asUtc - utcMs;
+}
+
+function getUtcRangeForStoreDate(dateStr, timeZone) {
+  const [y, m, d] = String(dateStr || '').split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const baseStart = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const baseEnd = Date.UTC(y, m - 1, d + 1, 0, 0, 0);
+
+  let startUtc = baseStart;
+  let endUtc = baseEnd;
+  for (let i = 0; i < 3; i += 1) {
+    startUtc = baseStart - getTimeZoneOffsetMs(startUtc, timeZone);
+    endUtc = baseEnd - getTimeZoneOffsetMs(endUtc, timeZone);
+  }
+  return {
+    fromUtc: toSqliteUtcDateTime(startUtc),
+    toUtc: toSqliteUtcDateTime(endUtc),
+  };
+}
 
 // GET /api/reports/daily
 router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
@@ -75,13 +121,21 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
       ORDER BY o.created_at
     `).all(req.businessId, targetDate);
 
-    const paidOrderCount = db.prepare(`
-      SELECT COUNT(DISTINCT order_id) as cnt FROM payments
-      WHERE business_id = ? AND date(created_at) = ?
-    `).get(req.businessId, targetDate);
+    const storeDateRange = getUtcRangeForStoreDate(targetDate, config.storeTimezone || 'Europe/Istanbul');
+    const closedOrderStatsForAvg = storeDateRange
+      ? db.prepare(`
+        SELECT COUNT(*) as cnt, COALESCE(SUM(grand_total), 0) as total
+        FROM orders
+        WHERE business_id = ?
+          AND status = 'closed'
+          AND closed_at IS NOT NULL
+          AND closed_at >= ?
+          AND closed_at < ?
+      `).get(req.businessId, storeDateRange.fromUtc, storeDateRange.toUtc)
+      : { cnt: 0, total: 0 };
 
-    const avgOrderValue = paidOrderCount.cnt > 0
-      ? revenue.total / paidOrderCount.cnt
+    const avgOrderValue = closedOrderStatsForAvg.cnt > 0
+      ? closedOrderStatsForAvg.total / closedOrderStatsForAvg.cnt
       : 0;
 
     res.json({

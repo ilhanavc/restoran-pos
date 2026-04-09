@@ -108,7 +108,7 @@ export default function KitchenScreen() {
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800 }}>
             <ChefHat size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-            Muıtfak Ekranı
+            Mutfak Ekranı
           </h1>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
             {orders.length} aktif sipariş

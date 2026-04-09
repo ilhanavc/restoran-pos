@@ -156,7 +156,7 @@ export function resetPrintOptionsForType(type) {
 }
 
 export const primaryTypeLabel = (t) =>
-  ({ receipt: 'Adisyon', kitchen: 'Muıtfak', bar: 'Bar' }[t] || t);
+  ({ receipt: 'Adisyon', kitchen: 'Mutfak', bar: 'Bar' }[t] || t);
 
 /** Liste sütunu */
 export const listTypeLabel = (t) => {
@@ -166,7 +166,7 @@ export const listTypeLabel = (t) => {
 
 export const ROLE_LABELS = {
   receipt: 'Adisyon',
-  kitchen: 'Muıtfak',
+  kitchen: 'Mutfak',
   bar: 'Bar',
   courier: 'Kurye',
   server: 'Abiye',

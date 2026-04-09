@@ -38,7 +38,7 @@ const BRIDGE_DOT = {
 const NAV_ITEMS = [
   { id: 'home', path: '/home', label: 'Anasayfa', icon: Home, roles: ['admin', 'cashier'] },
   { id: 'tables', path: '/tables', label: 'Masalar', icon: LayoutGrid, roles: ['admin', 'cashier', 'waiter'] },
-  { id: 'kitchen', path: '/kitchen', label: 'Muıtfak', icon: ChefHat, roles: ['admin', 'kitchen'] },
+  { id: 'kitchen', path: '/kitchen', label: 'Mutfak', icon: ChefHat, roles: ['admin', 'kitchen'] },
   { id: 'customers', path: '/customers', label: 'Müşteriler', icon: Users, roles: ['admin', 'cashier'] },
   { id: 'reservations', path: '/reservations', label: 'Rezervasyonlar', icon: CalendarDays, roles: ['admin', 'cashier'] },
   { id: 'stock', path: '/stock', label: 'Stok', icon: Boxes, roles: ['admin', 'cashier'] },
@@ -96,8 +96,8 @@ export default function Sidebar({
           type="button"
           className="sidebar-toggle-btn"
           onClick={onToggle}
-          aria-label={isOpen ? 'Sidebarı kapat' : 'Sidebarı aç'}
-          title={isOpen ? 'Sidebarı kapat' : 'Sidebarı aç'}
+          aria-label={isOpen ? "Sidebar'ı kapat" : "Sidebar'ı aç"}
+          title={isOpen ? "Sidebar'ı kapat" : "Sidebar'ı aç"}
         >
           {isOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
         </button>

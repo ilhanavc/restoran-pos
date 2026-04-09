@@ -735,7 +735,7 @@ export default function TablesScreen({
         <div className="modal-overlay" onClick={() => setCallModalOpen(false)}>
           <div className="modal modal-lg calls-history-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2>Caller ID Son 7 Gunluk Arama Gecmisi</h2>
+              <h2>Caller ID Son 7 Günlük Arama Geçmişi</h2>
               <button className="btn btn-ghost btn-icon" onClick={() => setCallModalOpen(false)} title="Kapat">
                 <X size={14} />
               </button>
@@ -745,7 +745,7 @@ export default function TablesScreen({
                 <div className="empty-state">Yükleniyor...</div>
               ) : callHistory.length === 0 ? (
                 <div className="empty-state">
-                  <div className="empty-state-text">Gosterilecek arama kaydi bulunamadi</div>
+                  <div className="empty-state-text">Gösterilecek arama kaydı bulunamadı</div>
                 </div>
               ) : (
                 <table className="data-table calls-history-table">
@@ -753,7 +753,7 @@ export default function TablesScreen({
                     <tr>
                       <th>#</th>
                       <th>Numara</th>
-                      <th>Musteri</th>
+                      <th>Müşteri</th>
                       <th>Arama Tarih/Saat</th>
                       <th>Durum</th>
                       <th>Sipariş</th>
@@ -766,7 +766,7 @@ export default function TablesScreen({
                         <tr key={call.id}>
                           <td>{index + 1}</td>
                           <td>{call.phone || '-'}</td>
-                          <td>{call.customer_name_snapshot || call.customer_name || 'Yeni Musteri'}</td>
+                          <td>{call.customer_name_snapshot || call.customer_name || 'Yeni Müşteri'}</td>
                           <td>{formatCallDateTime(call.created_at)}</td>
                           <td>{call.status || '-'}</td>
                           <td>

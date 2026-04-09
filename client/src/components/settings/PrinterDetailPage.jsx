@@ -525,7 +525,7 @@ export default function PrinterDetailPage() {
   const physicalName = printOptions.device?.physicalName ?? '';
   const typeBehaviorText =
     type === 'kitchen'
-      ? 'Muıtfak modu aktif: operasyonel ve sade çıktı ayarları öne çıkar.'
+      ? 'Mutfak modu aktif: operasyonel ve sade çıktı ayarları öne çıkar.'
       : type === 'bar'
         ? 'Legacy Bar modu: mevcut kayıtlar için uyumluluk modunda düzenleme.'
         : 'Adisyon modu aktif: fiş görünümü ve ödeme çıktısı ayarları öne çıkar.';
@@ -612,19 +612,19 @@ export default function PrinterDetailPage() {
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Yazıcı tipi (davranışı belirler)</span>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <TypePill active={type === 'receipt'} onClick={() => setType('receipt')} label="Adisyon" />
-                <TypePill active={type === 'kitchen'} onClick={() => setType('kitchen')} label="Muıtfak" />
+                <TypePill active={type === 'kitchen'} onClick={() => setType('kitchen')} label="Mutfak" />
                 {!isNew && showLegacyBar ? <TypePill active={type === 'bar'} onClick={() => setType('bar')} label="Bar (legacy)" /> : null}
               </div>
               <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{typeBehaviorText}</span>
               {!isNew && showLegacyBar ? (
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                  Legacy kayıt. Yeni yazıcı oluştururken yalnızca Adisyon ve Muıtfak seçilir.
+                  Legacy kayıt. Yeni yazıcı oluştururken yalnızca Adisyon ve Mutfak seçilir.
                 </span>
               ) : null}
             </label>
             {isNew ? (
               <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -8, marginBottom: 14 }}>
-                Yeni yazıcıda yalnızca <strong>Adisyon</strong> ve <strong>Muıtfak</strong> tipi kullanılır.
+                Yeni yazıcıda yalnızca <strong>Adisyon</strong> ve <strong>Mutfak</strong> tipi kullanılır.
               </p>
             ) : null}
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 }}>
@@ -799,7 +799,7 @@ export default function PrinterDetailPage() {
 
             {type === 'kitchen' ? (
               <div style={{ marginTop: 18, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>Muıtfak grubu</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-secondary)', marginBottom: 10 }}>Mutfak grubu</div>
                 {Object.keys(printOptions.kitchenGroups || {}).map((key) => (
                   <ToggleRow
                     key={key}
@@ -818,7 +818,7 @@ export default function PrinterDetailPage() {
           >
             <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 14 }}>Çıktı / kağıt ayarları</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-              {type === 'receipt' ? 'Adisyon çıktısı' : type === 'kitchen' ? 'Muıtfak çıktısı' : 'Bar (legacy)'}
+              {type === 'receipt' ? 'Adisyon çıktısı' : type === 'kitchen' ? 'Mutfak çıktısı' : 'Bar (legacy)'}
             </div>
             <div
               style={{
@@ -929,7 +929,7 @@ export default function PrinterDetailPage() {
                     disabled={key === 'bar'}
                   />
                 ))}
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '14px 0 10px' }}>Muıtfak grupları</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '14px 0 10px' }}>Mutfak grupları</div>
                 {Object.keys(printOptions.kitchenGroups || {}).map((key) => (
                   <ToggleRow
                     key={key}
