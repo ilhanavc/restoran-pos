@@ -1,12 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency } from '../../constants/index.js';
-import { BarChart3, TrendingUp, CreditCard, ShoppingBag, Award, Calendar, Receipt, Clock } from 'lucide-react';
+import { BarChart3, TrendingUp, CreditCard, ShoppingBag, Award, Calendar, Receipt, Clock, Search, ChevronDown } from 'lucide-react';
 
 const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#14b8a6', '#a855f7'];
 
@@ -41,10 +41,21 @@ const CustomTooltipCurrency = ({ active, payload, label }) => {
 export default function ReportsScreen() {
   const [report, setReport] = useState(null);
   const [closedOrders, setClosedOrders] = useState([]);
+  const [closedOrdersTotal, setClosedOrdersTotal] = useState(0);
+  const [closedOrdersHasMore, setClosedOrdersHasMore] = useState(false);
+  const [closedOrdersPage, setClosedOrdersPage] = useState(1);
+  const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
   const [hourlyData, setHourlyData] = useState([]);
   const [trendData, setTrendData] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(true);
+  // Sipariş geçmişi filtreleri
+  const [orderFrom, setOrderFrom] = useState('');
+  const [orderTo, setOrderTo] = useState('');
+  const [orderCustomer, setOrderCustomer] = useState('');
+  const [orderMinAmount, setOrderMinAmount] = useState('');
+  const [orderMaxAmount, setOrderMaxAmount] = useState('');
+  const [orderFilterOpen, setOrderFilterOpen] = useState(false);
   const toast = useToast();
 
   useEffect(() => { loadAll(); }, [selectedDate]);
@@ -58,13 +69,16 @@ export default function ReportsScreen() {
 
       const [data, closed, hourly, range] = await Promise.all([
         api.getDailyReport(selectedDate),
-        api.getClosedOrders(selectedDate),
+        api.getClosedOrders({ date: selectedDate, limit: 50, page: 1 }),
         api.getHourlyReport(selectedDate),
         api.getRangeReport(from, to),
       ]);
 
       setReport(data);
       setClosedOrders(closed.orders || []);
+      setClosedOrdersTotal(closed.total ?? (closed.orders || []).length);
+      setClosedOrdersHasMore(closed.has_more ?? false);
+      setClosedOrdersPage(1);
 
       // Saatlik: sadece 07-23 arası göster
       setHourlyData(
@@ -80,6 +94,56 @@ export default function ReportsScreen() {
       toast.error('Rapor yüklenemedi');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const searchOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = {
+        page: 1,
+        limit: 50,
+        ...(orderFrom && { from: orderFrom }),
+        ...(orderTo && { to: orderTo || orderFrom }),
+        ...(!orderFrom && !orderTo && { date: selectedDate }),
+        ...(orderCustomer && { customer: orderCustomer }),
+        ...(orderMinAmount && { min_amount: orderMinAmount }),
+        ...(orderMaxAmount && { max_amount: orderMaxAmount }),
+      };
+      const closed = await api.getClosedOrders(params);
+      setClosedOrders(closed.orders || []);
+      setClosedOrdersTotal(closed.total ?? (closed.orders || []).length);
+      setClosedOrdersHasMore(closed.has_more ?? false);
+      setClosedOrdersPage(1);
+    } catch {
+      toast.error('Sipariş geçmişi yüklenemedi');
+    } finally {
+      setLoading(false);
+    }
+  }, [orderFrom, orderTo, orderCustomer, orderMinAmount, orderMaxAmount, selectedDate, toast]);
+
+  const loadMoreOrders = async () => {
+    const nextPage = closedOrdersPage + 1;
+    setLoadingMoreOrders(true);
+    try {
+      const params = {
+        page: nextPage,
+        limit: 50,
+        ...(orderFrom && { from: orderFrom }),
+        ...(orderTo && { to: orderTo || orderFrom }),
+        ...(!orderFrom && !orderTo && { date: selectedDate }),
+        ...(orderCustomer && { customer: orderCustomer }),
+        ...(orderMinAmount && { min_amount: orderMinAmount }),
+        ...(orderMaxAmount && { max_amount: orderMaxAmount }),
+      };
+      const closed = await api.getClosedOrders(params);
+      setClosedOrders(prev => [...prev, ...(closed.orders || [])]);
+      setClosedOrdersHasMore(closed.has_more ?? false);
+      setClosedOrdersPage(nextPage);
+    } catch {
+      toast.error('Yüklenemedi');
+    } finally {
+      setLoadingMoreOrders(false);
     }
   };
 
@@ -271,38 +335,94 @@ export default function ReportsScreen() {
             </div>
           </div>
 
-          {/* Closed orders */}
-          {closedOrders.length > 0 && (
-            <div className="card card-padded" style={{ marginTop: 16 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Receipt size={14} /> Kapanan Siparişler ({closedOrders.length})
+          {/* Sipariş Geçmişi */}
+          <div className="card card-padded" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Receipt size={14} /> Sipariş Geçmişi
+                {closedOrdersTotal > 0 && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({closedOrdersTotal})</span>}
               </h3>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>No</th>
-                    <th>Masa / Tür</th>
-                    <th>Müşteri</th>
-                    <th>Personel</th>
-                    <th>Ödeme</th>
-                    <th className="text-right">Tutar</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {closedOrders.map((o) => (
-                    <tr key={o.id}>
-                      <td>#{o.order_no}</td>
-                      <td>{o.order_type === 'takeaway' ? 'Paket' : (o.table_name || '—')}</td>
-                      <td>{o.customer_name || '—'}</td>
-                      <td>{o.user_name || '—'}</td>
-                      <td>{paymentLabel[o.payment_type] || o.payment_type || '—'}</td>
-                      <td className="text-right" style={{ fontWeight: 600 }}>{formatCurrency(o.grand_total)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setOrderFilterOpen(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                <Search size={13} /> Filtrele <ChevronDown size={12} style={{ transform: orderFilterOpen ? 'rotate(180deg)' : 'none' }} />
+              </button>
             </div>
-          )}
+
+            {orderFilterOpen && (
+              <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius-sm)', padding: 12, marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 130 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Başlangıç tarihi</span>
+                  <input type="date" className="input input-sm" value={orderFrom} onChange={e => setOrderFrom(e.target.value)} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 130 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Bitiş tarihi</span>
+                  <input type="date" className="input input-sm" value={orderTo} onChange={e => setOrderTo(e.target.value)} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 160 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Müşteri adı</span>
+                  <input type="text" className="input input-sm" placeholder="Ad ara..." value={orderCustomer} onChange={e => setOrderCustomer(e.target.value)} />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 100 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Min. tutar</span>
+                  <input type="number" className="input input-sm" placeholder="0" value={orderMinAmount} onChange={e => setOrderMinAmount(e.target.value)} min="0" />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 100 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Maks. tutar</span>
+                  <input type="number" className="input input-sm" placeholder="∞" value={orderMaxAmount} onChange={e => setOrderMaxAmount(e.target.value)} min="0" />
+                </label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={searchOrders}>Ara</button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => {
+                    setOrderFrom(''); setOrderTo(''); setOrderCustomer('');
+                    setOrderMinAmount(''); setOrderMaxAmount('');
+                    loadAll();
+                  }}>Temizle</button>
+                </div>
+              </div>
+            )}
+
+            {closedOrders.length > 0 ? (
+              <>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>No</th>
+                      <th>Masa / Tür</th>
+                      <th>Müşteri</th>
+                      <th>Personel</th>
+                      <th>Ödeme</th>
+                      <th className="text-right">Tutar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {closedOrders.map((o) => (
+                      <tr key={o.id}>
+                        <td>#{o.order_no}</td>
+                        <td>{o.order_type === 'takeaway' ? 'Paket' : (o.table_name || '—')}</td>
+                        <td>{o.customer_name || '—'}</td>
+                        <td>{o.user_name || '—'}</td>
+                        <td>{paymentLabel[o.payment_type] || o.payment_type || '—'}</td>
+                        <td className="text-right" style={{ fontWeight: 600 }}>{formatCurrency(o.grand_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {closedOrdersHasMore && (
+                  <div style={{ textAlign: 'center', marginTop: 10 }}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={loadMoreOrders} disabled={loadingMoreOrders}>
+                      {loadingMoreOrders ? 'Yükleniyor...' : `Daha fazla göster (${closedOrders.length} / ${closedOrdersTotal})`}
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="empty-state" style={{ padding: 24 }}>Bu tarih için kapanan sipariş yok</div>
+            )}
+          </div>
 
           {/* Open Orders */}
           {report.openOrders?.length > 0 && (

@@ -321,12 +321,21 @@ router.post('/import/commit', (req, res) => {
 });
 
 // GET /api/customers
+// ?search=  — isim araması (min 2 karakter)
+// ?phone=   — telefon araması
+// ?page=    — sayfa no (varsayılan 1), sadece search/phone yokken geçerli
+// ?limit=   — sayfa boyutu (varsayılan 50, maks 200)
 router.get('/', (req, res) => {
   try {
     const { search, phone } = req.query;
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+
     const normalizedSearch = normalizeSearchTextTR(search);
     let customers = [];
-    
+    let total = 0;
+
     if (phone) {
       const normalized = normalizePhoneDigits(phone);
       const phoneResults = normalized
@@ -339,12 +348,14 @@ router.get('/', (req, res) => {
           OR cp.phone LIKE ?
         )
         ORDER BY c.full_name
+        LIMIT 50
       `).all(req.businessId, normalized, `%${phone}%`, `%${normalized}%`)
         : db.prepare(`
         SELECT c.* FROM customers c
         JOIN customer_phones cp ON c.id = cp.customer_id
         WHERE c.business_id = ? AND cp.phone LIKE ?
         ORDER BY c.full_name
+        LIMIT 50
       `).all(req.businessId, `%${phone}%`);
 
       // Deduplicate
@@ -354,24 +365,28 @@ router.get('/', (req, res) => {
         seen.add(r.id);
         customers.push(r);
       }
+      total = customers.length;
     } else {
-      let sql = 'SELECT * FROM customers WHERE business_id = ?';
+      const whereParts = ['business_id = ?'];
       const params = [req.businessId];
       if (normalizedSearch) {
-        sql += ' AND lower(replace(replace(full_name, \'İ\', \'i\'), \'I\', \'ı\')) LIKE ?';
+        whereParts.push('lower(replace(replace(full_name, \'İ\', \'i\'), \'I\', \'ı\')) LIKE ?');
         params.push(`%${normalizedSearch}%`);
       }
-      sql += ' ORDER BY full_name LIMIT 50';
-      customers = db.prepare(sql).all(...params);
+      const where = whereParts.join(' AND ');
+      const countRow = db.prepare(`SELECT COUNT(*) as cnt FROM customers WHERE ${where}`).get(...params);
+      total = countRow.cnt;
+      customers = db.prepare(`SELECT * FROM customers WHERE ${where} ORDER BY full_name LIMIT ? OFFSET ?`)
+        .all(...params, limit, offset);
     }
 
-    // Fix N+1 queries by fetching all relations at once
+    // İlişkili veriler (N+1 önleme)
     const customerIds = customers.map(c => c.id);
     if (customerIds.length > 0) {
       const placeholders = customerIds.map(() => '?').join(',');
       const allPhones = db.prepare(`SELECT * FROM customer_phones WHERE customer_id IN (${placeholders})`).all(...customerIds);
       const allAddresses = db.prepare(`SELECT * FROM customer_addresses WHERE customer_id IN (${placeholders})`).all(...customerIds);
-      
+
       const phoneMap = {};
       const addressMap = {};
       for (const p of allPhones) {
@@ -382,14 +397,19 @@ router.get('/', (req, res) => {
         if (!addressMap[a.customer_id]) addressMap[a.customer_id] = [];
         addressMap[a.customer_id].push(a);
       }
-      
       for (const c of customers) {
         c.phones = phoneMap[c.id] || [];
         c.addresses = addressMap[c.id] || [];
       }
     }
 
-    res.json(customers);
+    res.json({
+      customers,
+      total,
+      page: phone || normalizedSearch ? 1 : page,
+      limit,
+      has_more: !phone && !normalizedSearch && offset + customers.length < total,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
   }

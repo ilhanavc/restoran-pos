@@ -102,11 +102,53 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
   }
 });
 
-// GET /api/reports/closed-orders — seçilen gün kapanan siparişler (özet liste)
+// GET /api/reports/closed-orders — kapanan siparişler (filtrelenebilir)
+// ?date=        — tek gün (from/to yoksa bu kullanılır)
+// ?from=&to=    — tarih aralığı
+// ?customer=    — müşteri adı araması
+// ?min_amount=  — minimum tutar
+// ?max_amount=  — maksimum tutar
+// ?page=        — sayfa no (varsayılan 1)
+// ?limit=       — sayfa boyutu (varsayılan 50, maks 200)
 router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
   try {
-    const { date } = req.query;
-    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const { date, from, to, customer, min_amount, max_amount } = req.query;
+    const page = Math.max(1, parseInt(req.query.page || '1', 10) || 1);
+    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || '50', 10) || 50));
+    const offset = (page - 1) * limit;
+
+    // Tarih aralığı: from/to > date > bugün
+    const fromDate = from || date || new Date().toISOString().slice(0, 10);
+    const toDate = to || fromDate;
+
+    const whereParts = [
+      'o.business_id = ?',
+      "o.status = 'closed'",
+      'date(o.closed_at) BETWEEN ? AND ?',
+    ];
+    const params = [req.businessId, fromDate, toDate];
+
+    if (customer && customer.trim()) {
+      whereParts.push('c.full_name LIKE ?');
+      params.push(`%${customer.trim()}%`);
+    }
+    if (min_amount !== undefined && min_amount !== '') {
+      whereParts.push('o.grand_total >= ?');
+      params.push(Number(min_amount));
+    }
+    if (max_amount !== undefined && max_amount !== '') {
+      whereParts.push('o.grand_total <= ?');
+      params.push(Number(max_amount));
+    }
+
+    const where = whereParts.join(' AND ');
+
+    const countRow = db.prepare(`
+      SELECT COUNT(*) as cnt FROM orders o
+      LEFT JOIN customers c ON o.customer_id = c.id
+      WHERE ${where}
+    `).get(...params);
+    const total = countRow.cnt;
 
     const rows = db.prepare(`
       SELECT o.id, o.order_no, o.order_type, o.grand_total, o.discount_amount, o.closed_at,
@@ -118,11 +160,20 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
       LEFT JOIN tables t ON o.table_id = t.id
       LEFT JOIN users u ON o.user_id = u.id
       LEFT JOIN customers c ON o.customer_id = c.id
-      WHERE o.business_id = ? AND o.status = 'closed' AND date(o.closed_at) = ?
+      WHERE ${where}
       ORDER BY o.closed_at DESC
-    `).all(req.businessId, targetDate);
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
 
-    res.json({ date: targetDate, orders: rows });
+    res.json({
+      from: fromDate,
+      to: toDate,
+      orders: rows,
+      total,
+      page,
+      limit,
+      has_more: offset + rows.length < total,
+    });
   } catch (err) {
     console.error('Closed orders report:', err);
     res.status(500).json({ error: 'Sunucu hatası' });

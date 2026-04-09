@@ -145,7 +145,7 @@ class ApiService {
 
   // Reports
   getDailyReport(date) { return this.get(`/reports/daily${date ? '?date=' + date : ''}`); }
-  getClosedOrders(date) { return this.get(`/reports/closed-orders${date ? '?date=' + encodeURIComponent(date) : ''}`); }
+  getClosedOrders(params = {}) { return this.get(`/reports/closed-orders${this.buildQuery(params)}`); }
   getRangeReport(from, to) { return this.get(`/reports/range?from=${from}&to=${to}`); }
   getHourlyReport(date) { return this.get(`/reports/hourly${date ? '?date=' + date : ''}`); }
 

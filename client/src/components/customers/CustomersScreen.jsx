@@ -6,6 +6,10 @@ import { Users, Search, Phone, X, FileUp, Download } from 'lucide-react';
 
 export default function CustomersScreen() {
   const [customers, setCustomers] = useState([]);
+  const [customerTotal, setCustomerTotal] = useState(0);
+  const [customerPage, setCustomerPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -22,19 +26,37 @@ export default function CustomersScreen() {
 
   useEffect(() => { loadCustomers(); }, []);
 
-  const loadCustomers = async (params = {}) => {
+  const loadCustomers = async (params = {}, append = false) => {
     try {
       const data = await api.getCustomers(params);
-      setCustomers(data);
+      const list = data.customers ?? data; // geriye dönük uyumluluk
+      if (append) {
+        setCustomers(prev => [...prev, ...list]);
+      } else {
+        setCustomers(list);
+        setCustomerPage(data.page ?? 1);
+      }
+      setCustomerTotal(data.total ?? list.length);
+      setHasMore(data.has_more ?? false);
     } catch (err) {
       toast.error('Müşteriler yüklenemedi');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
+  };
+
+  const handleLoadMore = () => {
+    const nextPage = customerPage + 1;
+    setCustomerPage(nextPage);
+    setLoadingMore(true);
+    loadCustomers({ page: nextPage }, true);
   };
 
   const handleSearch = (q) => {
     setSearchQuery(q);
+    setCustomerPage(1);
+    setHasMore(false);
     if (q.length >= 2) {
       const isPhone = /\d/.test(q);
       loadCustomers(isPhone ? { phone: q } : { search: q });
@@ -263,6 +285,18 @@ export default function CustomersScreen() {
             <div className="empty-state">
               <Users size={32} className="empty-state-icon" />
               <div className="empty-state-text">Müşteri bulunamadı</div>
+            </div>
+          )}
+          {hasMore && (
+            <div style={{ textAlign: 'center', padding: '12px 0' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Yükleniyor...' : `Daha fazla göster (${customers.length} / ${customerTotal})`}
+              </button>
             </div>
           )}
         </div>
