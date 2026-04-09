@@ -39,6 +39,12 @@ function req(name, fallback = '') {
   return v != null && String(v).trim() !== '' ? String(v).trim() : fallback;
 }
 
+function parseEscT(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(255, Math.trunc(n)));
+}
+
 export function loadConfig() {
   const apiBase = req('API_BASE', 'http://127.0.0.1:3001/api').replace(/\/$/, '');
   const token = req('BRIDGE_TOKEN');
@@ -48,6 +54,9 @@ export function loadConfig() {
   const claimId = req('BRIDGE_CLAIM_ID', 'store-bridge');
   const socketTimeoutMs = Math.max(1000, parseInt(req('PRINT_SOCKET_TIMEOUT_MS', '8000'), 10) || 8000);
   const storeTimezone = req('STORE_TIMEZONE', req('BRIDGE_STORE_TIMEZONE', 'Europe/Istanbul'));
+  const printEscT = parseEscT(req('BRIDGE_PRINT_ESC_T', ''));
+  const printCharFallback = req('BRIDGE_PRINT_CHAR_FALLBACK', 'transliterate').toLowerCase();
+  const printForceTrAscii = req('BRIDGE_PRINT_FORCE_TR_ASCII', '0');
 
   if (!token) {
     throw new Error('BRIDGE_TOKEN gerekli');
@@ -118,6 +127,9 @@ export function loadConfig() {
     claimId,
     socketTimeoutMs,
     storeTimezone,
+    printEscT,
+    printCharFallback,
+    printForceTrAscii,
     cid812Enabled,
     cid812Mode,
     cid812HidVid,

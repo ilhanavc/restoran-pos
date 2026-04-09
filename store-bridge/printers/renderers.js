@@ -8,6 +8,7 @@ const DEFAULT_LINE_WIDTH = 42;
 const MIN_LINE_WIDTH = 32;
 const MAX_LINE_WIDTH = 64;
 const DEFAULT_STORE_TIMEZONE = 'Europe/Istanbul';
+const DEFAULT_CHAR_FALLBACK = 'transliterate';
 
 /**
  * Varsayılan ESC t kod sayfası: 12 = PC857 (IBM Turkish).
@@ -15,6 +16,20 @@ const DEFAULT_STORE_TIMEZONE = 'Europe/Istanbul';
  * pos-config.json bridge.printEscT veya BRIDGE_PRINT_ESC_T env ile override edilebilir.
  */
 const DEFAULT_ESC_T = 12; // PC857 (IBM Turkish)
+
+const TRANSLITERATE_MAP = new Map([
+  ['Ç', 'C'], ['ç', 'c'],
+  ['Ğ', 'G'], ['ğ', 'g'],
+  ['İ', 'I'], ['ı', 'i'],
+  ['Ö', 'O'], ['ö', 'o'],
+  ['Ş', 'S'], ['ş', 's'],
+  ['Ü', 'U'], ['ü', 'u'],
+  ['Â', 'A'], ['â', 'a'],
+  ['Ê', 'E'], ['ê', 'e'],
+  ['Î', 'I'], ['î', 'i'],
+  ['Ô', 'O'], ['ô', 'o'],
+  ['Û', 'U'], ['û', 'u'],
+]);
 
 /**
  * PC857 (IBM Code Page 857 — Turkish) manuel byte tablosu.
@@ -73,8 +88,14 @@ const PC857_MAP = new Map([
  */
 export function encodePC857(text) {
   const src = normalizePrintableText(String(text ?? ''));
+  const forceAsciiTr = shouldForceTrAscii();
   const bytes = [];
   for (const ch of src) {
+    if (forceAsciiTr && TRANSLITERATE_MAP.has(ch)) {
+      const ascii = TRANSLITERATE_MAP.get(ch);
+      for (const c of ascii) bytes.push(c.codePointAt(0));
+      continue;
+    }
     // ASCII aralığı — doğrudan geç
     const cp = ch.codePointAt(0);
     if (cp == null) continue;
@@ -92,10 +113,39 @@ export function encodePC857(text) {
       bytes.push(0x54, 0x4c); // 'T', 'L'
       continue;
     }
+    const fallback = transliterateUnknown(ch);
+    if (fallback) {
+      for (const c of fallback) {
+        const ccp = c.codePointAt(0);
+        if (ccp != null && ccp <= 0x7f) bytes.push(ccp);
+      }
+      continue;
+    }
     // Bilinmeyen → '?'
     bytes.push(0x3f);
   }
   return Buffer.from(bytes);
+}
+
+function shouldForceTrAscii() {
+  const raw = String(process.env.BRIDGE_PRINT_FORCE_TR_ASCII || '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
+function resolveCharFallbackMode() {
+  const raw = String(process.env.BRIDGE_PRINT_CHAR_FALLBACK || DEFAULT_CHAR_FALLBACK).trim().toLowerCase();
+  if (raw === 'strict') return 'strict';
+  if (raw === 'question') return 'question';
+  return 'transliterate';
+}
+
+function transliterateUnknown(ch) {
+  const mode = resolveCharFallbackMode();
+  if (mode === 'strict' || mode === 'question') return '';
+  if (TRANSLITERATE_MAP.has(ch)) return TRANSLITERATE_MAP.get(ch);
+  const decomp = String(ch || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const ascii = decomp.replace(/[^\x20-\x7E]/g, '');
+  return ascii || '';
 }
 
 function normalizePrintableText(input) {
@@ -159,14 +209,24 @@ function escInit() {
 }
 
 function escSelectCodePage(n) {
-  return Buffer.from([0x1b, 0x74, n & 0xff]);
+  const code = n & 0xff;
+  // ESC t n (Epson) + FS } & n (Phoenix vb. klonlarda yaygın)
+  return Buffer.from([0x1b, 0x74, code, 0x1c, 0x7d, 0x26, code]);
 }
 
-function resolveEscT() {
-  const raw = Number(process.env.BRIDGE_PRINT_ESC_T);
-  if (Number.isFinite(raw)) {
-    return Math.max(0, Math.min(255, Math.trunc(raw)));
-  }
+function parseEscT(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(255, Math.trunc(n)));
+}
+
+function resolveEscT({ printerOptions = {}, payload = {} } = {}) {
+  const optEscT = parseEscT(printerOptions?.escT ?? printerOptions?.esc_t);
+  if (optEscT != null) return optEscT;
+  const envEscT = parseEscT(process.env.BRIDGE_PRINT_ESC_T);
+  if (envEscT != null) return envEscT;
+  const payloadEscT = parseEscT(payload?.esc_t);
+  if (payloadEscT != null) return payloadEscT;
   return DEFAULT_ESC_T;
 }
 
@@ -533,7 +593,7 @@ function lineReceiptThreeCols(productName, midCol, price, width) {
   const left = padEndDisplayWidth(trimFixed(productName, c1), c1);
   const mid = padEndDisplayWidth(trimFixed(midCol, c2), c2);
   const right = padStartDisplayWidth(trimFixed(price, c3), c3);
-  return (left + mid + right).slice(0, width);
+  return sliceByDisplayWidth(left + mid + right, width);
 }
 
 /**
@@ -545,7 +605,7 @@ function linesReceiptThreeCols(productName, midCol, price, width) {
   const c3 = 11;
   const c1 = Math.max(12, Math.floor((width - c3) * 0.55));
   const c2 = width - c1 - c3;
-  const name = String(productName ?? '').trim();
+  const name = normalizePrintableText(String(productName ?? '').trim());
   const midStr = padEndDisplayWidth(trimFixed(String(midCol ?? ''), c2), c2);
   const rightStr = padStartDisplayWidth(trimFixed(String(price ?? ''), c3), c3);
 
@@ -959,7 +1019,7 @@ function buildTestLines(p) {
   out.push({ text: centerLine('Türkçe Karakter Testi', w), bold: true });
   out.push(centerLine('ÇĞİÖŞÜ çğıöşü', w));
   out.push(centerLine('Çorba Göbek İmam Öküz Şeker Ücret', w));
-  out.push(centerLine(`ESC t: ${p?.esc_t ?? resolveEscT()} | PC857`, w));
+  out.push(centerLine(`ESC t: ${p?.esc_t ?? resolveEscT({ payload: p })} | PC857`, w));
   out.push(sep);
   const lines = Array.isArray(p.lines) ? p.lines : [];
   for (const line of lines) {
@@ -979,9 +1039,7 @@ function buildTestLines(p) {
 export function payloadToEscPosBuffer(job, printerOptions = {}) {
   const p = job.payload || {};
   const width = resolveLineWidth(p);
-  const escT = (printerOptions.escT != null && Number.isFinite(Number(printerOptions.escT)))
-    ? Math.max(0, Math.min(255, Math.trunc(Number(printerOptions.escT))))
-    : resolveEscT();
+  const escT = resolveEscT({ printerOptions, payload: p });
   const skipInit = !!printerOptions.skipInit;
   const renderPayload = { ...p, esc_t: escT };
   const parts = [];

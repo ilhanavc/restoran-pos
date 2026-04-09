@@ -14,6 +14,16 @@ REM set "API_BASE=http://127.0.0.1:3001/api"
 REM Fis saati gosterimi icin tek magazanin saat dilimi (or. Europe/Istanbul).
 REM set "STORE_TIMEZONE=Europe/Istanbul"
 
+REM ESC/POS kod sayfasi secimi (Turkce icin varsayilan 12=PC857). Bazi yazicilarda 24/16 gerekebilir.
+REM set "BRIDGE_PRINT_ESC_T=12"
+
+REM Bilinmeyen karakter fallback modu: transliterate | question | strict
+REM transliterate: okunabilir ASCII'ye cevirir (onerilen), question/strict: '?'
+REM set "BRIDGE_PRINT_CHAR_FALLBACK=transliterate"
+
+REM Zorunlu ASCII Turkce (codepage uyumsuz modellerde acil cozum): 1=true, 0=false
+REM set "BRIDGE_PRINT_FORCE_TR_ASCII=0"
+
 REM Yazdirma: gercek yazici/store-bridge kullanirken genelde true. Sadece mock yazdirmak icin false veya 0.
 REM set "DISABLE_PRINT_JOB_MOCK=true"
 

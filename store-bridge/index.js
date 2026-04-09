@@ -63,6 +63,9 @@ async function main() {
   const cfg = loadConfig();
   // Renderer tarafında tek mağaza saat dilimini deterministik kullan.
   process.env.BRIDGE_STORE_TIMEZONE = cfg.storeTimezone;
+  if (cfg.printEscT != null) process.env.BRIDGE_PRINT_ESC_T = String(cfg.printEscT);
+  process.env.BRIDGE_PRINT_CHAR_FALLBACK = String(cfg.printCharFallback || 'transliterate');
+  process.env.BRIDGE_PRINT_FORCE_TR_ASCII = String(cfg.printForceTrAscii || '0');
   const api = createApiClient(cfg);
 
   const health = await api.health();
@@ -85,7 +88,7 @@ async function main() {
   process.on('SIGTERM', shutdown);
 
   console.log(
-    `[store-bridge] çalışıyor poll=${cfg.pollIntervalMs}ms dryRun=${cfg.dryRun} api=${cfg.apiBase} cid812=${cfg.cid812Enabled ? `on mode=${cfg.cid812Mode}` : 'off'}`,
+    `[store-bridge] çalışıyor poll=${cfg.pollIntervalMs}ms dryRun=${cfg.dryRun} api=${cfg.apiBase} esc_t=${process.env.BRIDGE_PRINT_ESC_T || 'default(12)'} fallback=${process.env.BRIDGE_PRINT_CHAR_FALLBACK} forceTrAscii=${process.env.BRIDGE_PRINT_FORCE_TR_ASCII} cid812=${cfg.cid812Enabled ? `on mode=${cfg.cid812Mode}` : 'off'}`,
   );
 }
 
