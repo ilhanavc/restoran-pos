@@ -431,7 +431,7 @@ function startServerAndWaitForHealth(absoluteDbPath) {
     console.log('[electron] paths: server node_modules (beklenen) =', serverDepsRoot);
     console.log('[electron] paths: CLIENT_DIST_PATH =', clientDistPath);
     console.log('[electron] SQLite: backend DB_PATH =', absoluteDbPath);
-    console.log('[electron] spawn öncesi env.BRIDGE_TOKEN =', env.BRIDGE_TOKEN || '(tanımsız)');
+    console.log('[electron] spawn öncesi env.BRIDGE_TOKEN =', env.BRIDGE_TOKEN ? '***' : '(tanımsız)');
 
     let stderrBuf = '';
 
