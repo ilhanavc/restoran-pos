@@ -219,7 +219,7 @@ export default function PrinterListPage() {
                         title="Sil"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setDeleteTarget({ id: p.id, name: p.name });
+                          setDeleteTarget({ id: p.id, name: p.name, isActive: p.is_active !== false });
                         }}
                       >
                         <Trash2 size={15} style={{ marginRight: 4 }} />
@@ -311,6 +311,7 @@ export default function PrinterListPage() {
         onClose={() => setDeleteTarget(null)}
         printerId={deleteTarget?.id}
         printerName={deleteTarget?.name}
+        printerIsActive={deleteTarget?.isActive !== false}
         onAfterDeactivate={load}
         onAfterDelete={load}
       />

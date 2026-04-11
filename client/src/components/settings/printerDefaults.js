@@ -78,6 +78,43 @@ function defaultCopies() {
   };
 }
 
+export function defaultTemplateForType(type) {
+  if (type === 'kitchen' || type === 'bar') {
+    return [
+      '{{center:MUTFAK}}',
+      '{{center:{order_type} | {table}}}',
+      'No: {order_no}   {date}',
+      '{{line}}',
+      'URUN                            ADET',
+      '{{line}}',
+      '{{items}}',
+      '{{line}}',
+      '{{center:- {short_no} -}}',
+      '{footer1}',
+    ].join('\n');
+  }
+  return [
+    '{{center:{business_name}}}',
+    '{{center:{business_address}}}',
+    '{{center:{business_phone}}}',
+    '{{line}}',
+    '{{center:{order_type}}}',
+    'No: {order_no}   {date}',
+    '{table}',
+    '{{line}}',
+    'URUN              MIKTAR       TUTAR',
+    '{{line}}',
+    '{{items}}',
+    '{{line}}',
+    'Ara toplam: {subtotal}',
+    'TOPLAM: {total}',
+    '{{payments}}',
+    '{{line}}',
+    '{{center:{footer1}}}',
+    '{{center:{footer2}}}',
+  ].join('\n');
+}
+
 /** @param {'receipt' | 'kitchen' | 'bar'} type */
 export function createEmptyPrintOptions(type) {
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
@@ -107,6 +144,10 @@ export function createEmptyPrintOptions(type) {
       ICECEKLER: false,
     },
     output,
+    template: {
+      enabled: false,
+      body: defaultTemplateForType(type),
+    },
   };
 }
 
@@ -149,6 +190,10 @@ export function normalizePrintOptions(po, type) {
     roles: { ...e.roles, ...(parsed.roles || {}) },
     kitchenGroups: { ...e.kitchenGroups, ...(parsed.kitchenGroups || {}) },
     output: { ...e.output, ...(parsed.output || {}) },
+    template: {
+      ...e.template,
+      ...(parsed.template && typeof parsed.template === 'object' ? parsed.template : {}),
+    },
   };
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
   out.roles[pk] = true;

@@ -234,6 +234,58 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
   }
 });
 
+// GET /api/reports/closed-orders/export — filtreye uyan TÜM siparişleri döner (sayfalama yok, max 5000)
+// Aynı filtre parametrelerini kabul eder: date, from, to, customer, min_amount, max_amount
+router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) => {
+  try {
+    const { date, from, to, customer, min_amount, max_amount } = req.query;
+    const fromDate = from || date || new Date().toISOString().slice(0, 10);
+    const toDate = to || fromDate;
+
+    const whereParts = [
+      'o.business_id = ?',
+      "o.status = 'closed'",
+      'date(o.closed_at) BETWEEN ? AND ?',
+    ];
+    const params = [req.businessId, fromDate, toDate];
+
+    if (customer && customer.trim()) {
+      whereParts.push('c.full_name LIKE ?');
+      params.push(`%${customer.trim()}%`);
+    }
+    if (min_amount !== undefined && min_amount !== '') {
+      whereParts.push('o.grand_total >= ?');
+      params.push(Number(min_amount));
+    }
+    if (max_amount !== undefined && max_amount !== '') {
+      whereParts.push('o.grand_total <= ?');
+      params.push(Number(max_amount));
+    }
+
+    const where = whereParts.join(' AND ');
+
+    const rows = db.prepare(`
+      SELECT o.id, o.order_no, o.order_type, o.grand_total, o.discount_amount, o.closed_at,
+        t.name AS table_name,
+        u.full_name AS user_name,
+        c.full_name AS customer_name,
+        (SELECT p.payment_type FROM payments p WHERE p.order_id = o.id ORDER BY p.created_at LIMIT 1) AS payment_type
+      FROM orders o
+      LEFT JOIN tables t ON o.table_id = t.id
+      LEFT JOIN users u ON o.user_id = u.id
+      LEFT JOIN customers c ON o.customer_id = c.id
+      WHERE ${where}
+      ORDER BY o.closed_at DESC
+      LIMIT 5000
+    `).all(...params);
+
+    res.json({ from: fromDate, to: toDate, orders: rows, total: rows.length });
+  } catch (err) {
+    console.error('Closed orders export:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
 // GET /api/reports/range
 router.get('/range', authorize('admin', 'cashier'), (req, res) => {
   try {

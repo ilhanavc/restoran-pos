@@ -8,6 +8,7 @@ export default function PrinterDeleteModal({
   onClose,
   printerId,
   printerName,
+  printerIsActive = true,
   onAfterDeactivate,
   onAfterDelete,
 }) {
@@ -30,7 +31,15 @@ export default function PrinterDeleteModal({
         if (!cancelled) setEl(data);
       })
       .catch((e) => {
-        if (!cancelled) error(e.message || 'Silme kontrolü yapılamadı');
+        if (!cancelled) {
+          error(e.message || 'Silme kontrolü yapılamadı');
+          setEl({
+            canHardDelete: false,
+            canDeactivate: printerIsActive,
+            blockers: [],
+            usage: null,
+          });
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -38,7 +47,7 @@ export default function PrinterDeleteModal({
     return () => {
       cancelled = true;
     };
-  }, [open, printerId]);
+  }, [open, printerId, printerIsActive]);
 
   if (!open) return null;
 

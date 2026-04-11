@@ -3,7 +3,7 @@
  * Express kodu Electron içine gömülmez; file:// kullanılmaz.
  * pos-config.json mevcutsa ayarlar oradan okunur; Store Bridge otomatik başlatılır.
  */
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const { execFileSync } = require('child_process');
 const path = require('path');
@@ -792,6 +792,10 @@ function scheduleBackup(dbPath) {
 // ---------------------------------------------------------------------------
 
 function createWindow(port) {
+  const preloadPath = app.isPackaged
+    ? path.join(app.getAppPath(), 'electron', 'preload.cjs')
+    : path.join(__dirname, 'preload.cjs');
+
   mainWindow = new BrowserWindow({
     width: 1366,
     height: 768,
@@ -799,6 +803,7 @@ function createWindow(port) {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: preloadPath,
     },
   });
 
@@ -861,6 +866,85 @@ app.whenReady().then(async () => {
     app.quit();
   }
 });
+
+// ---------------------------------------------------------------------------
+// electron-updater — otomatik güncelleme
+// Yalnızca paketlenmiş uygulamada çalışır. Dev modunda atlanır.
+// publish.yml / GitHub Actions release pipeline kurulunca devreye girer.
+// ---------------------------------------------------------------------------
+
+function initAutoUpdater() {
+  if (!app.isPackaged) return; // Dev modda güncelleme kontrolü yapma
+
+  let autoUpdater;
+  try {
+    autoUpdater = require('electron-updater').autoUpdater;
+  } catch {
+    console.log('[updater] electron-updater yüklü değil; güncelleme devre dışı.');
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('checking-for-update', () => {
+    console.log('[updater] Güncelleme kontrol ediliyor...');
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    console.log(`[updater] Güncelleme mevcut: v${info.version}`);
+    mainWindow?.webContents.send('update-available', {
+      version: info.version,
+      releaseNotes: info.releaseNotes || '',
+    });
+  });
+
+  autoUpdater.on('update-not-available', () => {
+    console.log('[updater] Uygulama güncel.');
+  });
+
+  autoUpdater.on('download-progress', (progress) => {
+    mainWindow?.webContents.send('download-progress', {
+      percent: Math.round(progress.percent),
+      transferred: progress.transferred,
+      total: progress.total,
+      bytesPerSecond: progress.bytesPerSecond,
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    console.log(`[updater] v${info.version} indirildi, kurulum bekliyor.`);
+    mainWindow?.webContents.send('update-downloaded', { version: info.version });
+  });
+
+  autoUpdater.on('error', (err) => {
+    const msg = err?.message || String(err);
+    console.error('[updater] Hata:', msg);
+    mainWindow?.webContents.send('update-error', { message: msg });
+  });
+
+  // IPC: renderer'dan güncelleme kur
+  ipcMain.on('install-update', () => {
+    autoUpdater.quitAndInstall();
+  });
+
+  // IPC: renderer'dan güncelleme kontrolü
+  ipcMain.on('check-for-updates', () => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.error('[updater] checkForUpdates hatası:', err?.message);
+    });
+  });
+
+  // Uygulama açıldıktan 10 saniye sonra kontrol et (ani yavaşlamayı önle)
+  const timer = setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      console.log('[updater] Güncelleme kontrolü yapılamadı:', err?.message || err);
+    });
+  }, 10000);
+  timer.unref?.();
+}
+
+app.whenReady().then(() => initAutoUpdater());
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

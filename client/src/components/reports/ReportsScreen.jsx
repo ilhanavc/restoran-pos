@@ -21,6 +21,79 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+async function exportOrderHistoryToExcel(orders, fromDate, toDate) {
+  const XLSX = await import('xlsx');
+  const wb = XLSX.utils.book_new();
+  const paymentLabel = { cash: 'Nakit', card: 'Kart', mixed: 'Karışık', other: 'Diğer' };
+
+  const rows = [['No', 'Tür', 'Masa', 'Müşteri', 'Personel', 'Ödeme', 'İndirim', 'Tutar', 'Kapanış']];
+  for (const o of orders) {
+    rows.push([
+      `#${o.order_no}`,
+      o.order_type === 'takeaway' ? 'Paket' : 'Masa',
+      o.table_name || '',
+      o.customer_name || '',
+      o.user_name || '',
+      paymentLabel[o.payment_type] || o.payment_type || '',
+      o.discount_amount || 0,
+      o.grand_total,
+      o.closed_at || '',
+    ]);
+  }
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Sipariş Geçmişi');
+
+  const label = fromDate === toDate ? fromDate : `${fromDate}_${toDate}`;
+  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  downloadBlob(
+    new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+    `Siparisler_${label}.xlsx`,
+  );
+}
+
+function printOrderHistory(orders, fromDate, toDate) {
+  const paymentLabel = { cash: 'Nakit', card: 'Kart', mixed: 'Karışık', other: 'Diğer' };
+  const fmt = (n) => Number(n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 }) + ' ₺';
+  const label = fromDate === toDate ? fromDate : `${fromDate} — ${toDate}`;
+  const total = orders.reduce((s, o) => s + (o.grand_total || 0), 0);
+
+  const rows = orders.map(o => `
+    <tr>
+      <td>#${o.order_no}</td>
+      <td>${o.order_type === 'takeaway' ? 'Paket' : (o.table_name || '—')}</td>
+      <td>${o.customer_name || '—'}</td>
+      <td>${o.user_name || '—'}</td>
+      <td>${paymentLabel[o.payment_type] || o.payment_type || '—'}</td>
+      <td style="text-align:right">${fmt(o.discount_amount)}</td>
+      <td style="text-align:right;font-weight:600">${fmt(o.grand_total)}</td>
+    </tr>`).join('');
+
+  const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="UTF-8">
+  <title>Sipariş Geçmişi — ${label}</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:20px}
+    h1{font-size:16px;margin-bottom:4px} p{color:#666;font-size:11px;margin-bottom:12px}
+    table{width:100%;border-collapse:collapse;font-size:11px}
+    th{background:#4f46e5;color:#fff;padding:6px 8px;text-align:left;font-size:10px}
+    td{padding:5px 8px;border-bottom:1px solid #eee} tr:nth-child(even) td{background:#f9f9f9}
+    tfoot td{font-weight:700;border-top:2px solid #4f46e5;background:#f5f5ff}
+    @media print{body{margin:8px}}
+  </style></head><body>
+  <h1>Sipariş Geçmişi</h1>
+  <p>Dönem: ${label} · ${orders.length} sipariş</p>
+  <table>
+    <thead><tr><th>No</th><th>Tür</th><th>Masa</th><th>Müşteri</th><th>Personel</th><th>Ödeme</th><th>İndirim</th><th>Tutar</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td colspan="7" style="text-align:right">Toplam</td><td style="text-align:right">${fmt(total)}</td></tr></tfoot>
+  </table>
+  </body></html>`;
+
+  const w = window.open('', '_blank', 'width=960,height=700');
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { w.print(); }, 300);
+}
+
 async function exportToExcel(report, closedOrders, selectedDate) {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
@@ -177,6 +250,7 @@ export default function ReportsScreen() {
   const [closedOrdersHasMore, setClosedOrdersHasMore] = useState(false);
   const [closedOrdersPage, setClosedOrdersPage] = useState(1);
   const [loadingMoreOrders, setLoadingMoreOrders] = useState(false);
+  const [exportingOrders, setExportingOrders] = useState(false);
   const [hourlyData, setHourlyData] = useState([]);
   const [trendData, setTrendData] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
@@ -189,6 +263,34 @@ export default function ReportsScreen() {
   const [orderMaxAmount, setOrderMaxAmount] = useState('');
   const [orderFilterOpen, setOrderFilterOpen] = useState(false);
   const toast = useToast();
+
+  const exportOrders = useCallback(async (format) => {
+    setExportingOrders(true);
+    try {
+      const params = {
+        ...(orderFrom && { from: orderFrom }),
+        ...(orderTo && { to: orderTo || orderFrom }),
+        ...(!orderFrom && !orderTo && { date: selectedDate }),
+        ...(orderCustomer && { customer: orderCustomer }),
+        ...(orderMinAmount && { min_amount: orderMinAmount }),
+        ...(orderMaxAmount && { max_amount: orderMaxAmount }),
+      };
+      const result = await api.exportClosedOrders(params);
+      const orders = result.orders || [];
+      const fromDate = result.from || selectedDate;
+      const toDate = result.to || selectedDate;
+      if (!orders.length) { toast.warn('Dışa aktarılacak sipariş bulunamadı'); return; }
+      if (format === 'excel') {
+        await exportOrderHistoryToExcel(orders, fromDate, toDate);
+      } else {
+        printOrderHistory(orders, fromDate, toDate);
+      }
+    } catch {
+      toast.error('Dışa aktarma başarısız');
+    } finally {
+      setExportingOrders(false);
+    }
+  }, [orderFrom, orderTo, orderCustomer, orderMinAmount, orderMaxAmount, selectedDate, toast]);
 
   useEffect(() => { loadAll(); }, [selectedDate]);
 
@@ -496,14 +598,36 @@ export default function ReportsScreen() {
                 <Receipt size={14} /> Sipariş Geçmişi
                 {closedOrdersTotal > 0 && <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({closedOrdersTotal})</span>}
               </h3>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => setOrderFilterOpen(v => !v)}
-                style={{ display: 'flex', alignItems: 'center', gap: 4 }}
-              >
-                <Search size={13} /> Filtrele <ChevronDown size={12} style={{ transform: orderFilterOpen ? 'rotate(180deg)' : 'none' }} />
-              </button>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => exportOrders('excel')}
+                  disabled={exportingOrders}
+                  title="Tüm filtrelenmiş siparişleri Excel olarak indir"
+                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                >
+                  <Download size={13} /> Excel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => exportOrders('print')}
+                  disabled={exportingOrders}
+                  title="Yazdır / PDF kaydet"
+                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                >
+                  <Printer size={13} /> Yazdır
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setOrderFilterOpen(v => !v)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 4 }}
+                >
+                  <Search size={13} /> Filtrele <ChevronDown size={12} style={{ transform: orderFilterOpen ? 'rotate(180deg)' : 'none' }} />
+                </button>
+              </div>
             </div>
 
             {orderFilterOpen && (

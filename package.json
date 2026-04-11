@@ -93,7 +93,12 @@
         ]
       }
     ],
-    "publish": null,
+    "publish": {
+      "provider": "github",
+      "owner": "ilhanavc",
+      "repo": "restoran-pos",
+      "private": false
+    },
     "npmRebuild": false,
     "nsis": {
       "differentialPackage": false,
@@ -114,6 +119,9 @@
       "signAndEditExecutable": false,
       "signDlls": false
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",

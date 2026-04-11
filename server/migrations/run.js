@@ -376,6 +376,19 @@ export const migrations = [
     created_at TEXT DEFAULT (datetime('now'))
   )`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id)`,
+
+  // ── Garson Çağırma ──
+  `CREATE TABLE IF NOT EXISTS waiter_calls (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    table_id TEXT NOT NULL REFERENCES tables(id),
+    table_name TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','resolved')),
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    resolved_by TEXT REFERENCES users(id)
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_waiter_calls_business_status ON waiter_calls(business_id, status)`,
 ];
 
 /** Eski KDV eklemeli tutarları: ürün fiyatları KDV dahil kabul edilerek siparişleri yeniden hesaplar (bir kez). */

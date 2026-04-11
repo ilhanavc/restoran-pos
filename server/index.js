@@ -24,6 +24,7 @@ import adminRoutes from './routes/admin.js';
 import bridgeRoutes from './routes/bridge.js';
 import reservationsRoutes from './routes/reservations.js';
 import stockRoutes from './routes/stock.js';
+import waiterCallRoutes from './routes/waiterCall.js';
 
 const app = express();
 
@@ -85,6 +86,15 @@ const printerLimiter = rateLimit({
   message: { error: 'Yazıcı test limiti aşıldı. Lütfen bir dakika bekleyin.' },
 });
 
+// Garson çağırma public endpoint: 1 dakikada 10 istek/IP (QR kötüye kullanımını önle)
+const waiterCallLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Çok sık çağrı yapıldı. Lütfen bir dakika bekleyin.',
+});
+
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
 
@@ -104,6 +114,7 @@ app.use('/api/admin', adminLimiter, adminRoutes);
 app.use('/api/bridge', bridgeLimiter, bridgeRoutes);
 app.use('/api/reservations', reservationsRoutes);
 app.use('/api/stock', stockRoutes);
+app.use('/api/waiter-call', waiterCallLimiter, waiterCallRoutes);
 
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
@@ -61,115 +61,88 @@ function TypePill({ active, onClick, label }) {
   );
 }
 
-/** 80mm termal hissi; layout/output state ile canlı */
-function LivePrinterPreview({ type, printOptions }) {
+/** Sunucuda store-bridge ile aynı satır üreticisi; şablon ve satır genişliği yazdırmayla uyumludur. */
+function PrinterPreviewPanel({ type, lineWidth, printOptions }) {
   const layout = printOptions?.layout || {};
-  const output = printOptions?.output || {};
-  const groups = printOptions?.kitchenGroups || {};
-  const activeGroups = Object.entries(groups)
-    .filter(([, v]) => v)
-    .map(([k]) => (k === 'ICECEKLER' ? 'İÇECEKLER' : k))
-    .join(', ');
-  const now = new Date().toLocaleString('tr-TR');
-  const pl = Number(layout.marginLeft) || 0;
-  const pr = Number(layout.marginRight) || 0;
+  const [lines, setLines] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchErr, setFetchErr] = useState(null);
+  const timerRef = useRef(null);
+
+  const previewKind = type === 'receipt' ? 'receipt' : type === 'bar' ? 'bar' : 'kitchen';
+  const printOptionsSig = useMemo(() => JSON.stringify(printOptions ?? {}), [printOptions]);
+
+  const lw = useMemo(() => {
+    const n = parseInt(String(lineWidth ?? '').trim(), 10);
+    if (Number.isFinite(n) && n >= 32 && n <= 64) return n;
+    return 42;
+  }, [lineWidth]);
+
+  const fi = Number(layout.fontSizeItems) || 13;
   const ff = layout.fontFamily || 'Courier New, monospace';
 
-  const boxStyle = {
-    fontFamily: ff,
-    color: 'var(--text-primary)',
-    background: 'var(--bg-elevated)',
-    border: '1px solid var(--border)',
-    borderRadius: 8,
-    paddingTop: 12,
-    paddingBottom: 12,
-    paddingLeft: 12 + pl,
-    paddingRight: 12 + pr,
-    minHeight: 480,
-    maxWidth: '100%',
-    width: '100%',
-    lineHeight: 1.4,
-    boxSizing: 'border-box',
-  };
-
-  if (type === 'kitchen') {
-    const ft = Number(layout.fontSizeTitle) || 14;
-    const fi = Number(layout.fontSizeItems) || 13;
-    return (
-      <div style={boxStyle}>
-        <div style={{ color: 'var(--accent, #f97316)', fontWeight: 700, fontSize: ft, marginBottom: 6 }}>MUTFAK</div>
-        <div style={{ fontSize: ft - 2, fontWeight: 600 }}>{now}</div>
-        <div style={{ fontSize: fi }}>No: 136 · Bahçe | Masa 1</div>
-        {activeGroups ? (
-          <div style={{ fontSize: fi - 1, marginTop: 4, color: 'var(--text-muted)' }}>[{activeGroups}]</div>
-        ) : null}
-        <hr style={{ border: 'none', borderTop: '1px dashed var(--border)', margin: '10px 0' }} />
-        <div style={{ fontSize: fi, fontWeight: 600 }}>Hellim Peynirli Salata</div>
-        <div style={{ fontSize: fi, textAlign: 'right' }}>1 Ad</div>
-        <div style={{ fontSize: fi - 1, color: 'var(--text-muted)', paddingLeft: 8 }}>Not: az tuzlu</div>
-        <div style={{ fontSize: fi, fontWeight: 600, marginTop: 6 }}>Mevsim Salata</div>
-        <div style={{ fontSize: fi, textAlign: 'right' }}>2 Ad</div>
-        {output.showPrices ? <div style={{ fontSize: fi - 1, marginTop: 6 }}>Fiyat önizleme (açık)</div> : null}
-        {output.showOrderTotal ? <div style={{ fontSize: fi - 1 }}>Ara toplam: —</div> : null}
-        {output.showOrderNumber !== false ? <div style={{ marginTop: 10, textAlign: 'center', fontSize: fi - 1 }}>- 136 -</div> : null}
-        {(layout.footerLine1 || layout.footerLine2) && (
-          <div style={{ marginTop: 8, fontSize: (Number(layout.fontSizeFooter) || 12) - 1 }}>
-            {layout.footerLine1}
-            {layout.footerLine2 ? <div>{layout.footerLine2}</div> : null}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (type === 'bar') {
-    const fi = Number(layout.fontSizeItems) || 13;
-    return (
-      <div style={boxStyle}>
-        <div style={{ color: 'var(--accent)', fontWeight: 700 }}>Bar (legacy)</div>
-        <div style={{ fontSize: fi }}>{now}</div>
-        <hr style={{ border: 'none', borderTop: '1px dashed var(--border)', margin: '10px 0' }} />
-        <div style={{ fontSize: fi }}>Ürün × 1</div>
-      </div>
-    );
-  }
-
-  const fh = Number(layout.fontSizeHeader) || 18;
-  const fs = Number(layout.fontSizeSubheader) || 13;
-  const fi = Number(layout.fontSizeItems) || 13;
-  const ftot = Number(layout.fontSizeTotal) || 16;
-  const fftr = Number(layout.fontSizeFooter) || 12;
+  useEffect(() => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setLoading(true);
+    setFetchErr(null);
+    timerRef.current = setTimeout(async () => {
+      try {
+        const data = await api.postAdminPrinterPreview({
+          type: previewKind,
+          line_width: lineWidth === '' || lineWidth == null ? null : lineWidth,
+          print_options: printOptions,
+        });
+        setLines(Array.isArray(data.lines) ? data.lines : []);
+      } catch (e) {
+        setFetchErr(e.message || 'Önizleme yüklenemedi');
+        setLines([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 320);
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [previewKind, lineWidth, printOptionsSig]);
 
   return (
-    <div style={boxStyle}>
-      <div style={{ textAlign: 'center', fontWeight: 700, fontSize: fh }}>Demo Restoran</div>
-      <div style={{ textAlign: 'center', fontSize: fs, color: 'var(--text-muted)' }}>{now}</div>
-      {output.showOrderNumber !== false ? (
-        <div style={{ fontSize: fs, marginTop: 4 }}>Adisyon No: 222705187</div>
-      ) : null}
-      <div style={{ fontSize: fs, fontWeight: 600 }}>Bahçe | Masa 1</div>
-      <hr style={{ border: 'none', borderTop: '1px dashed var(--border)', margin: '10px 0' }} />
-      <div style={{ fontSize: fi, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <span>Hellim Peynirli Salata</span>
-        {output.showPrices ? <span>120,00</span> : <span>1 Tam</span>}
+    <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+      <div
+        className="printer-preview-paper"
+        style={{
+          background: '#f4f4f4',
+          color: '#141414',
+          border: '1px solid #bdbdbd',
+          borderRadius: 6,
+          padding: '14px 12px',
+          maxWidth: '100%',
+          width: `${lw}ch`,
+          minWidth: 0,
+          boxSizing: 'content-box',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+        }}
+      >
+        {loading ? (
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Önizleme güncelleniyor…</div>
+        ) : null}
+        {!loading && fetchErr ? (
+          <div style={{ fontSize: 13, color: 'var(--danger, #ef4444)' }}>{fetchErr}</div>
+        ) : null}
+        {!loading && !fetchErr ? (
+          <pre
+            style={{
+              margin: 0,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: ff,
+              fontSize: fi,
+              lineHeight: 1.35,
+            }}
+          >
+            {lines.join('\n')}
+          </pre>
+        ) : null}
       </div>
-      <div style={{ fontSize: fi, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-        <span>Mevsim Salata</span>
-        {output.showPrices ? <span>85,00</span> : <span>1 Tam</span>}
-      </div>
-      <hr style={{ border: 'none', borderTop: '1px dashed var(--border)', margin: '10px 0' }} />
-      {output.showOrderTotal ? <div style={{ fontSize: fi }}>Ara toplam: 325,00</div> : null}
-      {output.showVat ? <div style={{ fontSize: fi }}>KDV: 32,50</div> : null}
-      <div style={{ marginTop: 6, fontWeight: 700, fontSize: ftot, display: 'flex', justifyContent: 'space-between' }}>
-        <span>TOPLAM</span>
-        <span>325,00</span>
-      </div>
-      {layout.footerLine1 ? (
-        <div style={{ marginTop: 10, textAlign: 'center', fontWeight: 600, fontSize: fftr }}>{layout.footerLine1}</div>
-      ) : null}
-      {layout.footerLine2 ? (
-        <div style={{ textAlign: 'center', fontSize: fftr, color: 'var(--text-muted)' }}>{layout.footerLine2}</div>
-      ) : null}
     </div>
   );
 }
@@ -1007,11 +980,12 @@ export default function PrinterDetailPage() {
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
                 Tür: <strong>{primaryTypeLabel(type)}</strong>
                 <span style={{ display: 'block', marginTop: 4 }}>
-                  Gerçek yazdırma ile birebir olmayabilir; boyut ve boşluklar yaklaşık gösterilir.
+                  Metin kırılımları ve şablon, yazdırmada kullanılan satır üreticisiyle aynıdır. Punto/mm termal
+                  cihaza göre değişebilir.
                 </span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '6px 0 8px' }}>
-                <LivePrinterPreview type={type} printOptions={printOptions} />
+              <div style={{ padding: '6px 0 8px' }}>
+                <PrinterPreviewPanel type={type} lineWidth={lineWidth} printOptions={printOptions} />
               </div>
             </div>
           </div>
@@ -1024,6 +998,7 @@ export default function PrinterDetailPage() {
         onClose={() => setDeleteOpen(false)}
         printerId={id}
         printerName={name}
+        printerIsActive={isActive}
         onAfterDeactivate={() => navigate('/settings/printers')}
         onAfterDelete={() => navigate('/settings/printers')}
       />

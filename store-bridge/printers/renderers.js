@@ -681,6 +681,89 @@ function shortTicketNo(orderNo) {
   return raw.slice(-3);
 }
 
+function templateVars(p, w) {
+  const pays = Array.isArray(p.payments) ? p.payments : [];
+  const totalPaid = pays.reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  const sm = salonMasaLine(p);
+  return {
+    business_name: p.business_name || p.printer_name || '',
+    business_address: p.business_address || '',
+    business_phone: p.business_phone || '',
+    order_type: orderTypeTitle(p.order_type),
+    order_no: String(p.order_no ?? ''),
+    short_no: shortTicketNo(p.order_no),
+    date: fmtDateTimeCompact(p.created_at),
+    table: sm || '',
+    customer_name: p.customer_name || '',
+    customer_phone: p.customer_phone || '',
+    subtotal: p.subtotal != null ? fmtMoney(p.subtotal) : '',
+    total: p.grand_total != null ? fmtMoney(p.grand_total) : '',
+    vat: p.vat_total != null ? fmtMoney(p.vat_total) : '',
+    paid: totalPaid ? fmtMoney(totalPaid) : '',
+    footer1: p.receipt_footer || 'Afiyet Olsun',
+    footer2: 'Bizi tercih ettiğiniz için teşekkür ederiz',
+    line: separatorSpaced(w),
+  };
+}
+
+function templateItemsBlock(p, w) {
+  const items = Array.isArray(p.items) ? p.items : Array.isArray(p.lines) ? p.lines : [];
+  const isKitchen = p.kind === 'kitchen' || p.kind === 'kitchen_adjustment';
+  const rows = [];
+  for (const it of items) {
+    const name = it.product_name || '';
+    const qty = formatQtyLabel(it.quantity, it.portion_label);
+    if (isKitchen) {
+      rows.push(...linesProductQty(name, qty, w));
+    } else {
+      const { total } = itemUnitAndTotal(it);
+      rows.push(...linesReceiptThreeCols(name, qty, total != null ? fmtMoney(total) : '-', w));
+    }
+    if (it.note) {
+      rows.push(...wrapText(`  [ ${it.note} ]`, Math.max(8, w - 2)));
+    }
+  }
+  return rows.join('\n');
+}
+
+function templatePaymentsBlock(p, w) {
+  const pays = Array.isArray(p.payments) ? p.payments : [];
+  if (!pays.length) return '';
+  const rows = [];
+  for (const pay of pays) {
+    rows.push(alignLeftRight(paymentLabel(pay.payment_type), fmtMoney(pay.amount), w));
+    if (Number(pay.change_amount) > 0) rows.push(alignLeftRight('Para üstü', fmtMoney(pay.change_amount), w));
+  }
+  return rows.join('\n');
+}
+
+function buildTemplateLines(p) {
+  const template = p?._template;
+  if (!template?.enabled || !String(template.body || '').trim()) return null;
+  const w = resolveLineWidth(p);
+  const vars = templateVars(p, w);
+  const raw = String(template.body || '')
+    .replaceAll('{{items}}', templateItemsBlock(p, w))
+    .replaceAll('{{payments}}', templatePaymentsBlock(p, w))
+    .replaceAll('{{line}}', vars.line)
+    .replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key) => vars[key] ?? '');
+  const out = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const centerMatch = line.match(/^\{\{center:(.*)\}\}$/);
+    if (centerMatch) {
+      out.push(centerLine(centerMatch[1], w));
+      continue;
+    }
+    const text = line;
+    if (!text.trim()) {
+      out.push('');
+      continue;
+    }
+    out.push(...wrapText(text, w));
+  }
+  return out;
+}
+
 function trimFixed(s, max) {
   const t = normalizePrintableText(String(s ?? ''));
   if (displayWidth(t) <= max) return t;
@@ -789,6 +872,8 @@ function itemUnitAndTotal(item) {
 }
 
 function buildKitchenLines(p) {
+  const templated = buildTemplateLines(p);
+  if (templated) return templated;
   const w = resolveLineWidth(p);
   /** @type {(string|{text?:string,bold?:boolean,large?:boolean,bodyEmphasis?:boolean,underline?:boolean})[]} */
   const out = [];
@@ -912,6 +997,8 @@ function buildKitchenAdjustmentLines(p) {
 }
 
 function buildReceiptLines(p) {
+  const templated = buildTemplateLines(p);
+  if (templated) return templated;
   const w = resolveLineWidth(p);
   /** @type {(string|{text?:string,bold?:boolean,large?:boolean,bodyEmphasis?:boolean,underline?:boolean})[]} */
   const out = [];
@@ -1159,7 +1246,12 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
     ? resolveWin1254EscT({ printerOptions, payload: p })
     : resolveEscT({ printerOptions, payload: p });
 
-  const renderPayload = { ...p, esc_t: escT, encoding_mode: encodingMode };
+  const renderPayload = {
+    ...p,
+    esc_t: escT,
+    encoding_mode: encodingMode,
+    _template: printerOptions?.template,
+  };
   const parts = [];
   if (!skipInit) parts.push(escInit());
   parts.push(escSelectCodePage(escT, { skipPhoenixCmd }));
@@ -1192,4 +1284,113 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
   // Reset encoder to default after render
   _activeEncoder = encodePC857;
   return concat(parts);
+}
+
+// ── Admin UI: plain-text preview (same line builders as real print, no ESC) ──
+
+function flattenLineEntries(rows) {
+  const out = [];
+  for (const row of rows) {
+    if (typeof row === 'string') out.push(row);
+    else if (row && typeof row === 'object' && typeof row.text === 'string') out.push(row.text);
+    else if (row != null) out.push(String(row));
+  }
+  return out;
+}
+
+function demoKitchenPreviewPayload(lineWidth, station) {
+  return {
+    kind: 'kitchen',
+    order_id: 'demo-order',
+    order_no: '136',
+    order_type: 'dine_in',
+    table_name: '12',
+    dining_area_name: 'Bahçe',
+    created_at: new Date().toISOString(),
+    user_name: 'Demo Garson',
+    business_name: 'Demo Restoran',
+    station: station || 'KITCHEN',
+    printer_name: 'Önizleme',
+    line_width: lineWidth,
+    lines: [
+      { product_name: 'Hellim Peynirli Salata', quantity: 1, note: 'az tuzlu', portion_label: 'Ad' },
+      { product_name: 'Mevsim Salata', quantity: 2, note: null, portion_label: 'Ad' },
+    ],
+    payment_summary: null,
+  };
+}
+
+function demoReceiptPreviewPayload(lineWidth) {
+  return {
+    kind: 'receipt',
+    order_no: '222705187',
+    order_type: 'dine_in',
+    created_at: new Date().toISOString(),
+    user_name: 'Demo Garson',
+    business_name: 'Demo Restoran',
+    business_address: 'Bahçe Mah. No: 1',
+    business_phone: '0212 000 00 00',
+    table_name: '12',
+    dining_area_name: 'Bahçe',
+    customer_name: null,
+    customer_phone: null,
+    delivery_address: null,
+    receipt_header: null,
+    receipt_footer: 'Afiyet olsun',
+    subtotal: 325,
+    discount_amount: 0,
+    grand_total: 325,
+    vat_total: 29.55,
+    line_width: lineWidth,
+    items: [
+      {
+        product_name: 'Hellim Peynirli Salata',
+        quantity: 1,
+        portion_label: 'Tam',
+        unit_price: 120,
+        modifiers: '[]',
+      },
+      {
+        product_name: 'Mevsim Salata',
+        quantity: 2,
+        portion_label: 'Ad',
+        unit_price: 42.5,
+        modifiers: '[]',
+      },
+    ],
+    payments: [{ payment_type: 'card', amount: 325, change_amount: 0 }],
+    printer_name: 'Önizleme',
+  };
+}
+
+/**
+ * Yazıcı ayarları ekranı: gerçek buildKitchenLines / buildReceiptLines çıktısının düz metin satırları.
+ * @param {'kitchen'|'receipt'|'bar'} kind
+ * @param {number|string|null|undefined} lineWidth
+ * @param {object} [printOptions] Kayıtlı print_options ile aynı şekil (template, layout, …)
+ * @returns {string[]}
+ */
+export function getPrinterPreviewPlainLines(kind, lineWidth, printOptions = {}) {
+  const lwRaw = lineWidth != null && lineWidth !== '' ? Number(lineWidth) : NaN;
+  const line_width = Number.isFinite(lwRaw) ? lwRaw : undefined;
+
+  const k = String(kind || 'kitchen').toLowerCase();
+  const base =
+    k === 'receipt'
+      ? demoReceiptPreviewPayload(line_width)
+      : demoKitchenPreviewPayload(line_width, k === 'bar' ? 'BAR' : 'KITCHEN');
+
+  const renderPayload = {
+    ...base,
+    line_width,
+    _template: printOptions?.template,
+  };
+
+  let rows;
+  if (k === 'receipt') {
+    rows = buildReceiptLines(renderPayload);
+  } else {
+    rows = buildKitchenLines(renderPayload);
+  }
+  return flattenLineEntries(rows);
 }

@@ -27,6 +27,7 @@ import DiningAreasSettingsPage from './components/settings/DiningAreasSettingsPa
 import CallerIdScreen from './components/callerid/CallerIdScreen.jsx';
 import ReservationsScreen from './components/reservations/ReservationsScreen.jsx';
 import StockScreen from './components/stock/StockScreen.jsx';
+import UpdateNotification from './components/layout/UpdateNotification.jsx';
 
 function ProtectedRoute({ children, requiredRoles }) {
   const { user, loading, hasRole } = useAuth();
@@ -204,6 +205,8 @@ export default function App() {
           onComplete={handlePaymentComplete}
         />
       )}
+
+      <UpdateNotification />
     </div>
   );
 }

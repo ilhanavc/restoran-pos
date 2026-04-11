@@ -146,6 +146,7 @@ class ApiService {
   // Reports
   getDailyReport(date) { return this.get(`/reports/daily${date ? '?date=' + date : ''}`); }
   getClosedOrders(params = {}) { return this.get(`/reports/closed-orders${this.buildQuery(params)}`); }
+  exportClosedOrders(params = {}) { return this.get(`/reports/closed-orders/export${this.buildQuery(params)}`); }
   getRangeReport(from, to) { return this.get(`/reports/range?from=${from}&to=${to}`); }
   getHourlyReport(date) { return this.get(`/reports/hourly${date ? '?date=' + date : ''}`); }
 
@@ -165,6 +166,11 @@ class ApiService {
   deleteStockItem(id) { return this.delete(`/stock/${id}`); }
   getStockMovements(itemId) { return this.get(`/stock/${itemId}/movements`); }
   createStockMovement(body) { return this.post('/stock/movements', body); }
+
+  // Waiter Call / Garson Çağırma
+  getWaiterCallSetup() { return this.get('/waiter-call/setup'); }
+  getWaiterCallPending() { return this.get('/waiter-call/pending'); }
+  resolveWaiterCall(id) { return this.patch(`/waiter-call/${id}/resolve`, {}); }
 
   // Print — legacy mock HTTP uçları; aktif POS akışı print_jobs + StoreBridge. Manuel test/debug için.
   /** @deprecated POS ekranları kullanmıyor; /api/print/receipt */
@@ -203,6 +209,8 @@ class ApiService {
   postAdminPrinter(body) { return this.post('/admin/printers', body); }
   patchAdminPrinter(id, body) { return this.patch(`/admin/printers/${encodeURIComponent(id)}`, body); }
   postPrinterTest(body) { return this.post('/admin/printers/test', body); }
+  /** Yazıcı ayarları: gerçek satır üreticisiyle düz metin önizleme (store-bridge renderers) */
+  postAdminPrinterPreview(body) { return this.post('/admin/printers/preview', body); }
   getAdminPrintJobs(params = {}) { return this.get(`/admin/print-jobs${this.buildQuery(params)}`); }
   getAdminPrinterRouting() { return this.get('/admin/printer-routing'); }
   patchAdminPrinterRouting(body) { return this.patch('/admin/printer-routing', body); }

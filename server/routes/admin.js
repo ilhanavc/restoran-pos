@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import bcryptjs from 'bcryptjs';
+import { z } from 'zod';
+import { getPrinterPreviewPlainLines } from '../../store-bridge/printers/renderers.js';
 import db from '../config/database.js';
 import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
@@ -56,6 +58,12 @@ function upsertSetting(businessId, key, valueObj) {
 }
 
 const PRINTER_TYPES = new Set(['receipt', 'kitchen', 'bar']);
+
+const printerPreviewBodySchema = z.object({
+  type: z.enum(['kitchen', 'receipt', 'bar']),
+  line_width: z.union([z.number(), z.string()]).nullable().optional(),
+  print_options: z.any().optional(),
+});
 
 function defaultLayoutReceipt() {
   return {
@@ -118,6 +126,43 @@ function defaultCopies() {
   };
 }
 
+function defaultTemplateForType(type) {
+  if (type === 'kitchen' || type === 'bar') {
+    return [
+      '{{center:MUTFAK}}',
+      '{{center:{order_type} | {table}}}',
+      'No: {order_no}   {date}',
+      '{{line}}',
+      'URUN                            ADET',
+      '{{line}}',
+      '{{items}}',
+      '{{line}}',
+      '{{center:- {short_no} -}}',
+      '{footer1}',
+    ].join('\n');
+  }
+  return [
+    '{{center:{business_name}}}',
+    '{{center:{business_address}}}',
+    '{{center:{business_phone}}}',
+    '{{line}}',
+    '{{center:{order_type}}}',
+    'No: {order_no}   {date}',
+    '{table}',
+    '{{line}}',
+    'URUN              MIKTAR       TUTAR',
+    '{{line}}',
+    '{{items}}',
+    '{{line}}',
+    'Ara toplam: {subtotal}',
+    'TOPLAM: {total}',
+    '{{payments}}',
+    '{{line}}',
+    '{{center:{footer1}}}',
+    '{{center:{footer2}}}',
+  ].join('\n');
+}
+
 function defaultPrintOptionsForType(type) {
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
   return {
@@ -141,6 +186,10 @@ function defaultPrintOptionsForType(type) {
       ICECEKLER: false,
     },
     output: defaultOutputForType(type),
+    template: {
+      enabled: false,
+      body: defaultTemplateForType(type),
+    },
   };
 }
 
@@ -173,6 +222,10 @@ function mergePrintOptions(rawJson, type) {
     roles: { ...base.roles, ...(parsed.roles || {}) },
     kitchenGroups: { ...base.kitchenGroups, ...(parsed.kitchenGroups || {}) },
     output: { ...base.output, ...(parsed.output || {}) },
+    template: {
+      ...base.template,
+      ...(parsed.template && typeof parsed.template === 'object' ? parsed.template : {}),
+    },
   };
   // Preserve printer hardware/encoding overrides
   if (parsed.escT != null) merged.escT = parsed.escT;
@@ -205,6 +258,10 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
     roles: { ...base.roles, ...(incomingObj.roles || {}) },
     kitchenGroups: { ...base.kitchenGroups, ...(incomingObj.kitchenGroups || {}) },
     output: { ...base.output, ...(incomingObj.output || {}) },
+    template: {
+      ...base.template,
+      ...(incomingObj.template && typeof incomingObj.template === 'object' ? incomingObj.template : {}),
+    },
   };
   // Preserve printer hardware/encoding overrides
   if (Object.prototype.hasOwnProperty.call(incomingObj, 'escT')) {
@@ -246,7 +303,9 @@ function getPrinterDeleteEligibility(businessId, printerId) {
   if (!row) return null;
 
   const cfg = getJsonSetting(businessId, 'printer.config', {});
-  const isDefault = cfg.defaultPrinterId === printerId;
+  const pid = String(printerId);
+  const defId = cfg.defaultPrinterId != null ? String(cfg.defaultPrinterId) : '';
+  const isDefault = defId !== '' && defId === pid;
 
   const routingCount =
     db
@@ -598,6 +657,21 @@ router.post('/printers', (req, res) => {
   }
 });
 
+router.post('/printers/preview', (req, res) => {
+  try {
+    const parsed = printerPreviewBodySchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Geçersiz istek', details: parsed.error.flatten() });
+    }
+    const { type, line_width, print_options } = parsed.data;
+    const lines = getPrinterPreviewPlainLines(type, line_width ?? undefined, print_options || {});
+    res.json({ lines });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+  }
+});
+
 router.get('/printers/:id/delete-eligibility', (req, res) => {
   try {
     const el = getPrinterDeleteEligibility(req.businessId, req.params.id);
@@ -681,7 +755,8 @@ router.patch('/printers/:id', (req, res) => {
     const wasActive = existing.is_active === 1 || existing.is_active === true;
     if (nextActive === 0) {
       const cfg = getJsonSetting(req.businessId, 'printer.config', {});
-      const hadDefault = cfg.defaultPrinterId === req.params.id;
+      const hadDefault =
+        cfg.defaultPrinterId != null && String(cfg.defaultPrinterId) === String(req.params.id);
       const routingDel = db
         .prepare(`DELETE FROM printer_routing WHERE business_id = ? AND printer_id = ?`)
         .run(req.businessId, req.params.id);
@@ -727,7 +802,7 @@ router.delete('/printers/:id', (req, res) => {
         req.params.id,
       );
       const cfg = getJsonSetting(req.businessId, 'printer.config', {});
-      if (cfg.defaultPrinterId === req.params.id) {
+      if (cfg.defaultPrinterId != null && String(cfg.defaultPrinterId) === String(req.params.id)) {
         upsertSetting(req.businessId, 'printer.config', { ...cfg, defaultPrinterId: null });
       }
       const del = db.prepare(`DELETE FROM printers WHERE id = ? AND business_id = ?`).run(req.params.id, req.businessId);

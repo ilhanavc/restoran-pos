@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import api from '../../services/api.js';
+import WaiterCallPanel from '../waiter-call/WaiterCallPanel.jsx';
 
 const BRIDGE_POLL_MS = 30000;
 
@@ -168,6 +169,13 @@ export default function Sidebar({
               </div>
             )}
           </div>
+
+          {/* Garson çağırma — admin, kasiyer, garson rollerinde görünür */}
+          {hasRole('admin', 'cashier', 'waiter') && (
+            <div style={{ padding: '4px 0' }}>
+              <WaiterCallPanel />
+            </div>
+          )}
 
           <div className="sidebar-bottom">
             <div style={{
