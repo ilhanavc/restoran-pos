@@ -50,11 +50,16 @@ export function loadConfig() {
   const token = req('BRIDGE_TOKEN');
   const businessId = req('BRIDGE_BUSINESS_ID');
   const pollIntervalMs = Math.max(500, parseInt(req('POLL_INTERVAL_MS', '2000'), 10) || 2000);
+  const discoveryPollIntervalMs = Math.max(
+    2000,
+    parseInt(req('DISCOVERY_POLL_INTERVAL_MS', '5000'), 10) || 5000,
+  );
   const dryRun = req('BRIDGE_DRY_RUN') === '1' || req('BRIDGE_DRY_RUN') === 'true';
   const claimId = req('BRIDGE_CLAIM_ID', 'store-bridge');
   const socketTimeoutMs = Math.max(1000, parseInt(req('PRINT_SOCKET_TIMEOUT_MS', '8000'), 10) || 8000);
   const storeTimezone = req('STORE_TIMEZONE', req('BRIDGE_STORE_TIMEZONE', 'Europe/Istanbul'));
   const printEscT = parseEscT(req('BRIDGE_PRINT_ESC_T', ''));
+  const printEncodingMode = req('BRIDGE_PRINT_ENCODING_MODE', 'win1254').toLowerCase() === 'pc857' ? 'pc857' : 'win1254';
   const printCharFallback = req('BRIDGE_PRINT_CHAR_FALLBACK', 'transliterate').toLowerCase();
   const printForceTrAscii = req('BRIDGE_PRINT_FORCE_TR_ASCII', '0');
 
@@ -123,11 +128,13 @@ export function loadConfig() {
     token,
     businessId,
     pollIntervalMs,
+    discoveryPollIntervalMs,
     dryRun,
     claimId,
     socketTimeoutMs,
     storeTimezone,
     printEscT,
+    printEncodingMode,
     printCharFallback,
     printForceTrAscii,
     cid812Enabled,

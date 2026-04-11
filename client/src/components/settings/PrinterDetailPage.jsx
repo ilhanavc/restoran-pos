@@ -202,6 +202,8 @@ export default function PrinterDetailPage() {
   const [lineWidth, setLineWidth] = useState('');
   const [escT, setEscT] = useState('');
   const [skipInit, setSkipInit] = useState(false);
+  const [skipPhoenixCmd, setSkipPhoenixCmd] = useState(true);
+  const [encodingMode, setEncodingMode] = useState('win1254');
   const [printOptions, setPrintOptions] = useState(() => normalizePrintOptions({}, 'receipt'));
 
   const showLegacyBar = type === 'bar';
@@ -218,10 +220,12 @@ export default function PrinterDetailPage() {
       lineWidth,
       escT,
       skipInit,
+      skipPhoenixCmd,
+      encodingMode,
       printOptions,
     });
     return sig !== loadedSig;
-  }, [name, type, connectionType, ip, port, isActive, isDefault, lineWidth, escT, skipInit, printOptions, loadedSig]);
+  }, [name, type, connectionType, ip, port, isActive, isDefault, lineWidth, escT, skipInit, skipPhoenixCmd, encodingMode, printOptions, loadedSig]);
 
   const snapshotState = useCallback((printer, cfg) => {
     const t = printer?.type || 'receipt';
@@ -230,6 +234,8 @@ export default function PrinterDetailPage() {
     const rawPo = printer?.print_options || {};
     const et = rawPo.escT != null ? String(rawPo.escT) : '';
     const si = !!rawPo.skipInit;
+    const spc = rawPo.skipPhoenixCmd !== false;
+    const em = rawPo.encodingMode === 'pc857' ? 'pc857' : 'win1254';
     const sig = JSON.stringify({
       name: printer?.name ?? '',
       type: t,
@@ -241,6 +247,8 @@ export default function PrinterDetailPage() {
       lineWidth: lw,
       escT: et,
       skipInit: si,
+      skipPhoenixCmd: spc,
+      encodingMode: em,
       printOptions: po,
     });
     setName(printer?.name ?? '');
@@ -253,6 +261,8 @@ export default function PrinterDetailPage() {
     setLineWidth(lw);
     setEscT(et);
     setSkipInit(si);
+    setSkipPhoenixCmd(spc);
+    setEncodingMode(em);
     setPrintOptions(po);
     setLoadedSig(sig);
   }, []);
@@ -281,19 +291,17 @@ export default function PrinterDetailPage() {
         }
         let data = await fetchDiscoveredPrinters();
         if (triggerRefresh) {
-          const terminalStates = new Set(['never_scanned', 'success', 'empty', 'bridge_unreachable', 'auth_error']);
+          const terminalStates = new Set(['success', 'empty', 'bridge_unreachable', 'auth_error']);
           let attempts = 0;
-          while (!terminalStates.has(data.scanState) || data.scanState === 'never_scanned') {
+          while (!terminalStates.has(data.scanState)) {
             if (attempts >= 12) break;
             attempts += 1;
-            await new Promise((resolve) => setTimeout(resolve, 800));
+            await new Promise((resolve) => setTimeout(resolve, 1500));
             data = await fetchDiscoveredPrinters();
           }
         }
       } catch (e) {
-        setDiscoveredPrinters([]);
-        setDiscoveryUpdatedAt('');
-        setDiscoveryState('bridge_unreachable');
+        setDiscoveryState((prev) => prev || 'bridge_unreachable');
         setDiscoveryMessage(e.message || 'StoreBridge servisine ulaşılamadı');
       } finally {
         setDiscoveryLoading(false);
@@ -314,6 +322,8 @@ export default function PrinterDetailPage() {
       setPort('9100');
       setIsActive(true);
       setIsDefault(false);
+      setSkipPhoenixCmd(true);
+      setEncodingMode('win1254');
       setPrintOptions(po);
       setLoadedSig(
         JSON.stringify({
@@ -424,15 +434,18 @@ export default function PrinterDetailPage() {
       portNum = 9100;
     }
 
-    const escTNum = parseInt(escT, 10);
+    const escTRaw = String(escT || '').trim();
+    const escTNum = parseInt(escTRaw, 10);
     const poToSave = {
       ...printOptions,
       output: {
         ...printOptions.output,
         footerNote: printOptions.layout?.footerLine1 ?? printOptions.output?.footerNote ?? '',
       },
-      escT: Number.isFinite(escTNum) && escTNum >= 0 && escTNum <= 255 ? escTNum : undefined,
-      skipInit: skipInit || undefined,
+      escT: escTRaw === '' ? null : Number.isFinite(escTNum) && escTNum >= 0 && escTNum <= 255 ? escTNum : undefined,
+      skipInit,
+      skipPhoenixCmd,
+      encodingMode: encodingMode === 'pc857' ? 'pc857' : 'win1254',
     };
 
     const lwNum = parseInt(lineWidth, 10);
@@ -503,6 +516,9 @@ export default function PrinterDetailPage() {
       return;
     }
     setPrintOptions(resetPrintOptionsForType(type));
+    setEscT('');
+    setSkipPhoenixCmd(true);
+    setEncodingMode('win1254');
     success('Önerilen varsayılanlar uygulandı');
   };
 
@@ -681,9 +697,9 @@ export default function PrinterDetailPage() {
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                ESC t kod sayfası <span style={{ fontWeight: 400 }}>— boş = varsayılan (12 / PC857 Türkçe)</span>
+                ESC t kod sayfası <span style={{ fontWeight: 400 }}>— boş = varsayılan (32 / Windows-1254 Türkçe)</span>
               </span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>12 = PC857 Türkçe &nbsp;·&nbsp; 0 = PC437 (US) &nbsp;·&nbsp; 33 = Windows-1254</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>12 = PC857 Türkçe &nbsp;·&nbsp; 0 = PC437 (US) &nbsp;·&nbsp; 32 = JP80H-UE Türkçe &nbsp;·&nbsp; 33 = Windows-1254 alternatif</span>
               <input
                 className="input"
                 type="number"
@@ -691,7 +707,7 @@ export default function PrinterDetailPage() {
                 max="255"
                 value={escT}
                 onChange={(e) => setEscT(e.target.value)}
-                placeholder="12"
+                placeholder="32"
                 style={{ maxWidth: 120 }}
               />
             </label>
@@ -705,6 +721,38 @@ export default function PrinterDetailPage() {
                 Bazı network yazıcılar ESC @ (sıfırlama) komutu sonrasında kod sayfasını varsayılana döndürür. Bu seçenek sorunu giderir.
               </p>
             )}
+            <ToggleRow
+              label="Phoenix FS komutunu atla (Çin yazıcı)"
+              checked={skipPhoenixCmd}
+              onChange={setSkipPhoenixCmd}
+            />
+            {skipPhoenixCmd && (
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                JP80H-UE ve benzeri Çin yapımı yazıcılarda "Chinese character mode" aktifken FS komutu ESC t'yi eziyor. Bu seçenek FS &#125; &amp; komutunu devre dışı bırakır.
+              </p>
+            )}
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Türkçe karakter kodlaması</span>
+              <select
+                className="input"
+                value={encodingMode}
+                onChange={(e) => {
+                  const nextMode = e.target.value;
+                  setEncodingMode(nextMode);
+                  if (nextMode === 'win1254') setSkipPhoenixCmd(true);
+                }}
+                style={{ fontSize: 13 }}
+              >
+                <option value="win1254">Windows-1254 — ESC t 32 (önerilen)</option>
+                <option value="pc857">PC857 — ESC t 12 (Epson uyumlu alternatif)</option>
+              </select>
+              {encodingMode === 'win1254' && (
+                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                  JP80H-UE gibi Çin yapımı yazıcılarda Windows-1254 daha güvenilir Türkçe karakter desteği sunar. Bu cihazda ESC t 32 komutu düzgün çıktı verdi; "Phoenix FS komutunu atla" seçeneğiyle birlikte kullanın.
+                </p>
+              )}
+            </label>
 
             <div
               style={{

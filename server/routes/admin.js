@@ -126,6 +126,8 @@ function defaultPrintOptionsForType(type) {
     copies: defaultCopies(),
     printOnSave: false,
     printOnIntegrationApprove: false,
+    skipPhoenixCmd: true,
+    encodingMode: 'win1254',
     roles: {
       receipt: pk === 'receipt',
       kitchen: pk === 'kitchen',
@@ -165,10 +167,20 @@ function mergePrintOptions(rawJson, type) {
       typeof parsed.printOnIntegrationApprove === 'boolean'
         ? parsed.printOnIntegrationApprove
         : base.printOnIntegrationApprove,
+    skipPhoenixCmd:
+      typeof parsed.skipPhoenixCmd === 'boolean' ? parsed.skipPhoenixCmd : base.skipPhoenixCmd,
+    encodingMode: parsed.encodingMode === 'pc857' ? 'pc857' : base.encodingMode,
     roles: { ...base.roles, ...(parsed.roles || {}) },
     kitchenGroups: { ...base.kitchenGroups, ...(parsed.kitchenGroups || {}) },
     output: { ...base.output, ...(parsed.output || {}) },
   };
+  // Preserve printer hardware/encoding overrides
+  if (parsed.escT != null) merged.escT = parsed.escT;
+  if (parsed.skipInit) merged.skipInit = true;
+  if (parsed.skipPhoenixCmd) merged.skipPhoenixCmd = true;
+  if (parsed.encodingMode === 'pc857' || parsed.encodingMode === 'win1254') {
+    merged.encodingMode = parsed.encodingMode;
+  }
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
   merged.roles[pk] = true;
   return merged;
@@ -187,10 +199,24 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
       typeof incomingObj.printOnIntegrationApprove === 'boolean'
         ? incomingObj.printOnIntegrationApprove
         : base.printOnIntegrationApprove,
+    skipPhoenixCmd:
+      typeof incomingObj.skipPhoenixCmd === 'boolean' ? incomingObj.skipPhoenixCmd : base.skipPhoenixCmd,
+    encodingMode: incomingObj.encodingMode === 'pc857' ? 'pc857' : base.encodingMode,
     roles: { ...base.roles, ...(incomingObj.roles || {}) },
     kitchenGroups: { ...base.kitchenGroups, ...(incomingObj.kitchenGroups || {}) },
     output: { ...base.output, ...(incomingObj.output || {}) },
   };
+  // Preserve printer hardware/encoding overrides
+  if (Object.prototype.hasOwnProperty.call(incomingObj, 'escT')) {
+    const escT = parseInt(incomingObj.escT, 10);
+    if (Number.isFinite(escT) && escT >= 0 && escT <= 255) out.escT = escT;
+  } else if (base.escT != null) {
+    out.escT = base.escT;
+  }
+  out.skipInit = incomingObj.skipInit != null ? !!incomingObj.skipInit : !!base.skipInit || undefined;
+  const encMode = incomingObj.encodingMode != null ? incomingObj.encodingMode : base.encodingMode;
+  out.encodingMode = encMode === 'pc857' ? 'pc857' : 'win1254';
+  if (!out.skipInit) delete out.skipInit;
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
   out.roles[pk] = true;
   return out;
@@ -827,13 +853,21 @@ router.post('/printers/test', (req, res) => {
       .get(printer_id, req.businessId);
     if (!p) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
 
+    let po = {};
+    try {
+      po = p.print_options ? JSON.parse(p.print_options) : {};
+    } catch {
+      po = {};
+    }
+    const physicalName = String(po?.device?.physicalName || '').trim();
     const nowIso = new Date().toISOString();
     const testPayload = {
       kind: 'test',
+      encoding_diagnostic: true,
       printer_name: p.name,
       connection_type: p.connection_type || 'network',
       address: p.connection_type === 'usb'
-        ? (p.printer_name || p.name)
+        ? (physicalName || p.name)
         : `${p.ip_address || '-'}:${p.port || 9100}`,
       created_at: nowIso,
       order_no: `TEST-${Date.now().toString().slice(-6)}`,

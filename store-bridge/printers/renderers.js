@@ -3,19 +3,45 @@
  * 80 mm termal: sabit satır genişliği, hizalı metin; init + kesim korunur.
  */
 
+import iconv from 'iconv-lite';
+
 /** @type {number} 80 mm termal için tipik karakter genişliği (12 cpi civarı) */
 const DEFAULT_LINE_WIDTH = 42;
 const MIN_LINE_WIDTH = 32;
 const MAX_LINE_WIDTH = 64;
 const DEFAULT_STORE_TIMEZONE = 'Europe/Istanbul';
 const DEFAULT_CHAR_FALLBACK = 'transliterate';
+const DEFAULT_ENCODING_MODE = 'win1254';
 
 /**
- * Varsayılan ESC t kod sayfası: 12 = PC857 (IBM Turkish).
+ * PC857 ESC t kod sayfası: 12 = IBM Turkish.
  * Epson TM serisi ve çoğu termal yazıcı bu değeri destekler.
  * pos-config.json bridge.printEscT veya BRIDGE_PRINT_ESC_T env ile override edilebilir.
  */
-const DEFAULT_ESC_T = 12; // PC857 (IBM Turkish)
+const PC857_ESC_T = 12; // PC857 (IBM Turkish)
+
+/**
+ * Windows-1254 (Turkish) code page number for ESC t.
+ * JP80H-UE firmware reports CP437 by default but uses ESC t 32 for its
+ * Turkish-compatible Windows table.
+ */
+const WIN1254_ESC_T = 32; // Windows-1254 Turkish on JP80H-UE
+
+/**
+ * Unicode metni Windows-1254 byte dizisine çevirir (iconv-lite kullanır).
+ * JP80H-UE gibi Çin yapımı yazıcılarda PC857 (ESC t 12) yetersiz kalınca
+ * Windows-1254 kullanımı için.
+ *
+ * ₺ → "TL" (PC857 ile aynı fallback; Windows-1254'te ₺ = 0x9C ama
+ *           eski firmware'ler bunu göstermeyebilir).
+ */
+export function encodeWin1254(text) {
+  if (text == null || text === '') return Buffer.from([]);
+  const src = normalizePrintableText(String(text));
+  // ₺ karakterini önce "TL"ye dönüştür (firmware uyumluluğu için)
+  const replaced = src.replace(/₺/g, 'TL');
+  return iconv.encode(replaced, 'win1254');
+}
 
 const TRANSLITERATE_MAP = new Map([
   ['Ç', 'C'], ['ç', 'c'],
@@ -42,13 +68,13 @@ const PC857_MAP = new Map([
   ['Ç', 0x80], ['ü', 0x81], ['é', 0x82], ['â', 0x83],
   ['ä', 0x84], ['à', 0x85], ['å', 0x86], ['ç', 0x87],
   ['ê', 0x88], ['ë', 0x89], ['è', 0x8a], ['ï', 0x8b],
-  ['î', 0x8c], ['ì', 0x8d], ['Ä', 0x8e], ['Å', 0x8f],
+  ['î', 0x8c], ['ı', 0x8d], ['Ä', 0x8e], ['Å', 0x8f],
   ['É', 0x90], ['æ', 0x91], ['Æ', 0x92], ['ô', 0x93],
   ['ö', 0x94], ['ò', 0x95], ['û', 0x96], ['ù', 0x97],
-  ['İ', 0x98], ['Ö', 0x99], ['Ü', 0x9a], ['ş', 0x9b],
-  ['£', 0x9c], ['Ş', 0x9d], ['×', 0x9e], ['ğ', 0x9f],
+  ['İ', 0x98], ['Ö', 0x99], ['Ü', 0x9a], ['ø', 0x9b],
+  ['£', 0x9c], ['Ø', 0x9d], ['×', 0x9e],
   ['á', 0xa0], ['í', 0xa1], ['ó', 0xa2], ['ú', 0xa3],
-  ['ñ', 0xa4], ['Ñ', 0xa5], ['Ğ', 0xa6], ['ı', 0xa7],
+  ['ñ', 0xa4], ['Ñ', 0xa5], ['Ğ', 0xa6], ['ğ', 0xa7],
   ['¿', 0xa8], ['®', 0xa9], ['¬', 0xaa], ['½', 0xab],
   ['¼', 0xac], ['¡', 0xad], ['«', 0xae], ['»', 0xaf],
   // 0xB0–0xBF: Kutu çizgileri (box drawing) ve blok karakterleri
@@ -67,8 +93,8 @@ const PC857_MAP = new Map([
   ['Ï', 0xd8], ['┘', 0xd9], ['┌', 0xda], ['█', 0xdb],
   ['▄', 0xdc], ['¦', 0xdd], ['Ì', 0xde], ['▀', 0xdf],
   // 0xE0–0xEF
-  ['Ó', 0xe0], ['ß', 0xe1], ['Ô', 0xe2], ['Ò', 0xe3],
-  ['õ', 0xe4], ['Õ', 0xe5], ['µ', 0xe6], ['×', 0xe7],
+  ['Ş', 0xe0], ['ß', 0xe1], ['Ô', 0xe2], ['Ò', 0xe3],
+  ['õ', 0xe4], ['Õ', 0xe5], ['µ', 0xe6], ['ş', 0xe7],
   ['Ú', 0xe8], ['Û', 0xe9], ['Ù', 0xea], ['ý', 0xeb],
   ['Ý', 0xec], ['¯', 0xed], ['´', 0xee], ['\u00ad', 0xef], // soft hyphen
   // 0xF0–0xFF
@@ -208,10 +234,14 @@ function escInit() {
   return Buffer.from([0x1b, 0x40]);
 }
 
-function escSelectCodePage(n) {
+function escSelectCodePage(n, { skipPhoenixCmd = false } = {}) {
   const code = n & 0xff;
-  // ESC t n (Epson) + FS } & n (Phoenix vb. klonlarda yaygın)
-  return Buffer.from([0x1b, 0x74, code, 0x1c, 0x7d, 0x26, code]);
+  // ESC t n — Epson standard code page select
+  const bytes = [0x1b, 0x74, code];
+  // FS } & n — Phoenix/clone variant; skip for Chinese-mode printers (JP80H-UE etc.)
+  // where 0x1C (FS) byte may trigger Chinese character mode and override ESC t.
+  if (!skipPhoenixCmd) bytes.push(0x1c, 0x7d, 0x26, code);
+  return Buffer.from(bytes);
 }
 
 function parseEscT(raw) {
@@ -227,12 +257,84 @@ function resolveEscT({ printerOptions = {}, payload = {} } = {}) {
   if (envEscT != null) return envEscT;
   const payloadEscT = parseEscT(payload?.esc_t);
   if (payloadEscT != null) return payloadEscT;
-  return DEFAULT_ESC_T;
+  return PC857_ESC_T;
 }
+
+function resolveWin1254EscT({ printerOptions = {}, payload = {} } = {}) {
+  const optEscT = parseEscT(printerOptions?.escT ?? printerOptions?.esc_t);
+  // ESC t 0 is PC437/US. It cannot display Windows-1254 Turkish bytes correctly,
+  // so treat it as an accidental stale override in win1254 mode.
+  if (optEscT === 0) return WIN1254_ESC_T;
+  if (optEscT != null) return optEscT;
+  const envEscT = parseEscT(process.env.BRIDGE_PRINT_ESC_T);
+  if (envEscT === 0) return WIN1254_ESC_T;
+  if (envEscT != null) return envEscT;
+  const payloadEscT = parseEscT(payload?.esc_t);
+  if (payloadEscT === 0) return WIN1254_ESC_T;
+  if (payloadEscT != null) return payloadEscT;
+  return WIN1254_ESC_T;
+}
+
+function resolveEncodingMode(printerOptions = {}) {
+  const raw = String(
+    printerOptions?.encodingMode ||
+      printerOptions?.encoding_mode ||
+      process.env.BRIDGE_PRINT_ENCODING_MODE ||
+      DEFAULT_ENCODING_MODE,
+  )
+    .trim()
+    .toLowerCase();
+  return raw === 'pc857' ? 'pc857' : 'win1254';
+}
+
+/**
+ * Aktif render sırasında kullanılacak metin encoder'ı.
+ * payloadToEscPosBuffer başında ayarlanır; Node.js single-thread olduğu için güvenli.
+ * @type {(text: string) => Buffer}
+ */
+let _activeEncoder = encodePC857;
 
 function textLine(s) {
   const line = s == null ? '' : String(s);
-  return Buffer.concat([encodePC857(line), Buffer.from([0x0a])]);
+  return Buffer.concat([_activeEncoder(line), Buffer.from([0x0a])]);
+}
+
+function encodedTextLine(encoder, s) {
+  return Buffer.concat([encoder(s == null ? '' : String(s)), Buffer.from([0x0a])]);
+}
+
+function asciiTextLine(s) {
+  return encodedTextLine(encodePC857, s);
+}
+
+function appendEncodingDiagnostic(parts, width) {
+  const sample = 'ÇĞİÖŞÜ çğıöşü';
+  const sampleWords = 'Çorba Göbek İmam Öküz Şeker Ücret';
+  const candidates = [
+    { code: 'A', label: 'WIN1254 ESCt33', escT: 33, encoder: encodeWin1254 },
+    { code: 'B', label: 'WIN1254 ESCt28', escT: 28, encoder: encodeWin1254 },
+    { code: 'C', label: 'WIN1254 ESCt32', escT: 32, encoder: encodeWin1254 },
+    { code: 'D', label: 'WIN1254 ESCt17', escT: 17, encoder: encodeWin1254 },
+    { code: 'E', label: 'WIN1254 ESCt16', escT: 16, encoder: encodeWin1254 },
+    { code: 'F', label: 'PC857 ESCt12', escT: 12, encoder: encodePC857 },
+    { code: 'G', label: 'PC857 ESCt13', escT: 13, encoder: encodePC857 },
+  ];
+
+  parts.push(asciiTextLine(separator(width)));
+  parts.push(asciiTextLine('KOD SAYFASI TARAMA'));
+  parts.push(asciiTextLine('Duzgun olan satirin harfini not alin.'));
+  parts.push(asciiTextLine(separator(width)));
+  for (const c of candidates) {
+    parts.push(escSelectCodePage(c.escT, { skipPhoenixCmd: true }));
+    parts.push(asciiTextLine(`[${c.code}] ${c.label}`));
+    parts.push(encodedTextLine(c.encoder, sample));
+    parts.push(encodedTextLine(c.encoder, sampleWords));
+    parts.push(asciiTextLine(''));
+  }
+  parts.push(asciiTextLine('[H] ASCII acil durum'));
+  parts.push(asciiTextLine('CGIOSU cgiosu'));
+  parts.push(asciiTextLine('Corba Gobek Imam Okuz Seker Ucret'));
+  parts.push(asciiTextLine(separator(width)));
 }
 
 /**
@@ -274,7 +376,7 @@ function emitLine(line) {
   else if (bodyEmphasis) chunks.push(resolveBodyCharacterSize());
   if (underline) chunks.push(Buffer.from([0x1b, 0x2d, 0x01]));
   if (bold) chunks.push(Buffer.from([0x1b, 0x45, 0x01]));
-  chunks.push(encodePC857(t));
+  chunks.push(_activeEncoder(t));
   chunks.push(Buffer.from([0x0a]));
   if (bold) chunks.push(Buffer.from([0x1b, 0x45, 0x00]));
   if (underline) chunks.push(Buffer.from([0x1b, 0x2d, 0x00]));
@@ -1019,7 +1121,8 @@ function buildTestLines(p) {
   out.push({ text: centerLine('Türkçe Karakter Testi', w), bold: true });
   out.push(centerLine('ÇĞİÖŞÜ çğıöşü', w));
   out.push(centerLine('Çorba Göbek İmam Öküz Şeker Ücret', w));
-  out.push(centerLine(`ESC t: ${p?.esc_t ?? resolveEscT({ payload: p })} | PC857`, w));
+  const encodingLabel = p?.encoding_mode === 'win1254' ? 'Windows-1254' : 'PC857';
+  out.push(centerLine(`ESC t: ${p?.esc_t ?? resolveEscT({ payload: p })} | ${encodingLabel}`, w));
   out.push(sep);
   const lines = Array.isArray(p.lines) ? p.lines : [];
   for (const line of lines) {
@@ -1034,17 +1137,32 @@ function buildTestLines(p) {
 
 /**
  * @param {{ job_type: string, payload: object }} job
- * @param {{ escT?: number, skipInit?: boolean }} [printerOptions]
+ * @param {{ escT?: number, skipInit?: boolean, skipPhoenixCmd?: boolean, encodingMode?: string }} [printerOptions]
  */
 export function payloadToEscPosBuffer(job, printerOptions = {}) {
   const p = job.payload || {};
   const width = resolveLineWidth(p);
-  const escT = resolveEscT({ printerOptions, payload: p });
   const skipInit = !!printerOptions.skipInit;
-  const renderPayload = { ...p, esc_t: escT };
+
+  // Encoding mode: "win1254" uses iconv-lite Windows-1254 + ESC t 33.
+  // "pc857" uses the manual PC857_MAP + ESC t 12 (or overridden escT).
+  const encodingMode = resolveEncodingMode(printerOptions);
+  const useWin1254 = encodingMode === 'win1254';
+  const skipPhoenixCmd =
+    printerOptions.skipPhoenixCmd != null ? !!printerOptions.skipPhoenixCmd : useWin1254;
+
+  // Set render-scoped encoder (Node.js single-threaded: safe for sync render)
+  _activeEncoder = useWin1254 ? encodeWin1254 : encodePC857;
+
+  // ESC t: Win1254 defaults to 33, PC857 defaults to 12; explicit printer/env overrides still work.
+  const escT = useWin1254
+    ? resolveWin1254EscT({ printerOptions, payload: p })
+    : resolveEscT({ printerOptions, payload: p });
+
+  const renderPayload = { ...p, esc_t: escT, encoding_mode: encodingMode };
   const parts = [];
   if (!skipInit) parts.push(escInit());
-  parts.push(escSelectCodePage(escT));
+  parts.push(escSelectCodePage(escT, { skipPhoenixCmd }));
 
   if (renderPayload.kind === 'kitchen') {
     flushStyledLines(parts, buildKitchenLines(renderPayload));
@@ -1056,6 +1174,9 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
     flushStyledLines(parts, buildTakeawayLabelLines(renderPayload));
   } else if (renderPayload.kind === 'test') {
     flushStyledLines(parts, buildTestLines(renderPayload));
+    if (renderPayload.encoding_diagnostic !== false) {
+      appendEncodingDiagnostic(parts, width);
+    }
   } else {
     parts.push(textLine(separator(width)));
     parts.push(textLine(`İş: ${job.job_type || '?'}`));
@@ -1068,5 +1189,7 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
   }
 
   parts.push(textLine(''), feedAndCut());
+  // Reset encoder to default after render
+  _activeEncoder = encodePC857;
   return concat(parts);
 }

@@ -58,6 +58,8 @@
           "!.env.*",
           "!.env.local",
           "!test-login.js",
+          "!node_modules/restoran-pos",
+          "!node_modules/restoran-pos/**/*",
           "!**/node_modules/**/*.md",
           "!**/node_modules/**/LICENSE",
           "!**/node_modules/**/LICENSE.*",
@@ -71,6 +73,8 @@
         "to": "store-bridge",
         "filter": [
           "**/*",
+          "!node_modules/restoran-pos",
+          "!node_modules/restoran-pos/**/*",
           "!**/node_modules/**/*.md",
           "!**/node_modules/**/LICENSE",
           "!**/node_modules/**/LICENSE.*",

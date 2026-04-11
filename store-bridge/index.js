@@ -5,7 +5,7 @@ import { startJobPoller } from './jobs/poller.js';
 import { Cid812Provider } from './callerid/Cid812Provider.js';
 import { discoverWindowsPrinters } from './printers/windowsDiscovery.js';
 
-function startDiscoveryLoop({ api, log }) {
+function startDiscoveryLoop({ api, cfg, log }) {
   let closed = false;
   let lastRequestId = null;
 
@@ -51,7 +51,7 @@ function startDiscoveryLoop({ api, log }) {
   scanAndPublish().catch(() => {});
   const timer = setInterval(() => {
     tick().catch(() => {});
-  }, 2000);
+  }, cfg.discoveryPollIntervalMs);
 
   return () => {
     closed = true;
@@ -64,6 +64,7 @@ async function main() {
   // Renderer tarafında tek mağaza saat dilimini deterministik kullan.
   process.env.BRIDGE_STORE_TIMEZONE = cfg.storeTimezone;
   if (cfg.printEscT != null) process.env.BRIDGE_PRINT_ESC_T = String(cfg.printEscT);
+  process.env.BRIDGE_PRINT_ENCODING_MODE = String(cfg.printEncodingMode || 'win1254');
   process.env.BRIDGE_PRINT_CHAR_FALLBACK = String(cfg.printCharFallback || 'transliterate');
   process.env.BRIDGE_PRINT_FORCE_TR_ASCII = String(cfg.printForceTrAscii || '0');
   const api = createApiClient(cfg);
@@ -75,7 +76,7 @@ async function main() {
   cid.start();
 
   const stopPoller = startJobPoller({ api, cfg, log: console });
-  const stopDiscoveryLoop = startDiscoveryLoop({ api, log: console });
+  const stopDiscoveryLoop = startDiscoveryLoop({ api, cfg, log: console });
 
   const shutdown = () => {
     console.log('[store-bridge] kapanıyor...');

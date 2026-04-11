@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encodePC857 } from '../../store-bridge/printers/renderers.js';
+import { encodePC857, encodeWin1254 } from '../../store-bridge/printers/renderers.js';
 
 /**
  * PC857 (IBM Turkish) karakter kodlaması doğruluk testleri.
@@ -38,8 +38,8 @@ describe('encodePC857', () => {
     expect(encodePC857('Ö')[0]).toBe(0x99);
   });
 
-  it('Ş → 0x9D', () => {
-    expect(encodePC857('Ş')[0]).toBe(0x9d);
+  it('Ş → 0xE0 (JP80H-UE uyumlu)', () => {
+    expect(encodePC857('Ş')[0]).toBe(0xe0);
   });
 
   it('Ü → 0x9A', () => {
@@ -52,20 +52,20 @@ describe('encodePC857', () => {
     expect(encodePC857('ç')[0]).toBe(0x87);
   });
 
-  it('ğ → 0x9F', () => {
-    expect(encodePC857('ğ')[0]).toBe(0x9f);
+  it('ğ → 0xA7 (JP80H-UE uyumlu)', () => {
+    expect(encodePC857('ğ')[0]).toBe(0xa7);
   });
 
-  it('ı → 0xA7 (noktalı olmayan i)', () => {
-    expect(encodePC857('ı')[0]).toBe(0xa7);
+  it('ı → 0x8D (noktalı olmayan i)', () => {
+    expect(encodePC857('ı')[0]).toBe(0x8d);
   });
 
   it('ö → 0x94', () => {
     expect(encodePC857('ö')[0]).toBe(0x94);
   });
 
-  it('ş → 0x9B', () => {
-    expect(encodePC857('ş')[0]).toBe(0x9b);
+  it('ş → 0xE7 (JP80H-UE uyumlu)', () => {
+    expect(encodePC857('ş')[0]).toBe(0xe7);
   });
 
   it('ü → 0x81', () => {
@@ -81,13 +81,13 @@ describe('encodePC857', () => {
       0xa6, // Ğ
       0x98, // İ
       0x99, // Ö
-      0x9d, // Ş
+      0xe0, // Ş → 0xE0 (JP80H-UE)
       0x9a, // Ü
       0x87, // ç
-      0x9f, // ğ
-      0xa7, // ı
+      0xa7, // ğ → 0xA7 (JP80H-UE)
+      0x8d, // ı
       0x94, // ö
-      0x9b, // ş
+      0xe7, // ş → 0xE7 (JP80H-UE)
       0x81, // ü
     ]);
     expect(result).toEqual(expected);
@@ -127,5 +127,53 @@ describe('encodePC857', () => {
   it('Sayısal metin (fiyat, miktar) bozulmadan geçer', () => {
     const result = encodePC857('42.50');
     expect(result.toString('ascii')).toBe('42.50');
+  });
+});
+
+// ── encodeWin1254 ────────────────────────────────────────────────────────────
+
+describe('encodeWin1254', () => {
+  it('null/undefined/boş → boş Buffer döner', () => {
+    expect(encodeWin1254(null)).toEqual(Buffer.from([]));
+    expect(encodeWin1254(undefined)).toEqual(Buffer.from([]));
+    expect(encodeWin1254('')).toEqual(Buffer.from([]));
+  });
+
+  it('saf ASCII metni değişmeden geçer', () => {
+    const result = encodeWin1254('HELLO 123');
+    expect(result.toString('binary')).toBe('HELLO 123');
+  });
+
+  it('Tüm büyük Türkçe harfler doğru kodlanır (Windows-1254)', () => {
+    // Windows-1254 byte values for Turkish uppercase chars
+    const result = encodeWin1254('ÇĞİÖŞÜ');
+    expect(result[0]).toBe(0xc7); // Ç
+    expect(result[1]).toBe(0xd0); // Ğ
+    expect(result[2]).toBe(0xdd); // İ
+    expect(result[3]).toBe(0xd6); // Ö
+    expect(result[4]).toBe(0xde); // Ş
+    expect(result[5]).toBe(0xdc); // Ü
+  });
+
+  it('Tüm küçük Türkçe harfler doğru kodlanır (Windows-1254)', () => {
+    const result = encodeWin1254('çğıöşü');
+    expect(result[0]).toBe(0xe7); // ç
+    expect(result[1]).toBe(0xf0); // ğ
+    expect(result[2]).toBe(0xfd); // ı
+    expect(result[3]).toBe(0xf6); // ö
+    expect(result[4]).toBe(0xfe); // ş
+    expect(result[5]).toBe(0xfc); // ü
+  });
+
+  it('₺ → "TL" (2 byte)', () => {
+    const result = encodeWin1254('₺');
+    expect(result.toString('binary')).toBe('TL');
+  });
+
+  it('Karışık metin doğru encode edilir', () => {
+    const result = encodeWin1254('Çorba');
+    expect(result[0]).toBe(0xc7); // Ç in Win-1254
+    expect(result[1]).toBe('o'.charCodeAt(0));
+    expect(result.length).toBe(5);
   });
 });

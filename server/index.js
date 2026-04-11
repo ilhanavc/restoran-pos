@@ -57,13 +57,23 @@ const authLimiter = rateLimit({
   message: { error: 'Çok fazla istek. Lütfen 15 dakika sonra tekrar deneyin.' },
 });
 
-// Admin ve bridge endpoint'leri: 1 dakikada 60 istek
-const adminBridgeLimiter = rateLimit({
+// Admin ekranlari: kullanici kaynakli ayar/rapor istekleri icin orta seviye koruma.
+const adminLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
+  max: 240,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'İstek limiti aşıldı. Lütfen bir dakika sonra tekrar deneyin.' },
+});
+
+// StoreBridge arka planda surekli print-job/discovery poll eder. Admin ile ayni kovayi
+// paylasirsa yazici ayar ekrani 429 alip listeyi gecici bos gosterebilir.
+const bridgeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'StoreBridge istek limiti aşıldı. Lütfen biraz sonra tekrar deneyin.' },
 });
 
 // Yazıcı test endpoint'i: 1 dakikada 10 istek (kağıt tüketimini önle)
@@ -90,8 +100,8 @@ app.use('/api/callerid', calleridRoutes);
 app.use('/api/caller-id', calleridRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/print', printerLimiter, printerRoutes);
-app.use('/api/admin', adminBridgeLimiter, adminRoutes);
-app.use('/api/bridge', adminBridgeLimiter, bridgeRoutes);
+app.use('/api/admin', adminLimiter, adminRoutes);
+app.use('/api/bridge', bridgeLimiter, bridgeRoutes);
 app.use('/api/reservations', reservationsRoutes);
 app.use('/api/stock', stockRoutes);
 

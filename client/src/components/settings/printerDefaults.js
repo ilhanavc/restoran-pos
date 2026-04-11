@@ -92,6 +92,8 @@ export function createEmptyPrintOptions(type) {
     copies: defaultCopies(),
     printOnSave: false,
     printOnIntegrationApprove: false,
+    skipPhoenixCmd: true,
+    encodingMode: 'win1254',
     roles: {
       receipt: pk === 'receipt',
       kitchen: pk === 'kitchen',
@@ -141,6 +143,9 @@ export function normalizePrintOptions(po, type) {
       typeof parsed.printOnIntegrationApprove === 'boolean'
         ? parsed.printOnIntegrationApprove
         : e.printOnIntegrationApprove,
+    skipPhoenixCmd:
+      typeof parsed.skipPhoenixCmd === 'boolean' ? parsed.skipPhoenixCmd : e.skipPhoenixCmd,
+    encodingMode: parsed.encodingMode === 'pc857' ? 'pc857' : e.encodingMode,
     roles: { ...e.roles, ...(parsed.roles || {}) },
     kitchenGroups: { ...e.kitchenGroups, ...(parsed.kitchenGroups || {}) },
     output: { ...e.output, ...(parsed.output || {}) },

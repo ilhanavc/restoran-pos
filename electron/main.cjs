@@ -221,6 +221,7 @@ function buildBridgeEnv(port) {
   if (b.socketTimeoutMs != null) env.PRINT_SOCKET_TIMEOUT_MS = String(b.socketTimeoutMs);
   // ESC t kod sayfası: 12 = PC857 (Turkish), 28 = WPC1254 — yazıcı modeline göre ayarla
   if (b.printEscT != null) env.BRIDGE_PRINT_ESC_T = String(b.printEscT);
+  if (b.printEncodingMode) env.BRIDGE_PRINT_ENCODING_MODE = String(b.printEncodingMode);
 
   const c = posConfig.callerid || {};
   if (c.enabled != null) env.CID812_ENABLED = c.enabled ? '1' : '0';
