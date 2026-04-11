@@ -5,7 +5,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 8.6/10** (up from 7.5/10) · 8 sprints completed · 65 automated tests · 15/15 production checklist items passed
+**Overall score: 8.6/10** (up from 7.5/10) · 8 sprints completed · 101 automated tests · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
@@ -48,7 +48,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Socket.io real-time (kitchen, table, takeaway screens)
 - Daily automatic DB backup (02:00, 30-day retention)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- 65 automated tests (Vitest), all passing
+- 101 automated tests (Vitest), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
@@ -74,7 +74,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Loyalty program
 
 ## Critical Technical Notes
-- **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds.
+- **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds. Vitest uses system Node: if `npm run test` fails with an ABI/version mismatch after `postinstall` or an Electron rebuild, run `npm rebuild better-sqlite3` in `server/`.
 - **PC857 Turkish encoding** — `ESC t 12` command; per-printer `skipInit` setting available to skip `ESC @` initialization (fixes Turkish chars on some network printers).
 - **CallerID** — Primary: C# SDK helper (`tools/callerid-sdk-helper`). Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`). Both POST to `POST /api/bridge/caller-id/incoming` with `X-Bridge-Token`.
 - **BRIDGE_TOKEN** — must always be masked in logs (`***`); never log in plain text.
@@ -107,13 +107,13 @@ restoran-pos-v3/
 │   │                          # admin, bridge
 │   ├── migrations/            # Table creation
 │   ├── seeds/                 # Demo data
+│   ├── tests/                 # Vitest tests (101 tests)
 │   └── index.js               # Server entry point
 ├── electron/
 │   └── main.cjs               # Electron main process
 ├── store-bridge/              # Local printer bridge; hardware CID (HID/clipboard)
 ├── tools/callerid-sdk-helper/ # C# CallerID SDK helper (.NET)
 ├── scripts/                   # .bat startup scripts, build helpers
-├── tests/                     # Vitest tests (65 tests)
 └── package.json
 ```
 
@@ -121,7 +121,7 @@ restoran-pos-v3/
 ```bash
 # Development
 npm run dev             # Vite (5173) + API (3001) concurrently
-npm run test            # Run all 65 tests
+npm run test            # Run all 101 tests (from repo root; delegates to server)
 npm run test:watch      # Watch mode
 
 # Production (browser)
@@ -146,7 +146,7 @@ npm run debug:login     # Test JWT/audit chain in terminal
 - Small, safe steps — no large refactors
 - Present a summary before making changes: "What will change and why"
 - Do not touch working code unnecessarily
-- Every new feature must not break the existing 65 tests
+- Every new feature must not break the existing 101 tests
 - Summarize what changed only when asked — do not add trailing summaries to every response
 
 ## Demo Credentials

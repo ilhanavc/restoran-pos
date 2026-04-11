@@ -10,6 +10,8 @@
     "server": "cd server && node index.js",
     "client": "cd client && npx vite --host",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "test": "npm run test --prefix server",
+    "test:watch": "npm run test:watch --prefix server",
     "db:migrate": "cd server && node migrations/run.js",
     "db:seed": "cd server && node seeds/run.js",
     "setup": "npm install && cd server && npm install && cd ../client && npm install && cd .. && npm run db:seed",
