@@ -344,4 +344,62 @@ router.get('/hourly', authorize('admin', 'cashier'), (req, res) => {
   }
 });
 
+// GET /api/reports/analytics — tarih aralığı için gelişmiş analitik
+// ?from= &to= — zorunlu
+router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
+  try {
+    const { from, to } = req.query;
+    if (!from || !to) return res.status(400).json({ error: 'from ve to parametreleri gerekli' });
+
+    // Top 10 ürün (adet bazlı)
+    const topProducts = db.prepare(`
+      SELECT oi.product_name, SUM(oi.quantity) AS total_qty, SUM(oi.unit_price * oi.quantity) AS total_revenue
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.business_id = ? AND date(o.closed_at) BETWEEN ? AND ?
+        AND o.status = 'closed' AND oi.status != 'cancelled'
+      GROUP BY oi.product_name
+      ORDER BY total_qty DESC
+      LIMIT 10
+    `).all(req.businessId, from, to);
+
+    // Saatlik yoğunluk (0-23)
+    const hourlyRows = db.prepare(`
+      SELECT strftime('%H', p.created_at) AS hour,
+             COUNT(*) AS order_count,
+             COALESCE(SUM(p.amount), 0) AS revenue
+      FROM payments p
+      JOIN orders o ON p.order_id = o.id
+      WHERE p.business_id = ? AND date(p.created_at) BETWEEN ? AND ?
+      GROUP BY hour ORDER BY hour
+    `).all(req.businessId, from, to);
+    const byHour = {};
+    for (const r of hourlyRows) byHour[r.hour] = r;
+    const peakHours = Array.from({ length: 24 }, (_, i) => {
+      const h = String(i).padStart(2, '0');
+      return { hour: `${h}:00`, order_count: byHour[h]?.order_count || 0, revenue: byHour[h]?.revenue || 0 };
+    });
+
+    // Günlük ciro (seçilen dönem)
+    const dailyRevenue = db.prepare(`
+      SELECT date(p.created_at) AS date, COALESCE(SUM(p.amount), 0) AS revenue, COUNT(*) AS order_count
+      FROM payments p
+      WHERE p.business_id = ? AND date(p.created_at) BETWEEN ? AND ?
+      GROUP BY date(p.created_at) ORDER BY date
+    `).all(req.businessId, from, to);
+
+    // Dönem özeti
+    const summary = db.prepare(`
+      SELECT COALESCE(SUM(p.amount), 0) AS total_revenue, COUNT(*) AS total_orders
+      FROM payments p
+      WHERE p.business_id = ? AND date(p.created_at) BETWEEN ? AND ?
+    `).get(req.businessId, from, to);
+
+    res.json({ from, to, topProducts, peakHours, dailyRevenue, summary });
+  } catch (err) {
+    console.error('Analytics report:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
 export default router;

@@ -183,6 +183,36 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
   }
 });
 
+// POST /api/orders/:id/takeaway/print-label — açık paket sipariş için manuel tekrar yazdırma
+router.post('/:id/takeaway/print-label', staff, (req, res) => {
+  try {
+    const order = db.prepare(`
+      SELECT id, order_type, status, takeaway_delivered_at
+      FROM orders WHERE id = ? AND business_id = ?
+    `).get(req.params.id, req.businessId);
+    if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    if (order.order_type !== 'takeaway') {
+      return res.status(400).json({ error: 'Sadece paket sipariş yazdırılabilir' });
+    }
+    if (['closed', 'cancelled'].includes(order.status) || order.takeaway_delivered_at) {
+      return res.status(400).json({ error: 'Kapalı veya teslim edilmiş sipariş yazdırılamaz' });
+    }
+
+    const result = enqueueTakeawayLabelJob(req.businessId, order.id, req.user.id, {
+      idempotencySuffix: `manual_${Date.now()}_${req.user.id}`,
+    });
+    processPendingJobsSync(req.businessId, req.user.id);
+
+    if (result.failed) {
+      return res.status(400).json({ error: 'Paket etiketi için aktif yazıcı bulunamadı' });
+    }
+    return res.json({ ok: true, printJob: result });
+  } catch (err) {
+    console.error('Takeaway print label error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
 // GET /api/orders/active - for kitchen screen
 router.get('/active', authorize('admin', 'kitchen'), (req, res) => {
   try {
@@ -488,6 +518,7 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
 
       const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
       updated.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
+      emitToRoom(req.businessId, 'order:updated', { order: updated });
       return res.json(updated);
     }
 

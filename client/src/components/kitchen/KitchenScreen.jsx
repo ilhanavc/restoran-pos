@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
-import { formatTime, timeAgo, ORDER_STATUS } from '../../constants/index.js';
+import { formatTime, timeAgo, ORDER_STATUS, parseDbTimestampMs } from '../../constants/index.js';
 import { RefreshCw, Clock, Package, ChefHat, Check, AlertCircle } from 'lucide-react';
 
 /** Web Audio API ile kısa bip sesi çalar */
@@ -26,7 +26,9 @@ function playBeep() {
 /** Sipariş yaşına göre (dakika) renk döner */
 function ageColor(createdAt, now) {
   if (!createdAt) return null;
-  const mins = (now - new Date(createdAt).getTime()) / 60000;
+  const createdMs = parseDbTimestampMs(createdAt);
+  if (!Number.isFinite(createdMs)) return null;
+  const mins = (now - createdMs) / 60000;
   if (mins > 20) return { border: 'var(--danger)', bg: 'rgba(239,68,68,0.09)' };
   if (mins > 10) return { border: '#f59e0b', bg: 'rgba(245,158,11,0.09)' };
   return null;

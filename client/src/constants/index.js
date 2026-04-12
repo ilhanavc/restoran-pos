@@ -58,17 +58,23 @@ export function formatCurrency(amount) {
 
 export function formatTime(dateStr) {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  const ms = parseDbTimestampMs(dateStr);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
 }
 
 export function formatDate(dateStr) {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('tr-TR');
+  const ms = parseDbTimestampMs(dateStr);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toLocaleDateString('tr-TR');
 }
 
 export function formatDateTime(dateStr) {
   if (!dateStr) return '';
-  return new Date(dateStr).toLocaleString('tr-TR');
+  const ms = parseDbTimestampMs(dateStr);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms).toLocaleString('tr-TR');
 }
 
 /** Sunucu (SQLite datetime('now')) UTC string'leri; tarayıcı "YYYY-MM-DD HH:MM:SS"i yerel sanıp ~3 saat sapma yapmasın diye ms. */

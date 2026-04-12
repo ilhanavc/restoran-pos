@@ -1,7 +1,31 @@
 import { Router } from 'express';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import multer from 'multer';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog, normalizeTurkishSearch } from '../utils/helpers.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UPLOADS_DIR = path.join(__dirname, '..', 'uploads', 'products');
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || '.jpg';
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`);
+  },
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Sadece görsel dosyası yüklenebilir'));
+  },
+});
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -253,6 +277,99 @@ router.patch('/:id', staffMenu, (req, res) => {
     res.json({ ...updated, portions: portionRows });
   } catch (err) {
     console.error('Product patch:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/products/:id/image — görsel yükle
+router.post('/:id/image', staffMenu, upload.single('image'), (req, res) => {
+  try {
+    const product = db.prepare('SELECT * FROM products WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!product) return res.status(404).json({ error: 'Ürün bulunamadı' });
+    if (!req.file) return res.status(400).json({ error: 'Görsel dosyası gerekli' });
+
+    // Delete old image if exists
+    if (product.image_url) {
+      const oldPath = path.join(UPLOADS_DIR, path.basename(product.image_url));
+      fs.unlink(oldPath, () => {});
+    }
+
+    const imageUrl = `/uploads/products/${req.file.filename}`;
+    db.prepare("UPDATE products SET image_url = ?, updated_at = datetime('now') WHERE id = ? AND business_id = ?")
+      .run(imageUrl, req.params.id, req.businessId);
+
+    res.json({ image_url: imageUrl });
+  } catch (err) {
+    console.error('Product image upload:', err);
+    res.status(500).json({ error: 'Görsel yükleme başarısız' });
+  }
+});
+
+// DELETE /api/products/:id/image — görseli kaldır
+router.delete('/:id/image', staffMenu, (req, res) => {
+  try {
+    const product = db.prepare('SELECT * FROM products WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!product) return res.status(404).json({ error: 'Ürün bulunamadı' });
+
+    if (product.image_url) {
+      const oldPath = path.join(UPLOADS_DIR, path.basename(product.image_url));
+      fs.unlink(oldPath, () => {});
+      db.prepare("UPDATE products SET image_url = NULL, updated_at = datetime('now') WHERE id = ? AND business_id = ?")
+        .run(req.params.id, req.businessId);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// GET /api/products/:id/combos — combo içeriği listele
+router.get('/:id/combos', staff, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT pc.id, pc.child_product_id, pc.quantity, pc.sort_order,
+             p.name AS child_name, p.price AS child_price, p.image_url AS child_image_url
+      FROM product_combos pc
+      JOIN products p ON pc.child_product_id = p.id
+      WHERE pc.parent_product_id = ? AND pc.business_id = ?
+      ORDER BY pc.sort_order, pc.created_at
+    `).all(req.params.id, req.businessId);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/products/:id/combos — combo öğesi ekle
+router.post('/:id/combos', staffMenu, (req, res) => {
+  try {
+    const { child_product_id, quantity = 1 } = req.body;
+    if (!child_product_id) return res.status(400).json({ error: 'Alt ürün gerekli' });
+    if (child_product_id === req.params.id) return res.status(400).json({ error: 'Ürün kendini içeremez' });
+
+    const child = db.prepare('SELECT id, name FROM products WHERE id = ? AND business_id = ? AND is_deleted = 0').get(child_product_id, req.businessId);
+    if (!child) return res.status(404).json({ error: 'Alt ürün bulunamadı' });
+
+    const sortOrder = (db.prepare('SELECT COUNT(*) as c FROM product_combos WHERE parent_product_id = ?').get(req.params.id)?.c || 0);
+    const id = genId();
+    db.prepare(`INSERT OR REPLACE INTO product_combos (id, business_id, parent_product_id, child_product_id, quantity, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(id, req.businessId, req.params.id, child_product_id, Math.max(1, Number(quantity) || 1), sortOrder);
+
+    res.status(201).json({ id, child_product_id, child_name: child.name, quantity: Number(quantity) || 1 });
+  } catch (err) {
+    console.error('Add combo:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// DELETE /api/products/:id/combos/:comboId — combo öğesini kaldır
+router.delete('/:id/combos/:comboId', staffMenu, (req, res) => {
+  try {
+    db.prepare('DELETE FROM product_combos WHERE id = ? AND parent_product_id = ? AND business_id = ?')
+      .run(req.params.comboId, req.params.id, req.businessId);
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });

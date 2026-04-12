@@ -142,6 +142,17 @@ export const migrations = [
     created_at TEXT DEFAULT (datetime('now'))
   )`,
 
+  `CREATE TABLE IF NOT EXISTS product_combos (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    parent_product_id TEXT NOT NULL REFERENCES products(id),
+    child_product_id TEXT NOT NULL REFERENCES products(id),
+    quantity INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(parent_product_id, child_product_id)
+  )`,
+
   // ── Customers ──
   `CREATE TABLE IF NOT EXISTS customers (
     id TEXT PRIMARY KEY,

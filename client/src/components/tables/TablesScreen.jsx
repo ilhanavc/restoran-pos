@@ -1,13 +1,32 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
-import { TABLE_STATUS, formatCurrency, timeAgo } from '../../constants/index.js';
+import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
   RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard,
 } from 'lucide-react';
+
+function formatOrderElapsed(dateStr, now = Date.now()) {
+  const startedAt = parseDbTimestampMs(dateStr);
+  if (!Number.isFinite(startedAt)) return '';
+  const totalSeconds = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const totalHours = Math.floor(totalMinutes / 60);
+  if (totalHours >= 24) {
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    return `${days} gün ${hours} sa ${minutes} dk ${seconds} sn`;
+  }
+  if (totalHours >= 1) {
+    return `${totalHours} sa ${minutes} dk ${seconds} sn`;
+  }
+  return `${totalMinutes} dk ${seconds} sn`;
+}
 
 export default function TablesScreen({
   onOpenOrder,
@@ -25,6 +44,12 @@ export default function TablesScreen({
   const [callHistoryLoading, setCallHistoryLoading] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [openMenuTableId, setOpenMenuTableId] = useState(null);
+  const [tableCancelTarget, setTableCancelTarget] = useState(null);
+  const [tableCancelLoading, setTableCancelLoading] = useState(false);
+  const [openTakeawayMenuId, setOpenTakeawayMenuId] = useState(null);
+  const [takeawayConfirmTarget, setTakeawayConfirmTarget] = useState(null);
+  const [takeawayActionLoading, setTakeawayActionLoading] = useState(null);
+  const takeawayMenuRef = useRef(null);
   const toast = useToast();
   const location = useLocation();
   const { isConnected, subscribe } = useSocket();
@@ -91,6 +116,28 @@ export default function TablesScreen({
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  useEffect(() => {
+    if (!openTakeawayMenuId && !takeawayConfirmTarget && !tableCancelTarget) return undefined;
+    const onKeyDown = (e) => {
+      if (e.key !== 'Escape') return;
+      if (!tableCancelLoading) setTableCancelTarget(null);
+      setOpenTakeawayMenuId(null);
+      setTakeawayConfirmTarget(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [openTakeawayMenuId, takeawayConfirmTarget, tableCancelTarget, tableCancelLoading]);
+
+  useEffect(() => {
+    if (!openTakeawayMenuId) return undefined;
+    const onPointerDown = (e) => {
+      if (takeawayMenuRef.current?.contains(e.target)) return;
+      setOpenTakeawayMenuId(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [openTakeawayMenuId]);
 
   const refreshAll = () => {
     loadTables();
@@ -197,16 +244,8 @@ export default function TablesScreen({
       }
       const peerTables = (areas.find((a) => (a.tables || []).some((t) => t.id === table.id))?.tables || currentArea?.tables || []);
       const label = masaLabelInArea(table, peerTables);
-      if (!window.confirm(`${label} siparişi iptal edilsin mi? Masa boşaltılacak.`)) return;
-      try {
-        await api.updateOrderStatus(orderId, 'cancelled');
-        toast.success('Sipariş iptal edildi');
-        setOpenMenuTableId(null);
-        if (transferMode === table.id) setTransferMode(null);
-        loadTables();
-      } catch (err) {
-        toast.error(err.message);
-      }
+      setTableCancelTarget({ table, orderId, label });
+      setOpenMenuTableId(null);
       return;
     }
     if (action === 'print') {
@@ -227,12 +266,72 @@ export default function TablesScreen({
 
   const handleTakeawayDelivery = async (orderId, action, e) => {
     e?.stopPropagation();
+    if (takeawayActionLoading) return;
+    setTakeawayActionLoading({ orderId, action });
     try {
       await api.patchTakeawayDelivery(orderId, action);
       loadTakeaway();
       loadTables();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setTakeawayActionLoading(null);
+    }
+  };
+
+  const confirmTableCancel = async () => {
+    const target = tableCancelTarget;
+    if (!target || tableCancelLoading) return;
+    setTableCancelLoading(true);
+    try {
+      await api.updateOrderStatus(target.orderId, 'cancelled');
+      toast.success('Sipariş iptal edildi');
+      if (transferMode === target.table.id) setTransferMode(null);
+      setTableCancelTarget(null);
+      loadTables();
+      loadTakeaway();
+    } catch (err) {
+      toast.error(err.message || 'Sipariş iptal edilemedi');
+    } finally {
+      setTableCancelLoading(false);
+    }
+  };
+
+  const handleTakeawayPrint = async (orderId, e) => {
+    e?.stopPropagation();
+    if (takeawayActionLoading) return;
+    setOpenTakeawayMenuId(null);
+    setTakeawayActionLoading({ orderId, action: 'print' });
+    try {
+      await api.printTakeawayLabel(orderId);
+      toast.success('Yazdırma isteği gönderildi');
+    } catch (err) {
+      toast.error(err.message || 'Yazdırma isteği gönderilemedi');
+    } finally {
+      setTakeawayActionLoading(null);
+    }
+  };
+
+  const requestTakeawayCancel = (order, e) => {
+    e?.stopPropagation();
+    setOpenTakeawayMenuId(null);
+    setTakeawayConfirmTarget(order);
+  };
+
+  const confirmTakeawayCancel = async () => {
+    const order = takeawayConfirmTarget;
+    if (!order || takeawayActionLoading) return;
+    setTakeawayActionLoading({ orderId: order.id, action: 'cancel' });
+    try {
+      await api.updateOrderStatus(order.id, 'cancelled');
+      toast.success('Sipariş iptal edildi');
+      setTakeawayConfirmTarget(null);
+      loadTakeaway();
+      loadTables();
+    } catch (err) {
+      toast.error(err.message || 'Sipariş iptal edilemedi');
+    } finally {
+      setTakeawayActionLoading(null);
     }
   };
 
@@ -249,13 +348,13 @@ export default function TablesScreen({
     occupied: allTables.filter(t => t.status === 'occupied').length,
     hot: allTables.filter(t => {
       if (t.status !== 'occupied' || !t.order_started_at) return false;
-      return (now - new Date(t.order_started_at).getTime()) / 60000 > 90;
+      return (now - parseDbTimestampMs(t.order_started_at)) / 60000 > 60;
     }).length,
   };
 
   const btnBase = {
     padding: '8px 10px',
-    borderRadius: 10,
+    borderRadius: 8,
     fontSize: 11,
     fontWeight: 700,
     cursor: 'pointer',
@@ -367,7 +466,7 @@ export default function TablesScreen({
 
                 // Masanın kaç dakikadır dolu olduğunu hesapla
                 const occupiedMinutes = isOccupied && table.order_started_at
-                  ? (now - new Date(table.order_started_at).getTime()) / 60000
+                  ? (now - parseDbTimestampMs(table.order_started_at)) / 60000
                   : 0;
 
                 // 5 renkli doluluk skalası
@@ -380,16 +479,12 @@ export default function TablesScreen({
                   if (hasReady) {
                     borderColor = 'var(--success)';
                     bg = 'var(--success-muted)';
-                  } else if (occupiedMinutes > 90) {
-                    // 90+ dk: kırmızı (yoğun kullanım)
+                  } else if (occupiedMinutes > 60) {
+                    // 60+ dk: uzun süre
                     borderColor = 'var(--danger)';
                     bg = 'rgba(239,68,68,0.07)';
-                  } else if (occupiedMinutes > 30) {
-                    // 30-90 dk: turuncu
-                    borderColor = '#f97316';
-                    bg = 'rgba(249,115,22,0.07)';
                   } else {
-                    // 0-30 dk: sarı (az dolu)
+                    // 0-60 dk: normal dolu
                     borderColor = 'var(--warning)';
                     bg = 'var(--warning-muted)';
                   }
@@ -482,9 +577,7 @@ export default function TablesScreen({
                     </div>
 
                     {!isReserved && (
-                      <div style={{ fontSize: 12, fontWeight: 600, color: st.color, marginBottom: 2 }}>
-                        {st.label}
-                      </div>
+                      <div aria-hidden="true" style={{ height: 20, marginBottom: 2 }} />
                     )}
 
                     {isOccupied && table.waiter_name && (
@@ -524,7 +617,7 @@ export default function TablesScreen({
                           )}
                           {table.order_started_at && (
                             <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-                              <Clock size={10} /> {timeAgo(table.order_started_at, now)}
+                              <Clock size={10} /> {formatOrderElapsed(table.order_started_at, now)}
                             </span>
                           )}
                         </div>
@@ -561,87 +654,251 @@ export default function TablesScreen({
             )}
             {takeawayOrders.map((o) => {
               const isOut = Boolean(o.takeaway_out_at);
+              const isBusy = takeawayActionLoading?.orderId === o.id;
+              const isPrinting = isBusy && takeawayActionLoading?.action === 'print';
+              const isCancelling = isBusy && takeawayActionLoading?.action === 'cancel';
+              const isMarkingOut = isBusy && takeawayActionLoading?.action === 'out_for_delivery';
+              const isMarkingDelivered = isBusy && takeawayActionLoading?.action === 'delivered';
               return (
                 <div
                   key={o.id}
+                  className="takeaway-order-card"
                   style={{
-                    borderRadius: 12,
-                    border: '1px solid var(--border)',
-                    background: 'var(--bg-card)',
+                    borderRadius: 8,
+                    border: isOut ? '1px solid rgba(59,130,246,.45)' : '1px solid var(--border)',
+                    background: isOut
+                      ? 'linear-gradient(145deg, rgba(59,130,246,.13), rgba(30,41,59,.98) 44%, rgba(15,23,42,.36))'
+                      : 'linear-gradient(145deg, rgba(99,102,241,.11), rgba(30,41,59,.98) 42%, rgba(34,197,94,.06))',
                     overflow: 'hidden',
+                    position: 'relative',
+                    minHeight: 184,
+                    boxShadow: openTakeawayMenuId === o.id ? '0 18px 34px rgba(0,0,0,.28)' : '0 10px 24px rgba(0,0,0,.18)',
                   }}
                 >
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      bottom: 0,
+                      width: 4,
+                      background: isOut ? 'var(--info)' : 'var(--warning)',
+                      opacity: 0.95,
+                    }}
+                  />
+                  <div
+                    ref={openTakeawayMenuId === o.id ? takeawayMenuRef : null}
+                    style={{ position: 'absolute', top: 8, right: 8, zIndex: 3 }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-icon"
+                      aria-label="Paket sipariş işlemleri"
+                      aria-haspopup="menu"
+                      aria-expanded={openTakeawayMenuId === o.id}
+                      disabled={isBusy}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenTakeawayMenuId((id) => (id === o.id ? null : o.id));
+                      }}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        minHeight: 32,
+                        padding: 0,
+                        borderRadius: 8,
+                        background: openTakeawayMenuId === o.id ? 'var(--bg-tertiary)' : 'rgba(15,23,42,.62)',
+                        border: '1px solid rgba(255,255,255,.12)',
+                        color: 'var(--text-primary)',
+                        opacity: isBusy ? 0.55 : 1,
+                      }}
+                    >
+                      <MoreVertical size={17} />
+                    </button>
+                    {openTakeawayMenuId === o.id && (
+                      <div
+                        role="menu"
+                        aria-label="Paket sipariş işlemleri"
+                        style={{
+                          position: 'absolute',
+                          top: 38,
+                          right: 0,
+                          width: 148,
+                          padding: 6,
+                          borderRadius: 8,
+                          border: '1px solid var(--border)',
+                          background: 'var(--bg-tertiary)',
+                          boxShadow: '0 16px 38px rgba(0,0,0,.35)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={isBusy}
+                          onClick={(e) => handleTakeawayPrint(o.id, e)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '9px 10px',
+                            border: 'none',
+                            borderRadius: 7,
+                            background: 'transparent',
+                            color: 'var(--text-primary)',
+                            cursor: isBusy ? 'not-allowed' : 'pointer',
+                            fontFamily: 'inherit',
+                            fontSize: 13,
+                            fontWeight: 700,
+                            textAlign: 'left',
+                          }}
+                        >
+                          <Printer size={15} color="var(--accent)" />
+                          {isPrinting ? 'Yazdırılıyor...' : 'Yazdır'}
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={isBusy}
+                          onClick={(e) => requestTakeawayCancel(o, e)}
+                          style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '9px 10px',
+                            border: 'none',
+                            borderRadius: 7,
+                            background: 'transparent',
+                            color: 'var(--danger)',
+                            cursor: isBusy ? 'not-allowed' : 'pointer',
+                            fontFamily: 'inherit',
+                            fontSize: 13,
+                            fontWeight: 700,
+                            textAlign: 'left',
+                          }}
+                        >
+                          <Undo2 size={15} />
+                          {isCancelling ? 'İptal ediliyor...' : 'İptal'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => onOpenTakeawayOrder?.(o.id)}
                     style={{
                       width: '100%',
                       textAlign: 'left',
-                      padding: 12,
+                      padding: '14px 48px 10px 16px',
                       border: 'none',
                       background: 'transparent',
                       color: 'var(--text-primary)',
                       cursor: 'pointer',
                       fontFamily: 'inherit',
+                      paddingRight: 48,
                     }}
                   >
-                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--accent)', marginBottom: 4 }}>
-                      #{o.order_no ?? o.id.slice(0, 8)}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, paddingRight: 4 }}>
+                      {o.created_at && (
+                        <div style={{ fontSize: 11, color: 'var(--warning)', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                          {formatOrderElapsed(o.created_at, now)}
+                        </div>
+                      )}
                     </div>
-                    {o.created_at && (
-                      <div style={{ fontSize: 11, color: 'var(--warning)', marginBottom: 6, fontWeight: 600 }}>
-                        {timeAgo(o.created_at, now)}
+
+                    <div style={{ marginTop: 12, minHeight: 42, paddingRight: 2 }}>
+                      <div
+                        style={{
+                          fontSize: 19,
+                          lineHeight: 1.18,
+                          fontWeight: 850,
+                          color: 'var(--text-primary)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {o.customer_name || 'Paket müşteri'}
                       </div>
-                    )}
-                    {isOut && (
-                      <div style={{
-                        fontSize: 10, fontWeight: 700, color: 'var(--info)',
-                        marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5,
-                      }}>
-                        Teslimatta
-                      </div>
-                    )}
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {o.user_name || '—'} · {o.item_count ?? 0} kalem
                     </div>
-                    {o.customer_name && (
-                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>{o.customer_name}</div>
-                    )}
-                    <div style={{ fontSize: 14, fontWeight: 700, marginTop: 8 }}>{formatCurrency(o.total)}</div>
+
+                    <div
+                      style={{
+                        marginTop: 14,
+                        fontSize: 28,
+                        fontWeight: 900,
+                        letterSpacing: 0,
+                        lineHeight: 1,
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      {formatCurrency(o.total)}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12, minHeight: 22 }}>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          borderRadius: 8,
+                          padding: '4px 8px',
+                          border: `1px solid ${isOut ? 'rgba(59,130,246,.45)' : 'rgba(245,158,11,.45)'}`,
+                          background: isOut ? 'rgba(59,130,246,.12)' : 'rgba(245,158,11,.12)',
+                          color: isOut ? 'var(--info)' : 'var(--warning)',
+                          fontSize: 10,
+                          fontWeight: 850,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        <Clock size={11} />
+                        {isOut ? 'Teslimatta' : 'Hazırlanıyor'}
+                      </span>
+                    </div>
                   </button>
                   <div
-                    style={{ display: 'flex', gap: 8, padding: '0 10px 10px', flexWrap: 'wrap' }}
+                    style={{
+                      display: 'flex',
+                      gap: 8,
+                      padding: '0 12px 12px 16px',
+                      flexWrap: 'wrap',
+                      position: 'relative',
+                      zIndex: 2,
+                    }}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <button
                       type="button"
-                      disabled={isOut}
+                      disabled={isOut || isBusy}
                       onClick={(e) => handleTakeawayDelivery(o.id, 'out_for_delivery', e)}
                       style={{
                         ...btnBase,
                         background: isOut ? 'var(--bg-tertiary)' : 'var(--warning-muted)',
                         color: isOut ? 'var(--text-muted)' : 'var(--warning)',
                         borderColor: isOut ? 'var(--border)' : 'var(--warning)',
-                        cursor: isOut ? 'not-allowed' : 'pointer',
-                        opacity: isOut ? 0.65 : 1,
+                        cursor: isOut || isBusy ? 'not-allowed' : 'pointer',
+                        opacity: isOut || isBusy ? 0.65 : 1,
                       }}
                     >
-                      Teslimata Çıkarıldı
+                      {isMarkingOut ? 'İşleniyor...' : 'Teslimata Çıkarıldı'}
                     </button>
                     <button
                       type="button"
-                      disabled={!isOut}
+                      disabled={!isOut || isBusy}
                       onClick={(e) => handleTakeawayDelivery(o.id, 'delivered', e)}
                       style={{
                         ...btnBase,
                         background: isOut ? 'var(--success-muted)' : 'var(--bg-tertiary)',
                         color: isOut ? 'var(--success)' : 'var(--text-muted)',
                         borderColor: isOut ? 'var(--success)' : 'var(--border)',
-                        cursor: isOut ? 'pointer' : 'not-allowed',
-                        opacity: isOut ? 1 : 0.65,
+                        cursor: isOut && !isBusy ? 'pointer' : 'not-allowed',
+                        opacity: isOut && !isBusy ? 1 : 0.65,
                       }}
                     >
-                      Teslim Edildi
+                      {isMarkingDelivered ? 'İşleniyor...' : 'Teslim Edildi'}
                     </button>
                   </div>
                 </div>
@@ -664,6 +921,13 @@ export default function TablesScreen({
         }
         @media (min-width: 640px) {
           .table-action-sheet-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
+        .takeaway-order-card {
+          transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+        }
+        .takeaway-order-card:hover {
+          transform: translateY(-1px);
+          border-color: var(--border-light) !important;
         }
       `}</style>
 
@@ -715,6 +979,14 @@ export default function TablesScreen({
                 )}
                 <button
                   type="button"
+                  style={actionTileBase}
+                  onClick={(e) => handleTableMenuAction('print', actionTable, e)}
+                >
+                  <Printer size={26} color="var(--accent)" strokeWidth={2} />
+                  Yazdırma
+                </button>
+                <button
+                  type="button"
                   style={{
                     ...actionTileBase,
                     borderColor: 'var(--danger)',
@@ -726,15 +998,145 @@ export default function TablesScreen({
                   <Undo2 size={26} color="var(--danger)" strokeWidth={2} />
                   İptal
                 </button>
-                <button
-                  type="button"
-                  style={actionTileBase}
-                  onClick={(e) => handleTableMenuAction('print', actionTable, e)}
-                >
-                  <Printer size={26} color="var(--accent)" strokeWidth={2} />
-                  Yazdırma
-                </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tableCancelTarget && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (!tableCancelLoading) setTableCancelTarget(null);
+          }}
+        >
+          <div
+            className="modal modal-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="table-cancel-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="table-cancel-title" style={{ margin: 0, fontSize: 18 }}>Sipariş iptal edilsin mi?</h2>
+                <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.45, fontWeight: 650 }}>
+                  Masa boşaltılacak ve bu işlem geri alınamaz.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setTableCancelTarget(null)}
+                disabled={tableCancelLoading}
+                title="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ paddingTop: 4 }}>
+              <div style={{
+                padding: '4px 2px 0',
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+              }}>
+                <div style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 850, lineHeight: 1.2 }}>
+                  {tableCancelTarget.label}
+                </div>
+                <div style={{ marginTop: 8, color: 'var(--text-secondary)', lineHeight: 1.45, fontSize: 14, fontWeight: 650 }}>
+                  Aktif sipariş iptal edilecek.
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setTableCancelTarget(null)}
+                disabled={tableCancelLoading}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={confirmTableCancel}
+                disabled={tableCancelLoading}
+              >
+                {tableCancelLoading ? 'İptal ediliyor...' : 'Siparişi iptal et'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {takeawayConfirmTarget && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            if (!takeawayActionLoading) setTakeawayConfirmTarget(null);
+          }}
+        >
+          <div
+            className="modal modal-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="takeaway-cancel-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header">
+              <div>
+                <h2 id="takeaway-cancel-title" style={{ margin: 0, fontSize: 18 }}>Sipariş iptal edilsin mi?</h2>
+                <p style={{ margin: '8px 0 0', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.45 }}>
+                  Bu işlem geri alınamaz.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setTakeawayConfirmTarget(null)}
+                disabled={!!takeawayActionLoading}
+                title="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body" style={{ paddingTop: 4 }}>
+              <div style={{
+                borderRadius: 8,
+                border: '1px solid var(--border)',
+                background: 'var(--bg-tertiary)',
+                padding: 12,
+                fontSize: 13,
+                color: 'var(--text-secondary)',
+              }}>
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  #{takeawayConfirmTarget.order_no ?? takeawayConfirmTarget.id.slice(0, 8)}
+                </strong>
+                {takeawayConfirmTarget.customer_name ? ` · ${takeawayConfirmTarget.customer_name}` : ''}
+                <div style={{ marginTop: 6, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {formatCurrency(takeawayConfirmTarget.total)}
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setTakeawayConfirmTarget(null)}
+                disabled={!!takeawayActionLoading}
+              >
+                Vazgeç
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={confirmTakeawayCancel}
+                disabled={!!takeawayActionLoading}
+              >
+                {takeawayActionLoading?.action === 'cancel' ? 'İptal ediliyor...' : 'Siparişi iptal et'}
+              </button>
             </div>
           </div>
         </div>

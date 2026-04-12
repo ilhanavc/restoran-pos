@@ -100,6 +100,22 @@ class ApiService {
   deleteProduct(id) { return this.delete(`/products/${id}`); }
   getModifiers(productId) { return this.get(`/products/${productId}/modifiers`); }
 
+  async uploadProductImage(productId, file) {
+    const fd = new FormData();
+    fd.append('image', file);
+    const headers = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const res = await fetch(`${API_BASE}/products/${productId}/image`, { method: 'POST', headers, body: fd });
+    if (res.status === 401) { this.setToken(null); window.location.reload(); throw new Error('Oturum süresi doldu'); }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Görsel yükleme başarısız');
+    return data;
+  }
+  deleteProductImage(id) { return this.delete(`/products/${id}/image`); }
+  getProductCombos(id) { return this.get(`/products/${id}/combos`); }
+  addProductCombo(id, body) { return this.post(`/products/${id}/combos`, body); }
+  removeProductCombo(id, comboId) { return this.delete(`/products/${id}/combos/${comboId}`); }
+
   // Orders
   getOrders(params = {}) { return this.get(`/orders${this.buildQuery(params)}`); }
   getOrder(id) { return this.get(`/orders/${id}`); }
@@ -115,6 +131,7 @@ class ApiService {
   applyDiscount(orderId, data) { return this.patch(`/orders/${orderId}/discount`, data); }
   getTakeawayOpenOrders() { return this.get('/orders/takeaway/open'); }
   patchTakeawayDelivery(orderId, action) { return this.patch(`/orders/${orderId}/takeaway/delivery`, { action }); }
+  printTakeawayLabel(orderId) { return this.post(`/orders/${orderId}/takeaway/print-label`, {}); }
 
   // Payments
   createPayment(data) { return this.post('/payments', data); }
@@ -126,6 +143,7 @@ class ApiService {
   getCustomers(params = {}) { return this.get(`/customers${this.buildQuery(params)}`); }
   getCustomersExport() { return this.get('/customers/export'); }
   getCustomer(id) { return this.get(`/customers/${id}`); }
+  getCustomerStats(id) { return this.get(`/customers/${id}/stats`); }
   createCustomer(data) { return this.post('/customers', data); }
   updateCustomer(id, data) { return this.patch(`/customers/${id}`, data); }
   previewCustomerImport({ rows, preview_token, page = 1, page_size = 250 }) {
@@ -151,6 +169,7 @@ class ApiService {
   exportClosedOrders(params = {}) { return this.get(`/reports/closed-orders/export${this.buildQuery(params)}`); }
   getRangeReport(from, to) { return this.get(`/reports/range?from=${from}&to=${to}`); }
   getHourlyReport(date) { return this.get(`/reports/hourly${date ? '?date=' + date : ''}`); }
+  getAnalyticsReport(params = {}) { return this.get(`/reports/analytics${this.buildQuery(params)}`); }
 
   // Reservations
   getReservations(params = {}) {

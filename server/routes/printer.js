@@ -10,6 +10,33 @@ router.use(authenticate, businessScope);
 // Legacy / mock: aktif POS akışı artık print_jobs → StoreBridge ile yazdırır.
 // Bu rotalar manuel HTTP testi, debug veya önizleme için korunur; sipariş/ödeme UI bunları çağırmaz.
 
+function parseUtcLikeTimestamp(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return new Date();
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(raw)) {
+    return new Date(raw.replace(' ', 'T') + 'Z');
+  }
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(raw)) {
+    return new Date(raw + 'Z');
+  }
+  return new Date(raw);
+}
+
+function formatStoreDateTime(value) {
+  const d = parseUtcLikeTimestamp(value);
+  if (Number.isNaN(d.getTime())) return String(value || '-');
+  return new Intl.DateTimeFormat('tr-TR', {
+    timeZone: config.storeTimezone || 'Europe/Istanbul',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(d);
+}
+
 // POST /api/print/receipt
 router.post('/receipt', (req, res) => {
   try {
@@ -95,7 +122,7 @@ function buildReceiptData(order) {
   lines.push({ type: 'text', text: order.business_phone || '' });
   if (order.tax_id) lines.push({ type: 'text', text: `VKN: ${order.tax_id}` });
   lines.push({ type: 'separator' });
-  lines.push({ type: 'text', text: `Tarih: ${new Date(order.created_at).toLocaleString('tr-TR')}` });
+  lines.push({ type: 'text', text: `Tarih: ${formatStoreDateTime(order.created_at)}` });
   lines.push({ type: 'text', text: `Sipariş No: ${order.order_no}` });
   if (order.table_name) lines.push({ type: 'text', text: `Masa: ${order.table_name}` });
   if (order.customer_name) lines.push({ type: 'text', text: `Müşteri: ${order.customer_name}` });

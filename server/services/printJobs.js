@@ -494,8 +494,9 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
  * Paket sipariş etiketi: varsayılan yazıcıdan kurye kağıdı basar.
  * Sadece order_type='takeaway' siparişlerde çağrılır.
  */
-export function enqueueTakeawayLabelJob(businessId, orderId, userId) {
-  const idempotencyKey = `takeaway_label|${businessId}|${orderId}`;
+export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {}) {
+  const suffix = options?.idempotencySuffix ? `|${String(options.idempotencySuffix).slice(0, 80)}` : '';
+  const idempotencyKey = `takeaway_label|${businessId}|${orderId}${suffix}`;
   const existing = db.prepare(`SELECT id FROM print_jobs WHERE idempotency_key = ?`).get(idempotencyKey);
   if (existing) return { created: 0, skipped: 1, duplicate: true };
 

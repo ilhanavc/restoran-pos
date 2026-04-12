@@ -262,6 +262,13 @@ export default function ReportsScreen() {
   const [orderMinAmount, setOrderMinAmount] = useState('');
   const [orderMaxAmount, setOrderMaxAmount] = useState('');
   const [orderFilterOpen, setOrderFilterOpen] = useState(false);
+  const [analyticsFrom, setAnalyticsFrom] = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 6);
+    return d.toISOString().slice(0, 10);
+  });
+  const [analyticsTo, setAnalyticsTo] = useState(new Date().toISOString().slice(0, 10));
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const toast = useToast();
 
   const exportOrders = useCallback(async (format) => {
@@ -382,6 +389,19 @@ export default function ReportsScreen() {
   };
 
   const paymentLabel = { cash: 'Nakit', card: 'Kart', mixed: 'Karışık', other: 'Diğer' };
+
+  const loadAnalytics = async () => {
+    if (!analyticsFrom || !analyticsTo) return;
+    setAnalyticsLoading(true);
+    try {
+      const data = await api.getAnalyticsReport({ from: analyticsFrom, to: analyticsTo });
+      setAnalyticsData(data);
+    } catch {
+      toast.error('Analitik yüklenemedi');
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
 
   const categoryPieData = (report?.categoryBreakdown || [])
     .filter(c => c.total_revenue > 0)
@@ -589,6 +609,95 @@ export default function ReportsScreen() {
                 </table>
               ) : <div className="empty-state" style={{ padding: 16 }}>Veri yok</div>}
             </div>
+          </div>
+
+          {/* ── Gelişmiş Analitik ── */}
+          <div className="card card-padded" style={{ marginTop: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <TrendingUp size={14} /> Gelişmiş Analitik
+              </h3>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input type="date" className="input" style={{ width: 150 }} value={analyticsFrom} onChange={e => setAnalyticsFrom(e.target.value)} />
+                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
+                <input type="date" className="input" style={{ width: 150 }} value={analyticsTo} onChange={e => setAnalyticsTo(e.target.value)} />
+                <button type="button" className="btn btn-primary btn-sm" onClick={loadAnalytics} disabled={analyticsLoading}>
+                  {analyticsLoading ? 'Yükleniyor…' : 'Göster'}
+                </button>
+              </div>
+            </div>
+
+            {!analyticsData && !analyticsLoading && (
+              <div className="empty-state" style={{ padding: 32 }}>Tarih aralığı seçip &quot;Göster&quot;e tıklayın</div>
+            )}
+            {analyticsLoading && <div className="empty-state" style={{ padding: 32 }}>Yükleniyor…</div>}
+
+            {analyticsData && !analyticsLoading && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                {/* Top 10 ürün */}
+                <div>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text-muted)' }}>EN ÇOK SATAN 10 ÜRÜN</h4>
+                  {analyticsData.topProducts?.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart
+                        data={analyticsData.topProducts.map(p => ({
+                          name: p.product_name.length > 14 ? p.product_name.slice(0, 13) + '…' : p.product_name,
+                          adet: p.total_qty,
+                          ciro: p.total_revenue,
+                        })).reverse()}
+                        layout="vertical"
+                        margin={{ top: 4, right: 16, left: 4, bottom: 0 }}
+                      >
+                        <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={95} />
+                        <Tooltip content={<CustomTooltipCurrency />} />
+                        <Bar dataKey="adet" name="Adet" fill="#6366f1" radius={[0, 3, 3, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <div className="empty-state" style={{ padding: 20 }}>Veri yok</div>}
+                </div>
+
+                {/* Saatlik yoğunluk */}
+                <div>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text-muted)' }}>YOĞUN SAATLER</h4>
+                  {analyticsData.peakHours?.some(h => h.order_count > 0) ? (
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart
+                        data={(analyticsData.peakHours || []).filter(h => parseInt(h.hour) >= 7 && parseInt(h.hour) <= 23)}
+                        margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+                      >
+                        <XAxis dataKey="hour" tick={{ fontSize: 9 }} interval={1} />
+                        <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
+                        <Tooltip content={<CustomTooltipCurrency />} />
+                        <Bar dataKey="order_count" name="Sipariş" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <div className="empty-state" style={{ padding: 20 }}>Veri yok</div>}
+                </div>
+
+                {/* Günlük ciro */}
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <h4 style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: 'var(--text-muted)' }}>
+                    GÜNLİK CİRO ({analyticsData.from} – {analyticsData.to})
+                    {analyticsData.summary && (
+                      <span style={{ fontWeight: 400, marginLeft: 12, color: 'var(--accent)' }}>
+                        Toplam: {formatCurrency(analyticsData.summary.total_revenue)} · {analyticsData.summary.total_orders} sipariş
+                      </span>
+                    )}
+                  </h4>
+                  {analyticsData.dailyRevenue?.length > 0 ? (
+                    <ResponsiveContainer width="100%" height={160}>
+                      <BarChart data={analyticsData.dailyRevenue.map(r => ({ ...r, dateLabel: shortDate(r.date) }))} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                        <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} width={38} />
+                        <Tooltip content={<CustomTooltipCurrency />} />
+                        <Bar dataKey="revenue" name="Ciro" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : <div className="empty-state" style={{ padding: 20 }}>Veri yok</div>}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Sipariş Geçmişi */}

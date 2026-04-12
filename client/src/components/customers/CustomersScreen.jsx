@@ -22,6 +22,8 @@ export default function CustomersScreen() {
   const [importPreview, setImportPreview] = useState(null);
   const [importPage, setImportPage] = useState(1);
   const [importPageSize, setImportPageSize] = useState(250);
+  const [customerStats, setCustomerStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(false);
   const toast = useToast();
 
   useEffect(() => { loadCustomers(); }, []);
@@ -69,6 +71,13 @@ export default function CustomersScreen() {
     try {
       const detail = await api.getCustomer(id);
       setSelectedCustomer(detail);
+      setCustomerStats(null);
+      // Load stats in background
+      setStatsLoading(true);
+      api.getCustomerStats(id)
+        .then(stats => setCustomerStats(stats))
+        .catch(() => {})
+        .finally(() => setStatsLoading(false));
     } catch (err) {
       toast.error('Müşteri bilgisi yüklenemedi');
     }
@@ -350,6 +359,43 @@ export default function CustomersScreen() {
                 📝 {selectedCustomer.note}
               </div>
             )}
+
+            {/* 360 İstatistikler */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>360° Profil</div>
+              {statsLoading ? (
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Yükleniyor…</div>
+              ) : customerStats ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                    <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>Toplam harcama</div>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent)' }}>{formatCurrency(customerStats.total_spend)}</div>
+                    </div>
+                    <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: '8px 10px' }}>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>Sipariş sayısı</div>
+                      <div style={{ fontSize: 14, fontWeight: 700 }}>{customerStats.order_count}</div>
+                    </div>
+                  </div>
+                  {customerStats.last_visit && (
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      Son ziyaret: <strong>{formatDateTime(customerStats.last_visit)}</strong>
+                    </div>
+                  )}
+                  {customerStats.favorite_products?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>Favori ürünler</div>
+                      {customerStats.favorite_products.map((fp, i) => (
+                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '3px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span>{fp.product_name}</span>
+                          <span style={{ color: 'var(--text-muted)' }}>{fp.total_qty}x</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
 
             {/* Recent Orders */}
             {selectedCustomer.recentOrders?.length > 0 && (

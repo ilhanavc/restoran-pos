@@ -2,7 +2,10 @@ import { createServer } from 'http';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import config from './config/index.js';
@@ -94,6 +97,11 @@ const waiterCallLimiter = rateLimit({
   legacyHeaders: false,
   message: 'Çok sık çağrı yapıldı. Lütfen bir dakika bekleyin.',
 });
+
+// Ürün görselleri — kimlik doğrulama gerektirmez (img src ile erişilir)
+const uploadsDir = path.join(__dirname, 'uploads');
+fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date().toISOString() }));
