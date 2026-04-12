@@ -3,11 +3,11 @@ import { useToast } from '../../context/ToastContext.jsx';
 import api from '../../services/api.js';
 import { formatCurrency } from '../../constants/index.js';
 import { X, CreditCard, Banknote, ArrowLeftRight, Check } from 'lucide-react';
+import SplitPaymentModal from './SplitPaymentModal.jsx';
 
 export default function PaymentScreen({ order, onClose, onComplete }) {
   const [orderState, setOrderState] = useState(order);
   const [paymentType, setPaymentType] = useState('cash');
-  const [cashReceived, setCashReceived] = useState('');
   const [mixedCash, setMixedCash] = useState('');
   const [mixedCard, setMixedCard] = useState('');
   const [discountPercent, setDiscountPercent] = useState('');
@@ -16,6 +16,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [lastChange, setLastChange] = useState(0);
+  const [splitOpen, setSplitOpen] = useState(false);
   const toast = useToast();
 
   useEffect(() => {
@@ -24,21 +25,18 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
 
   useEffect(() => {
     if (paymentType === 'mixed' && orderState) {
-      const due = orderState.grand_total;
+      const paid = (orderState.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const due = Math.max(0, Math.round(((Number(orderState.grand_total) || 0) - paid) * 100) / 100);
       setMixedCash('');
       setMixedCard(String(due % 1 === 0 ? due : due.toFixed(2)));
     }
-  }, [paymentType, orderState?.grand_total]);
+  }, [paymentType, orderState?.grand_total, orderState?.payments]);
 
   if (!orderState) return null;
 
-  const totalDue = orderState.grand_total;
-  const cashVal = parseFloat(cashReceived) || 0;
-  const change = paymentType === 'cash' ? Math.max(0, cashVal - totalDue) : 0;
+  const paidTotal = (orderState.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const totalDue = Math.max(0, Math.round(((Number(orderState.grand_total) || 0) - paidTotal) * 100) / 100);
   const payAmount = customAmount ? parseFloat(customAmount) : totalDue;
-
-  const DENOMINATIONS = [10, 20, 50, 100, 200];
-  const quickExact = [50, 100, 200, 500, 1000].filter(a => a >= totalDue && a <= totalDue * 3).slice(0, 3);
 
   const handleApplyDiscount = async () => {
     try {
@@ -55,6 +53,24 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
       setDiscountAmount('');
     } catch (err) {
       toast.error(err.message);
+    }
+  };
+
+  const handleSplitPaymentComplete = async (result) => {
+    if (result?.order?.status === 'closed') {
+      setLastChange(Number(result?.payment?.change_amount) || 0);
+      setCompleted(true);
+      setSplitOpen(false);
+      setTimeout(() => {
+        onComplete?.(result);
+      }, 1200);
+      return;
+    }
+    try {
+      const updated = await api.getOrder(orderState.id);
+      setOrderState(updated);
+    } catch {
+      // Split modal already refreshed its own state; keep the current payment screen usable.
     }
   };
 
@@ -97,11 +113,11 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
         order_id: oid,
         payment_type: paymentType,
         amount: payAmount,
-        cash_received: paymentType === 'cash' ? cashVal : payAmount,
+        cash_received: payAmount,
       };
       const result = await api.createPayment(payData);
 
-      setLastChange(paymentType === 'cash' ? change : 0);
+      setLastChange(0);
       setCompleted(true);
       toast.success('Ödeme alındı');
 
@@ -161,7 +177,23 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                 İndirim: -{formatCurrency(orderState.discount_amount)}
               </div>
             )}
+            {paidTotal > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--success)', marginTop: 4 }}>
+                Ödenen: {formatCurrency(paidTotal)} · Sipariş: {formatCurrency(orderState.grand_total)}
+              </div>
+            )}
           </div>
+
+          <button
+            type="button"
+            className="btn btn-primary btn-block btn-lg"
+            onClick={() => setSplitOpen(true)}
+            disabled={totalDue <= 0}
+            style={{ marginBottom: 20 }}
+          >
+            <ArrowLeftRight size={18} />
+            Ayrı ayrı öde
+          </button>
 
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -183,65 +215,6 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
               ))}
             </div>
           </div>
-
-          {paymentType === 'cash' && (
-            <div style={{ marginBottom: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                Alınan Tutar
-              </div>
-              <input className="input input-lg" type="number" value={cashReceived}
-                onChange={e => setCashReceived(e.target.value)}
-                placeholder={formatCurrency(totalDue)} style={{ fontSize: 20, fontWeight: 700, textAlign: 'center' }} autoFocus />
-
-              {/* Hızlı tuş takımı */}
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Ekle
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  {DENOMINATIONS.map(amt => (
-                    <button key={amt} type="button" className="btn btn-ghost btn-sm"
-                      style={{ fontWeight: 700, minWidth: 52 }}
-                      onClick={() => setCashReceived(String(Math.round(((parseFloat(cashReceived) || 0) + amt) * 100) / 100))}>
-                      +{amt}₺
-                    </button>
-                  ))}
-                </div>
-                <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                  <button type="button" className="btn btn-ghost btn-sm"
-                    style={{ fontWeight: 700 }}
-                    onClick={() => setCashReceived(String(totalDue))}>
-                    Tam
-                  </button>
-                  {quickExact.map(amt => (
-                    <button key={amt} type="button" className="btn btn-ghost btn-sm"
-                      onClick={() => setCashReceived(String(amt))}>
-                      {formatCurrency(amt)}
-                    </button>
-                  ))}
-                  {cashReceived && (
-                    <button type="button" className="btn btn-ghost btn-sm"
-                      style={{ color: 'var(--danger)' }}
-                      onClick={() => setCashReceived('')}>
-                      Sil
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {cashVal > 0 && cashVal >= totalDue && (
-                <div style={{
-                  marginTop: 12, padding: 12, borderRadius: 'var(--radius-sm)',
-                  background: 'var(--success-muted)', textAlign: 'center',
-                }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Para Üstü</div>
-                  <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--success)' }}>
-                    {formatCurrency(change)}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
 
           {paymentType === 'mixed' && (
             <div style={{ marginBottom: 20 }}>
@@ -285,20 +258,32 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
               <input className="input" type="number" placeholder="₺ Tutar"
                 value={discountAmount} onChange={e => { setDiscountAmount(e.target.value); setDiscountPercent(''); }}
                 style={{ flex: 1 }} />
-              <button type="button" className="btn btn-ghost" onClick={handleApplyDiscount}>Uygula</button>
+              <button type="button" className="btn btn-ghost" onClick={handleApplyDiscount} disabled={paidTotal > 0}>Uygula</button>
             </div>
+            {paidTotal > 0 && (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+                Ödeme alındıktan sonra indirim değiştirilemez.
+              </div>
+            )}
           </details>
         </div>
 
         <div className="modal-footer">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Vazgeç</button>
-          <button type="button" className="btn btn-success btn-lg" onClick={handlePayment} disabled={processing}
+          <button type="button" className="btn btn-success btn-lg" onClick={handlePayment} disabled={processing || totalDue <= 0}
             style={{ minWidth: 180 }}>
             <Check size={18} />
             {processing ? 'İşleniyor...' : `${formatCurrency(paymentType === 'mixed' ? totalDue : payAmount)} Ödeme Al`}
           </button>
         </div>
       </div>
+      {splitOpen && (
+        <SplitPaymentModal
+          orderId={orderState.id}
+          onClose={() => setSplitOpen(false)}
+          onPaymentComplete={handleSplitPaymentComplete}
+        />
+      )}
     </div>
   );
 }

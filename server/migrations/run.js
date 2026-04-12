@@ -229,12 +229,29 @@ export const migrations = [
     business_id TEXT NOT NULL REFERENCES businesses(id),
     order_id TEXT NOT NULL REFERENCES orders(id),
     payment_type TEXT NOT NULL CHECK(payment_type IN ('cash','card','mixed','other')),
+    payment_scope TEXT NOT NULL DEFAULT 'full_order' CHECK(payment_scope IN ('full_order','split_item')),
+    payer_no INTEGER,
+    payer_label TEXT,
     amount REAL NOT NULL,
     cash_received REAL DEFAULT 0,
     change_amount REAL DEFAULT 0,
     note TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     created_by TEXT REFERENCES users(id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS payment_allocations (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    payment_id TEXT NOT NULL REFERENCES payments(id),
+    order_id TEXT NOT NULL REFERENCES orders(id),
+    order_item_id TEXT NOT NULL REFERENCES order_items(id),
+    quantity INTEGER NOT NULL CHECK(quantity > 0),
+    unit_price_snapshot REAL NOT NULL,
+    line_total REAL NOT NULL,
+    payer_no INTEGER,
+    payer_label TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
   )`,
 
   // ── Printers ──
@@ -327,6 +344,9 @@ export const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_customer_phones_customer ON customer_phones(customer_id)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_phones_phone ON customer_phones(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`,
   `CREATE INDEX IF NOT EXISTS idx_incoming_calls_phone ON incoming_calls(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_business ON audit_logs(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`,
@@ -499,6 +519,38 @@ function ensureColumnMigrations() {
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_by')) {
     db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_by TEXT').run();
   }
+
+  const paymentCols = db.prepare('PRAGMA table_info(payments)').all();
+  if (paymentCols.length && !paymentCols.some((c) => c.name === 'payment_scope')) {
+    db.prepare(
+      `ALTER TABLE payments ADD COLUMN payment_scope TEXT NOT NULL DEFAULT 'full_order' CHECK(payment_scope IN ('full_order','split_item'))`,
+    ).run();
+  }
+  if (paymentCols.length && !paymentCols.some((c) => c.name === 'payer_no')) {
+    db.prepare('ALTER TABLE payments ADD COLUMN payer_no INTEGER').run();
+  }
+  if (paymentCols.length && !paymentCols.some((c) => c.name === 'payer_label')) {
+    db.prepare('ALTER TABLE payments ADD COLUMN payer_label TEXT').run();
+  }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS payment_allocations (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id),
+      payment_id TEXT NOT NULL REFERENCES payments(id),
+      order_id TEXT NOT NULL REFERENCES orders(id),
+      order_item_id TEXT NOT NULL REFERENCES order_items(id),
+      quantity INTEGER NOT NULL CHECK(quantity > 0),
+      unit_price_snapshot REAL NOT NULL,
+      line_total REAL NOT NULL,
+      payer_no INTEGER,
+      payer_label TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`);
 
   // order_id NOT NULL → nullable (test job'ları için gerekli; SQLite tablo recreation gerektirir)
   pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();

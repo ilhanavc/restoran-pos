@@ -631,6 +631,10 @@ router.patch('/:id/discount', authorize('admin', 'cashier'), (req, res) => {
     const { discount_amount, discount_percent } = req.body;
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    const paymentCount = db.prepare('SELECT COUNT(*) as c FROM payments WHERE order_id = ?').get(order.id);
+    if ((paymentCount?.c || 0) > 0) {
+      return res.status(400).json({ error: 'Ödeme alındıktan sonra indirim değiştirilemez' });
+    }
 
     const pct = discount_percent != null && discount_percent !== '' ? parseFloat(discount_percent) : null;
     const amt = discount_amount != null && discount_amount !== '' ? parseFloat(discount_amount) : null;

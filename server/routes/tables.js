@@ -21,6 +21,9 @@ router.get('/', tableStaff, (req, res) => {
         CASE WHEN t.current_order_id IS NOT NULL 
           THEN (SELECT grand_total FROM orders WHERE id = t.current_order_id) 
           ELSE 0 END as order_total,
+        CASE WHEN t.current_order_id IS NOT NULL
+          THEN (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE order_id = t.current_order_id)
+          ELSE 0 END as order_paid_total,
         CASE WHEN t.current_order_id IS NOT NULL 
           THEN (SELECT created_at FROM orders WHERE id = t.current_order_id) 
           ELSE NULL END as order_started_at,

@@ -505,6 +505,15 @@ export default function TablesScreen({
                           }}
                           >
                             {formatCurrency(table.order_total)}
+                            {Number(table.order_paid_total || 0) > 0 && (
+                              <span style={{
+                                color: 'var(--success)',
+                                fontSize: 18,
+                                fontWeight: 800,
+                              }}>
+                                /{formatCurrency(table.order_paid_total)}
+                              </span>
+                            )}
                           </div>
                         )}
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 10, color: 'var(--text-muted)' }}>
