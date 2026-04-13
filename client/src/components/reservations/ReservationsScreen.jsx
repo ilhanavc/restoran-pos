@@ -6,7 +6,7 @@ import { useToast } from '../../context/ToastContext.jsx';
 const STATUS_LABELS = {
   confirmed: { label: 'Onaylı', color: 'var(--info)', bg: 'var(--info-muted)' },
   arrived:   { label: 'Geldi',  color: 'var(--success)', bg: 'var(--success-muted)' },
-  cancelled: { label: 'İptal',  color: 'var(--danger)', bg: 'rgba(239,68,68,0.08)' },
+  cancelled: { label: 'İptal',  color: 'var(--danger)', bg: 'var(--danger-muted)' },
   no_show:   { label: 'Gelmedi', color: 'var(--text-muted)', bg: 'var(--bg-tertiary)' },
 };
 

@@ -20,6 +20,7 @@ export default function OrderScreen({
   callLogId,
   onBack,
   onPayment,
+  onQuickPayment,
   onNavigateToTables,
 }) {
   const [categories, setCategories] = useState([]);
@@ -47,7 +48,6 @@ export default function OrderScreen({
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
-  const callLogOpenedPatchSentRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -348,6 +348,7 @@ export default function OrderScreen({
         table_id: table?.id || null,
         order_type: orderType,
         customer_id: selectedCustomer?.id || null,
+        call_log_id: callLogId != null ? String(callLogId).trim() || null : null,
         guest_count: table?.guest_count || 0,
         delivery_address: selectedTakeawayAddress || customer?.selectedAddress || null,
         items: cartItems.map((ci) => ({
@@ -359,21 +360,18 @@ export default function OrderScreen({
         })),
       };
       const result = await api.createOrder(orderData);
+      let savedOrder = result;
       try {
         const full = await api.getOrder(result.id);
+        savedOrder = full;
         setExistingOrder(full);
       } catch {
         setExistingOrder(result);
       }
       setCartItems([]);
       toast.success('Sipariş kaydedildi');
-      const logId = callLogId != null ? String(callLogId).trim() : '';
-      if (logId && result?.id && !callLogOpenedPatchSentRef.current) {
-        callLogOpenedPatchSentRef.current = true;
-        api.patchCallLogStatus(logId, 'opened_order').catch(() => {});
-      }
       if (!skipNavigate && onNavigateToTables) onNavigateToTables();
-      return { order: result, isNew: true };
+      return { order: savedOrder, isNew: true };
     } catch (err) {
       toast.error(err.message);
       return null;
@@ -587,6 +585,28 @@ export default function OrderScreen({
   const araTotal = (Number(existingOrder?.subtotal) || 0) + cartSubtotal;
 
   const allExistingItems = existingOrder?.items || [];
+  const activeExistingItems = allExistingItems.filter((i) => i.status !== 'cancelled');
+  const hasUnsavedChanges = cartItems.length > 0;
+  const canOpenPayment = Boolean(existingOrder && !hasUnsavedChanges && existingOrder.status !== 'closed' && activeExistingItems.length > 0);
+  const tableDisplayName = table
+    ? (table.displayName || `Masa ${table.name}`)
+    : existingOrder?.table_name || null;
+
+  const withOrderPaymentContext = (order) => ({
+    ...order,
+    table_id: order.table_id || table?.id || null,
+    table_name: order.table_name || table?.name || null,
+    table_display_name: tableDisplayName || order.table_display_name || order.table_name || null,
+    area_name: table?.area_name || order.area_name || null,
+  });
+
+  const openPaymentFlow = async (kind) => {
+    if (!canOpenPayment || saving) return;
+    const payableOrder = withOrderPaymentContext(existingOrder);
+    if (kind === 'quick') onQuickPayment?.(payableOrder);
+    else onPayment?.(payableOrder);
+  };
+
   if (categoriesLoading) {
     return (
       <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, background: 'var(--bg-primary)' }}>
@@ -809,7 +829,7 @@ export default function OrderScreen({
                         width: 46,
                         flexShrink: 0,
                         background: 'var(--danger)',
-                        color: '#fff',
+                        color: 'var(--text-on-accent)',
                         padding: '8px 0',
                       }}
                     >
@@ -1094,51 +1114,72 @@ export default function OrderScreen({
           )}
         </div>
 
-        {/* Totals */}
-        <div style={{ borderTop: '1px solid var(--border)', padding: '12px 16px', flexShrink: 0, background: 'var(--bg-card)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>
-            <span>Ara toplam</span>
-            <span>{formatCurrency(araTotal)}</span>
+        {/* Totals & payment actions */}
+        <div
+          style={{
+            borderTop: '1px solid var(--border)',
+            padding: '12px 16px',
+            flexShrink: 0,
+            background: 'linear-gradient(180deg, var(--bg-card), var(--bg-secondary))',
+            boxShadow: '0 -10px 28px rgba(0,0,0,.18)',
+          }}
+        >
+          <div style={{ marginBottom: 10 }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: 'var(--text-muted)', marginBottom: 6 }}>
+                <span>Ara toplam</span>
+                <span>{formatCurrency(araTotal)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 20, fontWeight: 850 }}>
+                <span>Toplam</span>
+                <span>{formatCurrency(displayTotal)}</span>
+              </div>
+            </div>
           </div>
-          {existingOrder && existingOrder.discount_amount > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--danger)', marginBottom: 4 }}>
-              <span>İndirim</span>
-              <span>-{formatCurrency(existingOrder.discount_amount)}</span>
+
+          {hasUnsavedChanges && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+              Yeni ürünleri kaydettikten sonra ödeme aksiyonları açılır.
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 20, fontWeight: 800, marginBottom: 6 }}>
-            <span>Toplam</span>
-            <span>{formatCurrency(displayTotal)}</span>
-          </div>
-          {cartItems.length > 0 && (
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
-              Sepetteki ürünler kaydedilince toplam güncellenir.
+          {orderType === 'takeaway' && !selectedCustomer?.id && hasUnsavedChanges && (
+            <div style={{ fontSize: 11, color: 'var(--danger)', textAlign: 'center', marginBottom: 10 }}>
+              Kaydetmeden önce müşteri seçimi zorunludur.
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {cartItems.length > 0 && (
-              <button type="button" className="btn btn-primary" style={{ width: '100%' }} onClick={handleSaveOrder} disabled={saving}>
-                <Save size={15} /> Kaydet
-              </button>
-            )}
-            {orderType === 'takeaway' && !selectedCustomer?.id && cartItems.length > 0 && (
-              <div style={{ fontSize: 11, color: 'var(--danger)', textAlign: 'center' }}>
-                Kaydetmeden önce müşteri seçimi zorunludur.
-              </div>
-            )}
-            {existingOrder && cartItems.length === 0 && existingOrder.status !== 'closed' && (
+          {hasUnsavedChanges ? (
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
+              onClick={handleSaveOrder}
+              disabled={saving}
+            >
+              <Save size={16} /> {saving ? 'Kaydediliyor...' : 'Kaydet'}
+            </button>
+          ) : canOpenPayment && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               <button
                 type="button"
                 className="btn btn-primary"
-                style={{ width: '100%' }}
-                onClick={() => onPayment(existingOrder)}
-                disabled={!allExistingItems.filter((i) => i.status !== 'cancelled').length && !cartItems.length}
+                style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
+                onClick={() => openPaymentFlow('detail')}
+                disabled={saving}
               >
-                <CreditCard size={15} /> Ödeme
+                <CreditCard size={16} /> Ödeme
               </button>
-            )}
-          </div>
+              <button
+                type="button"
+                className="btn btn-success"
+                style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
+                onClick={() => openPaymentFlow('quick')}
+                disabled={saving || !onQuickPayment}
+              >
+                <CreditCard size={16} /> Hızlı Öde
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

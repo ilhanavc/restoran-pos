@@ -41,7 +41,7 @@ export default function UpdateNotification() {
     <div style={{
       position: 'fixed', bottom: 16, right: 16, zIndex: 9999,
       background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
+      borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-soft)',
       padding: '14px 16px', width: 320,
       display: 'flex', flexDirection: 'column', gap: 10,
     }}>
@@ -49,7 +49,7 @@ export default function UpdateNotification() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {downloaded
             ? <RefreshCw size={16} color="var(--success)" />
-            : <Download size={16} color="var(--primary)" />}
+            : <Download size={16} color="var(--accent)" />}
           <span style={{ fontWeight: 700, fontSize: 13 }}>
             {downloaded
               ? `v${downloaded.version} hazır`
@@ -75,7 +75,7 @@ export default function UpdateNotification() {
           </div>
           <div style={{ height: 4, background: 'var(--bg-secondary)', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{
-              height: '100%', background: 'var(--primary)',
+              height: '100%', background: 'var(--accent)',
               width: `${progress.percent}%`, transition: 'width 0.3s',
             }} />
           </div>

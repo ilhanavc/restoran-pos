@@ -128,7 +128,6 @@ class ApiService {
     return this.patch(`/orders/${orderId}/customer`, { customer_id: customerId });
   }
   updateOrderItem(orderId, itemId, data) { return this.patch(`/orders/${orderId}/items/${itemId}`, data); }
-  applyDiscount(orderId, data) { return this.patch(`/orders/${orderId}/discount`, data); }
   getTakeawayOpenOrders() { return this.get('/orders/takeaway/open'); }
   patchTakeawayDelivery(orderId, action) { return this.patch(`/orders/${orderId}/takeaway/delivery`, { action }); }
   printTakeawayLabel(orderId) { return this.post(`/orders/${orderId}/takeaway/print-label`, {}); }

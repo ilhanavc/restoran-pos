@@ -159,7 +159,7 @@ export function IncomingCallProvider({ children }) {
             background: 'var(--bg-card)',
             border: '2px solid var(--accent)',
             borderRadius: 'var(--radius-md)',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.25)',
+            boxShadow: 'var(--shadow-lg)',
             padding: '14px 16px',
             fontFamily: 'inherit',
           }}

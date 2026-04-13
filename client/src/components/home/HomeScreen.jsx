@@ -17,7 +17,7 @@ import {
 import { formatCurrency, PAYMENT_TYPES } from '../../constants/index.js';
 import api from '../../services/api.js';
 
-const PAYMENT_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#3b82f6', '#a855f7'];
+const PAYMENT_COLORS = ['var(--accent)', 'var(--success)', 'var(--warning)', 'var(--info)', 'var(--purple)'];
 
 function todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -126,7 +126,7 @@ export default function HomeScreen() {
                   contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
                   formatter={(value) => formatCurrency(value)}
                 />
-                <Line type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="total" stroke="var(--accent)" strokeWidth={3} dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -172,7 +172,7 @@ export default function HomeScreen() {
                 contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
                 formatter={(value) => [`${value} adet`, 'Satış']}
               />
-              <Bar dataKey="qty" fill="#22c55e" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="qty" fill="var(--success)" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

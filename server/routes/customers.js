@@ -554,46 +554,6 @@ router.post('/:id/phones', (req, res) => {
   }
 });
 
-// GET /api/customers/:id/stats — müşteri 360 profil istatistikleri
-router.get('/:id/stats', (req, res) => {
-  try {
-    const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
-    if (!customer) return res.status(404).json({ error: 'Müşteri bulunamadı' });
-
-    const spend = db.prepare(`
-      SELECT COALESCE(SUM(p.amount), 0) AS total_spend, COUNT(DISTINCT o.id) AS order_count
-      FROM orders o
-      JOIN payments p ON p.order_id = o.id
-      WHERE o.customer_id = ? AND o.business_id = ? AND o.status = 'closed'
-    `).get(req.params.id, req.businessId);
-
-    const lastVisit = db.prepare(`
-      SELECT MAX(closed_at) AS last_visit FROM orders
-      WHERE customer_id = ? AND business_id = ? AND status = 'closed'
-    `).get(req.params.id, req.businessId);
-
-    const favorites = db.prepare(`
-      SELECT oi.product_name, SUM(oi.quantity) AS total_qty
-      FROM order_items oi
-      JOIN orders o ON oi.order_id = o.id
-      WHERE o.customer_id = ? AND o.business_id = ? AND o.status = 'closed' AND oi.status != 'cancelled'
-      GROUP BY oi.product_name
-      ORDER BY total_qty DESC
-      LIMIT 3
-    `).all(req.params.id, req.businessId);
-
-    res.json({
-      total_spend: spend.total_spend,
-      order_count: spend.order_count,
-      last_visit: lastVisit.last_visit,
-      favorite_products: favorites,
-    });
-  } catch (err) {
-    console.error('Customer stats:', err);
-    res.status(500).json({ error: 'Sunucu hatası' });
-  }
-});
-
 // POST /api/customers/:id/addresses
 router.post('/:id/addresses', (req, res) => {
   try {

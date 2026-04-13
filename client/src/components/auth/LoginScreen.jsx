@@ -51,7 +51,7 @@ export default function LoginScreen() {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      minHeight: '100vh', background: 'var(--bg-primary)',
+      minHeight: '100vh', background: 'var(--bg-page)',
       padding: '20px',
     }}>
       <div style={{ width: '100%', maxWidth: 420 }}>
@@ -59,7 +59,7 @@ export default function LoginScreen() {
         <div style={{ textAlign: 'center', marginBottom: 40 }}>
           <div style={{
             width: 64, height: 64, borderRadius: 'var(--radius-lg)',
-            background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
+            background: 'linear-gradient(135deg, var(--accent), var(--accent-gradient-end))',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 28, fontWeight: 800, color: 'white', marginBottom: 16,
           }}>P</div>

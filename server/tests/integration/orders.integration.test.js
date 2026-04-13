@@ -47,9 +47,11 @@ beforeAll(async () => {
   authHeader = `Bearer ${token}`;
 
   const { default: ordersRoutes } = await import('../../routes/orders.js');
+  const { default: callerIdRoutes } = await import('../../routes/callerid.js');
   app = express();
   app.use(express.json());
   app.use('/api/orders', ordersRoutes);
+  app.use('/api/caller-id', callerIdRoutes);
 });
 
 // ── POST /api/orders ──────────────────────────────────────────────────────────
@@ -97,6 +99,42 @@ describe('POST /api/orders', () => {
       .send({ table_id: seeds.tableId, order_type: 'dine_in' });
 
     expect(res.status).toBe(400);
+  });
+
+  it('call_log_id ile arama kaydini siparise baglar', async () => {
+    const incomingRes = await request(app)
+      .post('/api/caller-id/simulate')
+      .set('Authorization', authHeader)
+      .send({ phone: '05321234567' });
+
+    expect(incomingRes.status).toBe(200);
+    expect(incomingRes.body).toHaveProperty('callLogId');
+
+    const createRes = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'dine_in',
+        call_log_id: incomingRes.body.callLogId,
+        items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
+      });
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body).toHaveProperty('id');
+
+    const historyRes = await request(app)
+      .get('/api/caller-id/history')
+      .set('Authorization', authHeader);
+
+    expect(historyRes.status).toBe(200);
+    expect(Array.isArray(historyRes.body)).toBe(true);
+
+    const linkedCall = historyRes.body.find((row) => row.id === incomingRes.body.callLogId);
+    expect(linkedCall).toBeTruthy();
+    expect(linkedCall.status).toBe('opened_order');
+    expect(linkedCall.order_id).toBe(createRes.body.id);
+    expect(linkedCall.order_no).toBe(createRes.body.order_no);
   });
 });
 

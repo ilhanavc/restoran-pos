@@ -183,7 +183,7 @@ export default function StockScreen() {
       </div>
 
       {lowStock.length > 0 && (
-        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>
+        <div style={{ background: 'var(--danger-muted)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>
           <AlertTriangle size={16} />
           {lowStock.length} kalem minimum stok altında: {lowStock.map(i => i.name).join(', ')}
         </div>
@@ -229,7 +229,7 @@ export default function StockScreen() {
                     </td>
                     <td>
                       {isLow ? (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--danger)', background: 'rgba(239,68,68,0.1)', padding: '2px 8px', borderRadius: 6 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--danger)', background: 'var(--danger-muted)', padding: '2px 8px', borderRadius: 6 }}>
                           DÜŞÜK
                         </span>
                       ) : (

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api from '../services/api.js';
+import { applyDisplaySettings, loadStoredDisplaySettings } from '../utils/displayTheme.js';
 
 const AuthContext = createContext(null);
 
@@ -12,7 +13,10 @@ export function AuthProvider({ children }) {
     if (token) {
       api.setToken(token);
       api.me()
-        .then(data => setUser(data.user))
+        .then((data) => {
+          setUser(data.user);
+          if (data.display) applyDisplaySettings(data.display);
+        })
         .catch(() => { api.setToken(null); setUser(null); })
         .finally(() => setLoading(false));
     } else {
@@ -24,12 +28,14 @@ export function AuthProvider({ children }) {
     const data = await api.login(email, password, businessId);
     api.setToken(data.token);
     setUser(data.user);
+    if (data.display) applyDisplaySettings(data.display);
     return data.user;
   }, []);
 
   const logout = useCallback(() => {
     api.setToken(null);
     setUser(null);
+    applyDisplaySettings(loadStoredDisplaySettings());
   }, []);
 
   const hasPermission = useCallback((perm) => {

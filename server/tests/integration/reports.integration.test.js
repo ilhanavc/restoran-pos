@@ -78,6 +78,9 @@ describe('GET /api/reports/daily', () => {
     expect(res.body).toHaveProperty('topProducts');
     expect(res.body).toHaveProperty('avgOrderValue');
     expect(typeof res.body.revenue).toBe('number');
+    expect(res.body.orderStats.total_orders).toBe(1);
+    expect(res.body.revenue).toBe(250);
+    expect(res.body.avgOrderValue).toBe(250);
   });
 
   it('?date parametresiyle belirli gün raporu döner', async () => {

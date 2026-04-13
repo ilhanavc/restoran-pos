@@ -599,6 +599,7 @@ function ensureColumnMigrations() {
       phone TEXT NOT NULL,
       normalized_phone TEXT NOT NULL,
       customer_id TEXT REFERENCES customers(id),
+      order_id TEXT REFERENCES orders(id),
       customer_name_snapshot TEXT,
       address_snapshot TEXT,
       source_type TEXT DEFAULT 'http',
@@ -606,6 +607,10 @@ function ensureColumnMigrations() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
+  const callLogCols = db.prepare('PRAGMA table_info(call_logs)').all();
+  if (callLogCols.length && !callLogCols.some((c) => c.name === 'order_id')) {
+    db.prepare('ALTER TABLE call_logs ADD COLUMN order_id TEXT REFERENCES orders(id)').run();
+  }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_customer_phones_normalized ON customer_phones(normalized_phone)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_business_created ON call_logs(business_id, created_at DESC)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_normalized ON call_logs(normalized_phone)`);

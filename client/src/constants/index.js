@@ -1,11 +1,11 @@
 /** Sipariş satırı (order_items) durum rozetleri — sipariş alma ekranı */
 export const ORDER_ITEM_LINE_STATUS = {
-  new: { label: 'Yeni', short: 'YENİ', bg: 'rgba(59,130,246,.2)', color: '#93c5fd' },
-  sent: { label: 'Mutfakta', short: 'MUTFAK', bg: 'rgba(245,158,11,.2)', color: '#fbbf24' },
-  preparing: { label: 'Hazırlanıyor', short: 'HAZIRLANIYOR', bg: 'rgba(245,158,11,.25)', color: '#f59e0b' },
-  ready: { label: 'Hazır', short: 'HAZIR', bg: 'rgba(34,197,94,.25)', color: '#4ade80' },
-  served: { label: 'Servis', short: 'SERVİS', bg: 'rgba(148,163,184,.2)', color: '#94a3b8' },
-  comped: { label: 'İkram', short: 'İKRAM', bg: 'rgba(239,68,68,.15)', color: '#f87171' },
+  new: { label: 'Yeni', short: 'YENİ', bg: 'var(--info-muted)', color: 'var(--info)' },
+  sent: { label: 'Mutfakta', short: 'MUTFAK', bg: 'var(--warning-muted)', color: 'var(--warning)' },
+  preparing: { label: 'Hazırlanıyor', short: 'HAZIRLANIYOR', bg: 'var(--warning-muted)', color: 'var(--warning)' },
+  ready: { label: 'Hazır', short: 'HAZIR', bg: 'var(--success-muted)', color: 'var(--success)' },
+  served: { label: 'Servis', short: 'SERVİS', bg: 'var(--surface-3)', color: 'var(--text-secondary)' },
+  comped: { label: 'İkram', short: 'İKRAM', bg: 'var(--danger-muted)', color: 'var(--danger)' },
 };
 
 export const ORDER_STATUS = {
@@ -37,8 +37,6 @@ export const TAKEAWAY_STATUS = {
 export const PAYMENT_TYPES = {
   cash: { label: 'Nakit', icon: '💵' },
   card: { label: 'Kredi Kartı', icon: '💳' },
-  mixed: { label: 'Karışık', icon: '🔀' },
-  other: { label: 'Diğer', icon: '📋' },
 };
 
 export const ROLES = {

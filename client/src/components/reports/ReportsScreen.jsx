@@ -213,7 +213,7 @@ function printReport(report, closedOrders, selectedDate) {
   setTimeout(() => { w.print(); }, 300);
 }
 
-const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#14b8a6', '#a855f7'];
+const PIE_COLORS = ['var(--accent)', 'var(--success)', 'var(--warning)', 'var(--danger)', 'var(--cyan)', 'var(--purple)'];
 
 function buildTrendDates(anchorDate) {
   const dates = [];
@@ -234,7 +234,7 @@ function shortDate(isoDate) {
 const CustomTooltipCurrency = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', fontSize: 12 }}>
+    <div style={{ background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px', fontSize: 12, boxShadow: 'var(--shadow-soft)' }}>
       <div style={{ fontWeight: 700, marginBottom: 4 }}>{label}</div>
       {payload.map((p, i) => (
         <div key={i} style={{ color: p.color }}>{p.name}: {typeof p.value === 'number' && p.name !== 'Sipariş' ? formatCurrency(p.value) : p.value}</div>
@@ -501,7 +501,7 @@ export default function ReportsScreen() {
                     <XAxis dataKey="date" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} width={40} />
                     <Tooltip content={<CustomTooltipCurrency />} />
-                    <Bar dataKey="revenue" name="Ciro" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="revenue" name="Ciro" fill="var(--accent)" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : <div className="empty-state" style={{ padding: 40 }}>Veri yok</div>}
@@ -542,7 +542,7 @@ export default function ReportsScreen() {
                     <XAxis dataKey="hourLabel" tick={{ fontSize: 10 }} interval={1} />
                     <YAxis tick={{ fontSize: 11 }} allowDecimals={false} width={30} />
                     <Tooltip content={<CustomTooltipCurrency />} />
-                    <Bar dataKey="order_count" name="Sipariş" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="order_count" name="Sipariş" fill="var(--success)" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : <div className="empty-state" style={{ padding: 40 }}>Veri yok</div>}
@@ -559,7 +559,7 @@ export default function ReportsScreen() {
                     <XAxis type="number" tick={{ fontSize: 11 }} allowDecimals={false} />
                     <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
                     <Tooltip content={<CustomTooltipCurrency />} />
-                    <Bar dataKey="adet" name="Adet" fill="#f59e0b" radius={[0, 3, 3, 0]} />
+                    <Bar dataKey="adet" name="Adet" fill="var(--warning)" radius={[0, 3, 3, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : <div className="empty-state" style={{ padding: 40 }}>Veri yok</div>}
@@ -651,7 +651,7 @@ export default function ReportsScreen() {
                         <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
                         <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={95} />
                         <Tooltip content={<CustomTooltipCurrency />} />
-                        <Bar dataKey="adet" name="Adet" fill="#6366f1" radius={[0, 3, 3, 0]} />
+                        <Bar dataKey="adet" name="Adet" fill="var(--accent)" radius={[0, 3, 3, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : <div className="empty-state" style={{ padding: 20 }}>Veri yok</div>}
@@ -669,7 +669,7 @@ export default function ReportsScreen() {
                         <XAxis dataKey="hour" tick={{ fontSize: 9 }} interval={1} />
                         <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={28} />
                         <Tooltip content={<CustomTooltipCurrency />} />
-                        <Bar dataKey="order_count" name="Sipariş" fill="#22c55e" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="order_count" name="Sipariş" fill="var(--success)" radius={[3, 3, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : <div className="empty-state" style={{ padding: 20 }}>Veri yok</div>}
@@ -691,7 +691,7 @@ export default function ReportsScreen() {
                         <XAxis dataKey="dateLabel" tick={{ fontSize: 10 }} />
                         <YAxis tick={{ fontSize: 10 }} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} width={38} />
                         <Tooltip content={<CustomTooltipCurrency />} />
-                        <Bar dataKey="revenue" name="Ciro" fill="#f59e0b" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="revenue" name="Ciro" fill="var(--warning)" radius={[3, 3, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : <div className="empty-state" style={{ padding: 20 }}>Veri yok</div>}

@@ -2,10 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
-import { applyDisplaySettings } from '../../utils/displayTheme.js';
+import { applyDisplaySettings, persistDisplaySettings } from '../../utils/displayTheme.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 
 const defaults = { theme: 'dark', language: 'tr', density: 'comfortable' };
+const THEME_OPTIONS = [
+  { value: 'dark', label: 'Koyu', desc: 'Mevcut koyu POS görünümü korunur.' },
+  { value: 'light', label: 'Aydınlık', desc: 'Profesyonel, dengeli ve mor vurgu kimliğini koruyan açık tema.' },
+];
 
 export default function DisplaySettingsPage() {
   const navigate = useNavigate();
@@ -20,7 +24,6 @@ export default function DisplaySettingsPage() {
     try {
       const { display } = await api.getDisplaySettings();
       const next = { ...defaults, ...display };
-      next.theme = 'dark';
       setForm(next);
       setLoaded({ ...next });
     } catch (e) {
@@ -44,12 +47,13 @@ export default function DisplaySettingsPage() {
   const save = async () => {
     setSaving(true);
     try {
-      const body = { ...form, theme: 'dark' };
+      const body = { ...form };
       const { display, message } = await api.patchDisplaySettings(body);
-      const next = { ...defaults, ...display, theme: 'dark' };
+      const next = { ...defaults, ...display };
       setForm(next);
       setLoaded({ ...next });
       applyDisplaySettings(next);
+      persistDisplaySettings(next);
       success(message || 'Ekran ayarları kaydedildi');
       if (next.language === 'en') {
         info('İngilizce dil tercihi kaydedildi; arayüz çevirileri yakında eklenecek.');
@@ -71,19 +75,50 @@ export default function DisplaySettingsPage() {
         </button>
       </div>
 
-      <div className="card card-padded" style={{ maxWidth: 480 }}>
+      <div className="card card-padded" style={{ maxWidth: 560 }}>
         {loading ? (
           <div style={{ color: 'var(--text-muted)' }}>Yükleniyor…</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10 }}>Tema</div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                <input type="radio" name="theme" checked readOnly />
-                <span>Koyu (aktif — tek desteklenen tema)</span>
-              </label>
-              <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                Açık ve sistem teması için uygulama güncellemesi gerekecek.
+              <div style={{ display: 'grid', gap: 10 }}>
+                {THEME_OPTIONS.map((option) => {
+                  const active = form.theme === option.value;
+                  return (
+                    <label
+                      key={option.value}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 12,
+                        cursor: 'pointer',
+                        padding: '12px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        border: `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                        background: active ? 'var(--accent-soft)' : 'var(--surface-2)',
+                        boxShadow: active ? 'var(--shadow-soft)' : 'none',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="theme"
+                        value={option.value}
+                        checked={active}
+                        onChange={(e) => {
+                          const next = { ...form, theme: e.target.value };
+                          setForm(next);
+                          applyDisplaySettings(next);
+                          persistDisplaySettings(next);
+                        }}
+                      />
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{option.label}</span>
+                        <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{option.desc}</span>
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
             </div>
 
@@ -114,7 +149,7 @@ export default function DisplaySettingsPage() {
             </label>
 
             <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              Görünüm sıklığı kaydedildiğinde hemen uygulanır. Dil tercihi veritabanında saklanır.
+              Tema ve görünüm sıklığı kaydedildiğinde tüm uygulamaya uygulanır. Dil tercihi veritabanında saklanır.
             </p>
           </div>
         )}

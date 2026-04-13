@@ -518,6 +518,16 @@ export default function MenuSettingsPage() {
   const handleBack = () => navigate('/settings');
 
   const dropdownValue = filterMode === 'all' ? 'all' : activeCategoryId || 'all';
+  const selectedCategory = useMemo(
+    () => (activeCategoryId ? categories.find((c) => c.id === activeCategoryId) : null),
+    [activeCategoryId, categories],
+  );
+  const toolbarTitle = filterMode === 'all' ? 'Tüm ürünler' : selectedCategory?.name || 'Kategori seçin';
+  const toolbarSummary = searchNorm
+    ? `"${search.trim()}" için ${filteredProducts.length} sonuç`
+    : filterMode === 'all'
+      ? `${filteredProducts.length} ürün listeleniyor`
+      : `${productCountByCat[activeCategoryId] || 0} ürün bu kategoride`;
 
   return (
     <div className="page-container menu-settings-page">
@@ -534,6 +544,12 @@ export default function MenuSettingsPage() {
         <div className="menu-settings-split">
           <aside className="menu-settings-sidebar">
             <div className="menu-settings-sidebar-head">
+              <div className="menu-settings-sidebar-copy">
+                <span className="menu-settings-sidebar-label">Kategoriler</span>
+                <strong className="menu-settings-sidebar-title">
+                  {activeCategories.length} aktif, {categories.length} toplam
+                </strong>
+              </div>
               <button type="button" className="btn btn-primary btn-sm menu-settings-add-cat" onClick={() => setCatModal('new')}>
                 <Plus size={16} />
                 Kategori Ekle
@@ -554,6 +570,7 @@ export default function MenuSettingsPage() {
                     <div
                       key={cat.id}
                       className={`menu-settings-cat-row ${activeRow ? 'menu-settings-cat-row--active' : ''} ${!isCatActive(cat) ? 'menu-settings-cat-row--inactive' : ''}`}
+                      style={{ '--menu-category-color': cat.color || '#6366f1' }}
                     >
                       <button
                         type="button"
@@ -569,8 +586,8 @@ export default function MenuSettingsPage() {
                         <span className="menu-settings-cat-text">
                           <span className="menu-settings-cat-name truncate">{cat.name}</span>
                           <span className="menu-settings-cat-meta">
-                            {productCountByCat[cat.id] || 0} ürün
-                            {!isCatActive(cat) ? ' · Pasif' : ''}
+                            <span className="menu-settings-cat-count">{productCountByCat[cat.id] || 0} ürün</span>
+                            {!isCatActive(cat) ? <span className="menu-settings-cat-state">Pasif</span> : null}
                           </span>
                         </span>
                       </button>
@@ -596,38 +613,69 @@ export default function MenuSettingsPage() {
           </aside>
 
           <section className="menu-settings-main">
-            <div className="menu-settings-toolbar">
-              <select
-                className="input menu-settings-toolbar-filter"
-                value={dropdownValue}
-                onChange={(e) => handleFilterDropdown(e.target.value)}
-              >
-                <option value="all">Tüm kategoriler</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                    {!isCatActive(c) ? ' (pasif)' : ''}
-                  </option>
-                ))}
-              </select>
-              <div className="menu-settings-search-wrap">
-                <Search size={18} className="menu-settings-search-icon" aria-hidden />
-                <input
-                  className="input menu-settings-search"
-                  placeholder="Arama…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+            <div className="menu-settings-main-head">
+              <div className="menu-settings-main-copy">
+                <span className="menu-settings-main-eyebrow">Menü görünümü</span>
+                <div className="menu-settings-main-title-row">
+                  <h2 className="menu-settings-main-title">{toolbarTitle}</h2>
+                  {filterMode === 'one' && selectedCategory && !isCatActive(selectedCategory) && (
+                    <span className="badge badge-warning">Pasif kategori</span>
+                  )}
+                </div>
+                <p className="menu-settings-main-subtitle">{toolbarSummary}</p>
               </div>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm menu-settings-new-prod"
-                onClick={openNewProduct}
-                disabled={activeCategories.length === 0}
-              >
-                <Plus size={16} />
-                Yeni ürün ekle
-              </button>
+              <div className="menu-settings-main-stats" aria-label="Menü özet bilgileri">
+                <span className="menu-settings-stat-chip">
+                  <strong>{categories.length}</strong>
+                  kategori
+                </span>
+                <span className="menu-settings-stat-chip">
+                  <strong>{products.filter((p) => !p.is_deleted).length}</strong>
+                  aktif ürün
+                </span>
+              </div>
+            </div>
+
+            <div className="menu-settings-toolbar">
+              <div className="menu-settings-toolbar-field">
+                <span className="menu-settings-toolbar-label">Kategori</span>
+                <select
+                  className="input menu-settings-toolbar-filter"
+                  value={dropdownValue}
+                  onChange={(e) => handleFilterDropdown(e.target.value)}
+                >
+                  <option value="all">Tüm kategoriler</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {!isCatActive(c) ? ' (pasif)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="menu-settings-toolbar-field menu-settings-toolbar-field--search">
+                <span className="menu-settings-toolbar-label">Ara</span>
+                <div className="menu-settings-search-wrap">
+                  <Search size={18} className="menu-settings-search-icon" aria-hidden />
+                  <input
+                    className="input menu-settings-search"
+                    placeholder="Ürün adı veya açıklama ara"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="menu-settings-toolbar-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm menu-settings-new-prod"
+                  onClick={openNewProduct}
+                  disabled={activeCategories.length === 0}
+                >
+                  <Plus size={16} />
+                  Yeni ürün ekle
+                </button>
+              </div>
             </div>
 
             {bulkMode && (
@@ -677,32 +725,46 @@ export default function MenuSettingsPage() {
                 <div className="menu-settings-product-grid">
                   {displayedProducts.map((prod) => {
                     const cat = categories.find((c) => c.id === prod.category_id);
-                    const subtitle =
-                      (prod.description && String(prod.description).trim()) ||
-                      (cat?.name ? `· ${cat.name}` : '');
+                    const description = prod.description && String(prod.description).trim();
                     const bulkOn = bulkMode && bulkAppliesToProduct(prod);
                     return (
                       <div
                         key={prod.id}
                         className={`menu-settings-prod-card ${prod.is_deleted ? 'menu-settings-prod-card--deleted' : ''} ${bulkOn ? 'menu-settings-prod-card--bulk' : ''}`}
+                        style={{ '--menu-category-color': cat?.color || '#6366f1' }}
                       >
                         <div className="menu-settings-prod-card-top">
-                          {bulkOn && (
-                            <label className="menu-settings-prod-check">
-                              <input
-                                type="checkbox"
-                                checked={bulkSelected.has(prod.id)}
-                                onChange={() => toggleBulkOne(prod.id)}
-                              />
-                            </label>
-                          )}
+                          <div className="menu-settings-prod-top-left">
+                            {bulkOn && (
+                              <label className="menu-settings-prod-check">
+                                <input
+                                  type="checkbox"
+                                  checked={bulkSelected.has(prod.id)}
+                                  onChange={() => toggleBulkOne(prod.id)}
+                                />
+                              </label>
+                            )}
+                            {cat?.name ? <span className="menu-settings-prod-category">{cat.name}</span> : null}
+                          </div>
                           <div className="menu-settings-prod-actions">
                             {!prod.is_deleted ? (
                               <>
-                                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Düzenle" onClick={() => navigate(`/settings/menu/product/${prod.id}`)}>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm btn-icon menu-settings-prod-action"
+                                  title="Düzenle"
+                                  aria-label={`${prod.name} ürününü düzenle`}
+                                  onClick={() => navigate(`/settings/menu/product/${prod.id}`)}
+                                >
                                   <Pencil size={16} />
                                 </button>
-                                <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Kaldır" onClick={() => deleteProduct(prod.id)}>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm btn-icon menu-settings-prod-action menu-settings-prod-action--danger"
+                                  title="Kaldır"
+                                  aria-label={`${prod.name} ürününü kaldır`}
+                                  onClick={() => deleteProduct(prod.id)}
+                                >
                                   <Trash2 size={16} color="var(--danger)" />
                                 </button>
                               </>
@@ -716,19 +778,23 @@ export default function MenuSettingsPage() {
                         <div className="menu-settings-prod-title truncate" title={prod.name}>
                           {prod.name}
                         </div>
-                        {subtitle ? (
-                          <div className="menu-settings-prod-sub truncate" title={subtitle}>
-                            {subtitle}
-                          </div>
-                        ) : (
-                          <div className="menu-settings-prod-sub menu-settings-prod-sub--muted">—</div>
-                        )}
+                        <div
+                          className={`menu-settings-prod-sub ${description ? 'truncate' : 'menu-settings-prod-sub--muted'}`}
+                          title={description || 'Bu ürün için açıklama eklenmemiş'}
+                        >
+                          {description || 'Bu ürün için açıklama eklenmemiş'}
+                        </div>
                         <div className="menu-settings-prod-bottom">
-                          <span className="menu-settings-prod-price">{formatCurrency(prod.price)}</span>
-                          {!prod.is_deleted && Number(prod.is_active) === 0 && (
-                            <span className="badge badge-warning">Pasif</span>
-                          )}
-                          {prod.is_deleted && <span className="badge badge-danger">Kaldırıldı</span>}
+                          <div className="menu-settings-prod-price-block">
+                            <span className="menu-settings-prod-price-label">Fiyat</span>
+                            <span className="menu-settings-prod-price">{formatCurrency(prod.price)}</span>
+                          </div>
+                          <div className="menu-settings-prod-status">
+                            {!prod.is_deleted && Number(prod.is_active) === 0 && (
+                              <span className="badge badge-warning">Pasif</span>
+                            )}
+                            {prod.is_deleted && <span className="badge badge-danger">Kaldırıldı</span>}
+                          </div>
                         </div>
                       </div>
                     );

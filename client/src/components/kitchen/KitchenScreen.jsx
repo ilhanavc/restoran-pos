@@ -29,8 +29,8 @@ function ageColor(createdAt, now) {
   const createdMs = parseDbTimestampMs(createdAt);
   if (!Number.isFinite(createdMs)) return null;
   const mins = (now - createdMs) / 60000;
-  if (mins > 20) return { border: 'var(--danger)', bg: 'rgba(239,68,68,0.09)' };
-  if (mins > 10) return { border: '#f59e0b', bg: 'rgba(245,158,11,0.09)' };
+  if (mins > 20) return { border: 'var(--danger)', bg: 'var(--danger-muted)' };
+  if (mins > 10) return { border: 'var(--warning)', bg: 'var(--warning-muted)' };
   return null;
 }
 

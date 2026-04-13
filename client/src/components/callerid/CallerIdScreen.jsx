@@ -7,12 +7,22 @@ import {
   Phone, PhoneIncoming, PhoneOff, User, History,
 } from 'lucide-react';
 
+function getCallStatusLabel(status) {
+  const labels = {
+    ringing: 'Çalıyor',
+    dismissed: 'Kapatıldı',
+    opened_order: 'Siparişe Dönüştü',
+    completed: 'Tamamlandı',
+  };
+  return labels[status] || status || '-';
+}
+
 export default function CallerIdScreen() {
   const [callHistory, setCallHistory] = useState([]);
   const [simulatePhone, setSimulatePhone] = useState('');
   const [loading, setLoading] = useState(false);
   const toast = useToast();
-  const { refresh } = useIncomingCall() || {};
+  const { refresh, openOrder } = useIncomingCall() || {};
 
   useEffect(() => {
     loadHistory();
@@ -90,7 +100,9 @@ export default function CallerIdScreen() {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {callHistory.map(call => (
+              {callHistory.map(call => {
+                const orderOpened = Boolean(call.order_id || call.order_no || call.status === 'opened_order');
+                return (
                 <div key={call.id} className="card card-padded" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                   <div style={{
                     width: 36, height: 36, borderRadius: '50%',
@@ -103,16 +115,27 @@ export default function CallerIdScreen() {
                     <div style={{ fontWeight: 600, fontSize: 13 }}>
                       {call.customer_name_snapshot || call.customer_name || 'Bilinmeyen Arayan'}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{call.phone} · {call.status}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      {call.phone} · {getCallStatusLabel(call.status)}
+                      {call.order_no ? ` · Sipariş #${call.order_no}` : ''}
+                    </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <span className={`badge ${call.customer_id ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: 10 }}>
-                      {call.customer_id ? 'Kayıtlı' : 'Yeni'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                      <span className={`badge ${call.customer_id ? 'badge-success' : 'badge-warning'}`} style={{ fontSize: 10 }}>
+                        {call.customer_id ? 'Kayıtlı' : 'Yeni'}
+                      </span>
+                      {!orderOpened && openOrder && (
+                        <button type="button" className="btn btn-primary btn-sm" onClick={() => openOrder(call)}>
+                          Sipariş Al
+                        </button>
+                      )}
+                    </div>
                     <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{timeAgo(call.created_at)}</div>
                   </div>
                 </div>
-              ))}
+              );
+              })}
             </div>
           )}
         </div>

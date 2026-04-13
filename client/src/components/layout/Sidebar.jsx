@@ -31,9 +31,9 @@ function useBridgeStatus() {
 }
 
 const BRIDGE_DOT = {
-  ok:            { color: '#22c55e', title: 'Store Bridge bağlı' },
-  down:          { color: '#ef4444', title: 'Store Bridge erişilemiyor' },
-  unconfigured:  { color: '#f59e0b', title: 'Store Bridge yapılandırılmamış' },
+  ok:            { color: 'var(--success)', title: 'Store Bridge bağlı' },
+  down:          { color: 'var(--danger)', title: 'Store Bridge erişilemiyor' },
+  unconfigured:  { color: 'var(--warning)', title: 'Store Bridge yapılandırılmamış' },
 };
 
 const NAV_ITEMS = [

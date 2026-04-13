@@ -10,6 +10,17 @@ import { validate } from '../middleware/validate.js';
 
 const router = Router();
 
+function getDisplaySettings(businessId) {
+  const row = db.prepare(`SELECT value FROM settings WHERE business_id = ? AND key = 'app.display'`).get(businessId);
+  const defaults = { theme: 'dark', language: 'tr', density: 'comfortable' };
+  if (!row?.value) return defaults;
+  try {
+    return { ...defaults, ...JSON.parse(row.value) };
+  } catch {
+    return defaults;
+  }
+}
+
 const loginSchema = {
   body: z.object({
     email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
@@ -80,6 +91,7 @@ router.post('/login', validate(loginSchema), (req, res) => {
         businessName: user.business_name,
         branchId: user.branch_id,
       },
+      display: getDisplaySettings(user.business_id),
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -102,6 +114,7 @@ router.get('/me', authenticate, (req, res) => {
       businessName: biz?.name,
       branchId: req.user.branch_id,
     },
+    display: getDisplaySettings(req.user.business_id),
   });
 });
 

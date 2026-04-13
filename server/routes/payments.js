@@ -13,20 +13,22 @@ router.use(authenticate, businessScope);
 const createPaymentSchema = {
   body: z.object({
     order_id: z.string().min(1, 'Sipariş kimliği gerekli'),
-    payment_type: z.enum(['cash', 'card', 'mixed', 'other'], {
-      errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card, mixed, other' }),
+    payment_type: z.enum(['cash', 'card'], {
+      errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card' }),
     }),
     amount: z.number().positive('Tutar sıfırdan büyük olmalıdır'),
     cash_received: z.number().min(0).optional().nullable(),
     note: z.string().max(500).optional().nullable(),
+    close_order: z.boolean().optional().default(false),
+    print_receipt: z.boolean().optional().default(false),
   }),
 };
 
 const createSplitPaymentSchema = {
   body: z.object({
     order_id: z.string().min(1, 'Sipariş kimliği gerekli'),
-    payment_type: z.enum(['cash', 'card', 'other'], {
-      errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card, other' }),
+    payment_type: z.enum(['cash', 'card'], {
+      errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card' }),
     }),
     cash_received: z.number().min(0).optional().nullable(),
     payer_no: z.number().int().positive().max(999).optional().nullable(),
@@ -159,7 +161,7 @@ function buildSplitState(orderId, businessId) {
   };
 }
 
-function closeOrderIfPaid(order, businessId, userId) {
+function closeOrderAndTableIfPaid(order, businessId, userId) {
   const totalPaid = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = ?').get(order.id);
   const current = db.prepare('SELECT grand_total FROM orders WHERE id = ?').get(order.id);
   if (round2(totalPaid.total || 0) + 0.02 < round2(current?.grand_total || 0)) return false;
@@ -195,7 +197,7 @@ router.get('/orders/:orderId/split-state', authorize('admin', 'cashier'), (req, 
 // POST /api/payments
 router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (req, res) => {
   try {
-    const { order_id, payment_type, amount, cash_received, note } = req.body;
+    const { order_id, payment_type, amount, cash_received, note, close_order, print_receipt } = req.body;
     const amt = amount; // Zod already validated and coerced
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, req.businessId);
@@ -208,13 +210,21 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
     const cashIn = cash_received != null ? cash_received : amt;
     const changeAmount = payment_type === 'cash' ? Math.max(0, cashIn - amt) : 0;
 
+    let closed = false;
     const txn = db.transaction(() => {
       db.prepare(`INSERT INTO payments (id, business_id, order_id, payment_type, amount, cash_received, change_amount, note, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         paymentId, req.businessId, order_id, payment_type, amt, cashIn, changeAmount, note || null, req.user.id
       );
 
-      closeOrderIfPaid(order, req.businessId, req.user.id);
+      if (close_order) {
+        closed = closeOrderAndTableIfPaid(order, req.businessId, req.user.id);
+        if (!closed) {
+          const err = new Error('Sipariş tamamen ödenmeden masa kapatılamaz');
+          err.status = 400;
+          throw err;
+        }
+      }
     });
     txn();
 
@@ -224,7 +234,7 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
     const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(order_id);
     updatedOrder.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order_id);
     emitToRoom(req.businessId, 'order:updated', { order: updatedOrder });
-    if (updatedOrder.status === 'closed') {
+    if (print_receipt || closed) {
       enqueueReceiptJobForClosedOrder(req.businessId, order_id, req.user.id);
       processPendingJobsSync(req.businessId, req.user.id);
     }
@@ -232,6 +242,7 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
     res.status(201).json({ payment, order: updatedOrder });
   } catch (err) {
     console.error('Payment error:', err);
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -248,7 +259,6 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
 
     const paymentId = genId();
     let createdPayment = null;
-    let closed = false;
 
     const txn = db.transaction(() => {
       const totalsBefore = paymentTotals(order.id);
@@ -366,7 +376,6 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
         );
       }
 
-      closed = closeOrderIfPaid(order, req.businessId, req.user.id);
       createdPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
     });
 
@@ -377,11 +386,6 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
       amount: createdPayment?.amount,
       payer_no: payer_no || null,
     });
-
-    if (closed) {
-      enqueueReceiptJobForClosedOrder(req.businessId, order.id, req.user.id);
-      processPendingJobsSync(req.businessId, req.user.id);
-    }
 
     const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);
     updatedOrder.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);

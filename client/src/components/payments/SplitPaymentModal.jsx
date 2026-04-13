@@ -6,8 +6,7 @@ import { useToast } from '../../context/ToastContext.jsx';
 
 const paymentTypes = [
   { key: 'cash', label: 'Nakit', icon: Banknote },
-  { key: 'card', label: 'Kart', icon: CreditCard },
-  { key: 'other', label: 'Diğer', icon: Check },
+  { key: 'card', label: 'Kredi Kartı', icon: CreditCard },
 ];
 
 function makePayer(no) {
@@ -511,7 +510,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
             padding: 10px 18px;
             background: var(--warning-muted);
             color: var(--warning);
-            border-bottom: 1px solid rgba(245, 158, 11, .35);
+            border-bottom: 1px solid var(--warning);
             font-size: 13px;
             font-weight: 700;
           }
@@ -605,7 +604,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
           .split-payer-card.is-paid {
             cursor: default;
             background: var(--success-muted);
-            border-color: rgba(34, 197, 94, .35);
+            border-color: var(--success);
           }
           .split-payer-head {
             display: flex;
@@ -621,7 +620,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
             align-items: center;
             border: 1px solid var(--border);
             border-radius: 8px;
-            background: rgba(15, 23, 42, .36);
+            background: var(--surface-2);
             padding: 0 14px;
             font-size: 14px;
             font-weight: 850;
@@ -645,7 +644,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
             gap: 10px;
             min-height: 34px;
             border-radius: 8px;
-            background: rgba(15, 23, 42, .42);
+            background: var(--surface-2);
             padding: 7px 9px;
             font-size: 13px;
           }

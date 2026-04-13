@@ -48,8 +48,10 @@ router.get('/history', (req, res) => {
     const calls = db.prepare(`
       SELECT cl.*,
         cl.customer_name_snapshot AS customer_name,
+        o.order_no,
         CASE WHEN cl.customer_id IS NOT NULL THEN 1 ELSE 0 END AS matched
       FROM call_logs cl
+      LEFT JOIN orders o ON o.id = cl.order_id AND o.business_id = cl.business_id
       WHERE cl.business_id = ?
       ORDER BY cl.created_at DESC LIMIT 50
     `).all(req.businessId);

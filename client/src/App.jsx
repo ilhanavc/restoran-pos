@@ -7,6 +7,7 @@ import LoginScreen from './components/auth/LoginScreen.jsx';
 import TablesScreen from './components/tables/TablesScreen.jsx';
 import OrderScreen from './components/orders/OrderScreen.jsx';
 import PaymentScreen from './components/payments/PaymentScreen.jsx';
+import QuickPaymentModal from './components/payments/QuickPaymentModal.jsx';
 import KitchenScreen from './components/kitchen/KitchenScreen.jsx';
 import CustomersScreen from './components/customers/CustomersScreen.jsx';
 import ReportsScreen from './components/reports/ReportsScreen.jsx';
@@ -46,6 +47,7 @@ export default function App() {
   const { user, loading, hasRole } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState(null);
+  const [quickPaymentOrder, setQuickPaymentOrder] = useState(null);
   const paymentAfterCompleteRef = useRef('back');
   const navigate = useNavigate();
   const location = useLocation();
@@ -59,8 +61,12 @@ export default function App() {
       : '/tables';
 
   useEffect(() => {
-    if (!user || user.role !== 'admin') return;
-    api.getDisplaySettings().then((d) => applyDisplaySettings(d.display)).catch(() => {});
+    if (!user) return;
+    if (user.display) {
+      applyDisplaySettings(user.display);
+      return;
+    }
+    api.me().then((d) => d.display && applyDisplaySettings(d.display)).catch(() => {});
   }, [user]);
 
   const handleOpenOrder = useCallback((table) => {
@@ -85,16 +91,31 @@ export default function App() {
 
   const handlePayment = useCallback((order) => {
     paymentAfterCompleteRef.current = 'back';
+    setQuickPaymentOrder(null);
     setPaymentOrder(order);
   }, []);
 
   const handlePaymentFromTables = useCallback((order) => {
     paymentAfterCompleteRef.current = 'tables';
+    setQuickPaymentOrder(null);
     setPaymentOrder(order);
+  }, []);
+
+  const handleQuickPayment = useCallback((order) => {
+    paymentAfterCompleteRef.current = 'back';
+    setPaymentOrder(null);
+    setQuickPaymentOrder(order);
+  }, []);
+
+  const handleQuickPaymentFromTables = useCallback((order) => {
+    paymentAfterCompleteRef.current = 'tables';
+    setPaymentOrder(null);
+    setQuickPaymentOrder(order);
   }, []);
 
   const handlePaymentComplete = useCallback(() => {
     setPaymentOrder(null);
+    setQuickPaymentOrder(null);
     if (paymentAfterCompleteRef.current === 'tables') {
       paymentAfterCompleteRef.current = 'back';
       navigate('/tables', { replace: true, state: { refreshTables: Date.now() } });
@@ -105,6 +126,7 @@ export default function App() {
 
   const handlePaymentClose = useCallback(() => {
     setPaymentOrder(null);
+    setQuickPaymentOrder(null);
     paymentAfterCompleteRef.current = 'back';
   }, []);
 
@@ -114,7 +136,7 @@ export default function App() {
         <div style={{ textAlign: 'center' }}>
           <div style={{
             width: 48, height: 48, borderRadius: 'var(--radius-md)',
-            background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
+            background: 'linear-gradient(135deg, var(--accent), var(--accent-gradient-end))',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 22, fontWeight: 800, color: 'white', marginBottom: 12,
           }}>P</div>
@@ -156,6 +178,7 @@ export default function App() {
               <TablesScreen
                 onOpenOrder={handleOpenOrder}
                 onPayment={handlePaymentFromTables}
+                onQuickPayment={handleQuickPaymentFromTables}
                 showTakeawaySidebar={hasRole('admin', 'cashier')}
                 onOpenTakeawayOrder={handleOpenTakeawayFromTables}
               />
@@ -185,12 +208,12 @@ export default function App() {
           
           <Route path="/order/table/:id" element={
             <ProtectedRoute requiredRoles={['admin', 'cashier', 'waiter']}>
-              <OrderScreenWrapper onPayment={handlePayment} />
+              <OrderScreenWrapper onPayment={handlePayment} onQuickPayment={handleQuickPayment} />
             </ProtectedRoute>
           } />
           <Route path="/order/takeaway" element={
             <ProtectedRoute requiredRoles={['admin', 'cashier']}>
-              <OrderScreenWrapper onPayment={handlePayment} />
+              <OrderScreenWrapper onPayment={handlePayment} onQuickPayment={handleQuickPayment} />
             </ProtectedRoute>
           } />
           
@@ -206,12 +229,20 @@ export default function App() {
         />
       )}
 
+      {quickPaymentOrder && (
+        <QuickPaymentModal
+          order={quickPaymentOrder}
+          onClose={handlePaymentClose}
+          onComplete={handlePaymentComplete}
+        />
+      )}
+
       <UpdateNotification />
     </div>
   );
 }
 
-function OrderScreenWrapper({ onPayment }) {
+function OrderScreenWrapper({ onPayment, onQuickPayment }) {
   const location = useLocation();
   const navigate = useNavigate();
   const state = location.state || {};
@@ -231,6 +262,7 @@ function OrderScreenWrapper({ onPayment }) {
       callLogId={state.callLogId}
       onBack={() => (orderType === 'dine_in' ? goToTables() : navigate(-1))}
       onPayment={onPayment}
+      onQuickPayment={onQuickPayment}
       onNavigateToTables={goToTables}
     />
   );

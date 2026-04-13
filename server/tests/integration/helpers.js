@@ -35,6 +35,22 @@ export function createTestDb() {
     for (const sql of migrations) db.exec(sql);
   })();
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS call_logs (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id),
+      phone TEXT NOT NULL,
+      normalized_phone TEXT NOT NULL,
+      customer_id TEXT REFERENCES customers(id),
+      order_id TEXT REFERENCES orders(id),
+      customer_name_snapshot TEXT,
+      address_snapshot TEXT,
+      source_type TEXT DEFAULT 'http',
+      status TEXT NOT NULL DEFAULT 'ringing' CHECK(status IN ('ringing','dismissed','opened_order','completed')),
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   // ensureColumnMigrations() tarafından sonradan eklenen kolonları da uygula
   const addColumnIfMissing = (table, column, definition) => {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -57,6 +73,7 @@ export function createTestDb() {
   addColumnIfMissing('printers', 'line_width', 'INTEGER');
   addColumnIfMissing('print_jobs', 'claimed_at', 'TEXT');
   addColumnIfMissing('print_jobs', 'claimed_by', 'TEXT');
+  addColumnIfMissing('call_logs', 'order_id', 'TEXT');
 
   return db;
 }

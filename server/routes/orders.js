@@ -12,6 +12,7 @@ import {
   enqueueReceiptJobForClosedOrder,
   enqueueTakeawayLabelJob,
 } from '../services/printJobs.js';
+import { linkCallLogToOrder } from '../services/callerIdService.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -29,6 +30,7 @@ const createOrderSchema = {
     order_type: z.enum(['dine_in', 'takeaway', 'delivery']).optional(),
     table_id: z.string().optional().nullable(),
     customer_id: z.string().optional().nullable(),
+    call_log_id: z.string().optional().nullable(),
     items: z.array(orderItemSchema).min(1, 'En az bir ürün gerekli'),
     note: z.string().max(500).optional().nullable(),
     guest_count: z.number().int().min(0).max(999).optional(),
@@ -316,7 +318,7 @@ router.patch('/:id/customer', staff, (req, res) => {
 // POST /api/orders
 router.post('/', staff, validate(createOrderSchema), (req, res) => {
   try {
-    const { table_id, order_type, customer_id, items, note, guest_count, delivery_address, delivery_note, courier_note } = req.body;
+    const { table_id, order_type, customer_id, call_log_id, items, note, guest_count, delivery_address, delivery_note, courier_note } = req.body;
 
     if (!items || !items.length) {
       return res.status(400).json({ error: 'Sipariş için en az bir ürün gerekli' });
@@ -397,6 +399,10 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
 
     if ((order_type || 'dine_in') === 'takeaway') {
       enqueueTakeawayLabelJob(req.businessId, orderId, req.user.id);
+    }
+
+    if (call_log_id) {
+      linkCallLogToOrder(req.businessId, call_log_id, orderId);
     }
 
     finalizeKitchenForNewItems(req.businessId, orderId, createdItemIds, req.user.id);
@@ -542,6 +548,16 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
           .run(order.id);
       }
       db.prepare(`UPDATE orders SET ${updates.join(', ')} WHERE id = ? AND business_id = ?`).run(...params);
+      if (status === 'closed' && order.table_id) {
+        db.prepare(
+          `UPDATE tables SET status = 'empty', current_order_id = NULL, guest_count = 0, updated_at = datetime('now')
+           WHERE business_id = ? AND current_order_id = ?`,
+        ).run(req.businessId, order.id);
+      }
+      if (status === 'closed' && order.customer_id) {
+        db.prepare("UPDATE customers SET total_orders = total_orders + 1, last_order_at = datetime('now') WHERE id = ?")
+          .run(order.customer_id);
+      }
     })();
 
     auditLog(req.businessId, req.user.id, `order_${status}`, 'order', req.params.id);
@@ -651,43 +667,6 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
     order.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
     emitToRoom(req.businessId, 'order:item_updated', { order });
     res.json(order);
-  } catch (err) {
-    res.status(500).json({ error: 'Sunucu hatası' });
-  }
-});
-
-// PATCH /api/orders/:id/discount
-router.patch('/:id/discount', authorize('admin', 'cashier'), (req, res) => {
-  try {
-    const { discount_amount, discount_percent } = req.body;
-    const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
-    if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
-    const paymentCount = db.prepare('SELECT COUNT(*) as c FROM payments WHERE order_id = ?').get(order.id);
-    if ((paymentCount?.c || 0) > 0) {
-      return res.status(400).json({ error: 'Ödeme alındıktan sonra indirim değiştirilemez' });
-    }
-
-    const pct = discount_percent != null && discount_percent !== '' ? parseFloat(discount_percent) : null;
-    const amt = discount_amount != null && discount_amount !== '' ? parseFloat(discount_amount) : null;
-
-    let discAmt = 0;
-    let storedPercent = 0;
-    if (pct != null && !Number.isNaN(pct) && pct > 0) {
-      discAmt = order.subtotal * (pct / 100);
-      storedPercent = pct;
-    } else if (amt != null && !Number.isNaN(amt) && amt >= 0) {
-      discAmt = amt;
-    }
-
-    db.prepare(`UPDATE orders SET discount_amount = ?, discount_percent = ?, 
-      grand_total = subtotal - ?, updated_at = datetime('now'), updated_by = ? WHERE id = ?`)
-      .run(discAmt, storedPercent, discAmt, req.user.id, req.params.id);
-
-    auditLog(req.businessId, req.user.id, 'order_discount', 'order', req.params.id, { discount_amount: discAmt, discount_percent: storedPercent });
-
-    const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
-    updated.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
-    res.json(updated);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
   }

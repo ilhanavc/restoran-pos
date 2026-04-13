@@ -126,6 +126,21 @@ export function updateCallLogStatus(businessId, logId, status) {
   return db.prepare(`SELECT * FROM call_logs WHERE id = ?`).get(logId);
 }
 
+export function linkCallLogToOrder(businessId, logId, orderId) {
+  const normalizedLogId = String(logId || '').trim();
+  const normalizedOrderId = String(orderId || '').trim();
+  if (!normalizedLogId || !normalizedOrderId) return null;
+
+  const r = db.prepare(
+    `UPDATE call_logs
+     SET status = 'opened_order', order_id = ?
+     WHERE id = ? AND business_id = ?`,
+  ).run(normalizedOrderId, normalizedLogId, businessId);
+
+  if (r.changes === 0) return null;
+  return db.prepare(`SELECT * FROM call_logs WHERE id = ?`).get(normalizedLogId);
+}
+
 export function listRecentCallLogs(businessId, limit = 40) {
   return db.prepare(`
     SELECT * FROM call_logs WHERE business_id = ? ORDER BY created_at DESC LIMIT ?

@@ -59,7 +59,7 @@ function QrSetupModal({ onClose }) {
 
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+      position: 'fixed', inset: 0, background: 'var(--bg-overlay)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
     }}>
       <div className="card card-padded" style={{ width: 560, maxHeight: '90vh', overflowY: 'auto' }}>
@@ -116,7 +116,7 @@ function QrSetupModal({ onClose }) {
             </div>
 
             {selectedTable && callUrl && (
-              <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+              <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
                   {selectedTable.area_name} — {selectedTable.name} Çağrı URL'si
                 </div>
@@ -137,7 +137,7 @@ function QrSetupModal({ onClose }) {
                     href={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(callUrl)}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ color: 'var(--primary)' }}
+                    style={{ color: 'var(--accent)' }}
                   >QR kodu görüntüle</a>
                 </p>
               </div>
@@ -261,7 +261,7 @@ export default function WaiterCallPanel() {
           {pendingCount > 0 && (
             <span style={{
               position: 'absolute', top: 6, right: 6,
-              background: 'var(--danger)', color: '#fff',
+              background: 'var(--danger)', color: 'var(--text-on-accent)',
               borderRadius: '999px', fontSize: 10, fontWeight: 700,
               minWidth: 16, height: 16, display: 'flex', alignItems: 'center', justifyContent: 'center',
               padding: '0 4px',
@@ -276,7 +276,7 @@ export default function WaiterCallPanel() {
           <div style={{
             position: 'absolute', left: '100%', top: 0, marginLeft: 4,
             background: 'var(--surface)', border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)', boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-soft)',
             width: 280, zIndex: 200,
           }}>
             <div style={{

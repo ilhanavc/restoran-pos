@@ -5,19 +5,19 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 8.6/10** (up from 7.5/10) · 8 sprints completed · 101 automated tests · 15/15 production checklist items passed
+**Overall score: 8.8/10** (up from 8.6/10) · 9 sprints completed · 104 automated tests · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
 |---------------------|--------|--------|
-| Feature Completeness| 9/10   | +1     |
-| Code Quality        | 8/10   | +1     |
-| Security            | 9/10   | +3     |
-| Performance         | 8/10   | +1     |
-| Test Coverage       | 7/10   | +6     |
+| Feature Completeness| 9/10   | ±0     |
+| Code Quality        | 8/10   | ±0     |
+| Security            | 9/10   | ±0     |
+| Performance         | 8/10   | ±0     |
+| Test Coverage       | 8/10   | +1     |
 | Documentation       | 7/10   | ±0     |
-| Deployment          | 8/10   | +1     |
-| **Overall**         | **8.6**| **+1.1** |
+| Deployment          | 9/10   | +1     |
+| **Overall**         | **8.8**| **+0.2** |
 
 ## Completed Sprints
 
@@ -31,6 +31,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | 6 | Real-time & Printer Fix | Socket.io (kitchen/table/takeaway screens now instant vs 10–15s polling), per-printer `ESC t` + `skipInit` for Turkish fix, duplicate takeaway receipt fix. *Delivered 2 months ahead of schedule.* |
 | 7 | Test Coverage | 65 automated tests (Vitest) covering Turkish encoding, printer deduplication, DB migration safety, order transaction integrity. Coverage 1→7/10. |
 | 8 | Production Hardening | Customer list pagination (50/page "load more"), order history search filters (date range / customer / amount), BRIDGE_TOKEN security fix, CORS hardening |
+| 9 | Feature Completion + Packaging Fix | Product image upload + combo menu, Customer 360 profile, Advanced order analytics, electron-updater auto-update, receipt template rebuild (4 templates, 48-char, PC857), **iconv-lite/store-bridge packaging bug fixed** (v1.0.3) |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -48,33 +49,39 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Socket.io real-time (kitchen, table, takeaway screens)
 - Daily automatic DB backup (02:00, 30-day retention)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- 101 automated tests (Vitest), all passing
+- 104 automated tests (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
 - Customer notification sound on new order
+- electron-updater auto-update (GitHub Releases, v1.0.3+)
+- Product image upload (server/uploads/products/, /uploads static)
+- Combo menu support (product_combos table, UI in MenuProductEditorPage)
+- Customer 360 profile (total spend, order count, last visit, top 3 products)
+- Advanced order analytics (top 10 products, peak hours, daily revenue — recharts)
+- Order report Excel export + print/PDF (daily + order history)
+- Waiter call QR code (table QR → customer scan → real-time notification via Socket.io)
+- Receipt templates rebuilt (4 templates: PAKET KASA, PAKET MUTFAK, MASA MUTFAK, MASA KASA — 32-char separators)
+- Supertest integration tests (auth, orders, payments, reports — 4 files)
 
-## Pending Tasks (Priority Order)
+## Pending Tasks
 
-### Short (1–3 days)
-1. **Order report PDF/Excel export** — customer export exists; order report export missing
-2. **Waiter call (QR code)** — table-side QR for calling waiter
-3. **electron-updater auto-update** — OTA updates for packaged app
-4. **Supertest integration tests** — end-to-end API flow tests
+All short-term and medium-term roadmap items completed as of Sprint 9.
+Long-term items deferred pending 15-day production testing period.
 
-### Medium (weeks)
-5. **Product image upload + combo menu**
-6. **Customer 360 profile** — lifetime spend, favorite items, analytics
-7. **Advanced order analytics**
-
-### Long-term
+### After production testing (v2 roadmap)
 - Multi-branch dashboard
 - Online order integrations (Yemeksepeti, Getir)
 - Mobile waiter app (tablet/offline)
 - Loyalty program
+- CI/CD pipeline (GitHub Actions) — **high priority, prevents packaging bugs**
+- Frontend test coverage (React component tests)
+- QR code local generation (replace external api.qrserver.com dependency)
+- Structured log file output for production debugging
 
 ## Critical Technical Notes
 - **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds. Vitest uses system Node: if `npm run test` fails with an ABI/version mismatch after `postinstall` or an Electron rebuild, run `npm rebuild better-sqlite3` in `server/`.
+- **`store-bridge/node_modules`** — `dist:prepare` runs `npm install --prefix store-bridge --omit=dev` since Sprint 9. Previously missing, caused iconv-lite crash in v1.0.2. Do NOT remove this step.
 - **PC857 Turkish encoding** — `ESC t 12` command; per-printer `skipInit` setting available to skip `ESC @` initialization (fixes Turkish chars on some network printers).
 - **CallerID** — Primary: C# SDK helper (`tools/callerid-sdk-helper`). Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`). Both POST to `POST /api/bridge/caller-id/incoming` with `X-Bridge-Token`.
 - **BRIDGE_TOKEN** — must always be masked in logs (`***`); never log in plain text.
@@ -156,3 +163,5 @@ npm run debug:login     # Test JWT/audit chain in terminal
 | Cashier | kasiyer@demo.com   | 123456   |
 | Waiter  | garson@demo.com    | 123456   |
 | Kitchen | mutfak@demo.com    | 123456   |
+“Codex will review your output once you are done.”
+

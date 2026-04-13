@@ -106,7 +106,7 @@ describe('split payments', () => {
     expect(res.body.split.totals.remaining_total).toBe(160);
   });
 
-  it('prevents double payment and closes the order when the last remaining quantity is paid', async () => {
+  it('prevents double payment and keeps the table open when the last remaining quantity is paid', async () => {
     const { orderId, itemId } = createOrder();
 
     await request(app)
@@ -143,15 +143,15 @@ describe('split payments', () => {
         payer_no: 2,
         payer_label: 'Kişi 2',
         allocations: [{ order_item_id: itemId, quantity: 2 }],
-      });
+    });
 
     expect(finalPay.status).toBe(201);
-    expect(finalPay.body.order.status).toBe('closed');
+    expect(finalPay.body.order.status).not.toBe('closed');
     expect(finalPay.body.split.totals.remaining_total).toBe(0);
 
     const table = dbRef.current.prepare('SELECT status, current_order_id, guest_count FROM tables WHERE id = ?').get(seeds.tableId);
-    expect(table.status).toBe('empty');
-    expect(table.current_order_id).toBeNull();
-    expect(table.guest_count).toBe(0);
+    expect(table.status).toBe('occupied');
+    expect(table.current_order_id).toBe(orderId);
+    expect(table.guest_count).toBe(4);
   });
 });
