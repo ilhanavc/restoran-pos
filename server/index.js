@@ -99,7 +99,9 @@ const waiterCallLimiter = rateLimit({
 });
 
 // Ürün görselleri — kimlik doğrulama gerektirmez (img src ile erişilir)
-const uploadsDir = path.join(__dirname, 'uploads');
+const uploadsDir = process.env.USER_DATA_PATH
+  ? path.join(process.env.USER_DATA_PATH, 'uploads')
+  : path.join(__dirname, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 

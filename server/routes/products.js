@@ -8,7 +8,9 @@ import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog, normalizeTurkishSearch } from '../utils/helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = path.join(__dirname, '..', 'uploads', 'products');
+const UPLOADS_DIR = process.env.USER_DATA_PATH
+  ? path.join(process.env.USER_DATA_PATH, 'uploads', 'products')
+  : path.join(__dirname, '..', 'uploads', 'products');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({

@@ -172,6 +172,7 @@ function buildChildEnv(port, absoluteDbPath, codeRoot) {
   env.NODE_ENV = 'production';
   env.PORT = String(port);
   env.DB_PATH = absoluteDbPath;
+  env.USER_DATA_PATH = app.getPath('userData');
   const dist = path.join(codeRoot, 'client', 'dist');
   if (!env.CLIENT_DIST_PATH) {
     env.CLIENT_DIST_PATH = dist;
