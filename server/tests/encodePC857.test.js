@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { encodePC857, encodeWin1254 } from '../../store-bridge/printers/renderers.js';
+import { encodePC857, encodeWin1254, payloadToEscPosBuffer } from '../../store-bridge/printers/renderers.js';
 
 /**
  * PC857 (IBM Turkish) karakter kodlaması doğruluk testleri.
@@ -175,5 +175,31 @@ describe('encodeWin1254', () => {
     expect(result[0]).toBe(0xc7); // Ç in Win-1254
     expect(result[1]).toBe('o'.charCodeAt(0));
     expect(result.length).toBe(5);
+  });
+});
+
+describe('payloadToEscPosBuffer encoding commands', () => {
+  it('Windows-1254 modunda ESC t 32 kullanır ve Phoenix FS komutunu göndermez', () => {
+    const buffer = payloadToEscPosBuffer(
+      {
+        payload: {
+          kind: 'receipt',
+          user_name: 'İlhan Avcı',
+          table_name: 'Masa 1',
+          items: [],
+          grand_total: 0,
+        },
+      },
+      { encodingMode: 'win1254', escT: 32, skipPhoenixCmd: false },
+    );
+
+    const escTIndex = buffer.findIndex((byte, index) => byte === 0x1b && buffer[index + 1] === 0x74);
+    const phoenixIndex = buffer.findIndex(
+      (byte, index) => byte === 0x1c && buffer[index + 1] === 0x7d && buffer[index + 2] === 0x26,
+    );
+
+    expect(escTIndex).toBeGreaterThanOrEqual(0);
+    expect(buffer[escTIndex + 2]).toBe(32);
+    expect(phoenixIndex).toBe(-1);
   });
 });

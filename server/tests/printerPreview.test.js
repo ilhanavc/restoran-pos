@@ -25,7 +25,7 @@ describe('getPrinterPreviewPlainLines', () => {
     expect(joined).toMatch(/BAR|Hellim/);
   });
 
-  it('şablon açıkken gövde ve {business_name} yer tutucuları uygulanır', () => {
+  it('şablon açık olsa bile güvenli varsayılan fiş düzeni korunur', () => {
     const lines = getPrinterPreviewPlainLines('kitchen', 42, {
       template: {
         enabled: true,
@@ -36,6 +36,7 @@ describe('getPrinterPreviewPlainLines', () => {
     const joined = lines.join('\n');
     expect(joined).toContain('Demo Restoran');
     expect(joined).toContain('Hellim Peynirli Salata');
-    expect(joined).toContain('Alt satır');
+    expect(joined).not.toContain('Alt satır');
+    expect(joined).toMatch(/MUTFAK|MASA SİPARİŞİ/);
   });
 });

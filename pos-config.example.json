@@ -15,7 +15,8 @@
     "pollIntervalMs": 2000,
     "socketTimeoutMs": 8000,
     "claimId": "store-bridge",
-    "printEncodingMode": "win1254"
+    "printEncodingMode": "win1254",
+    "printEscT": 32
   },
 
   "callerid": {

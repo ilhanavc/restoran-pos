@@ -1,7 +1,9 @@
 {
   "bridge": {
     "token": "restoran-pos-bridge-2024",
-    "businessId": "fdf05f1b-8e4f-4613-beb3-37ee2d4fe96c"
+    "businessId": "fdf05f1b-8e4f-4613-beb3-37ee2d4fe96c",
+    "printEncodingMode": "win1254",
+    "printEscT": 32
   },
   "cid812Enabled": true,
   "cid812Mode": "hid",

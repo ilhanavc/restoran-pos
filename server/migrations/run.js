@@ -521,6 +521,43 @@ function ensureColumnMigrations() {
   if (printerCols.length && !printerCols.some((c) => c.name === 'line_width')) {
     db.prepare('ALTER TABLE printers ADD COLUMN line_width INTEGER').run();
   }
+  if (printerCols.length) {
+    db.prepare('UPDATE printers SET line_width = 42 WHERE line_width IS NOT NULL AND line_width > 42').run();
+    db.prepare('UPDATE printers SET line_width = NULL WHERE line_width IS NOT NULL AND line_width < 32').run();
+
+    const printerOptionRows = db
+      .prepare('SELECT id, type, print_options FROM printers WHERE print_options IS NOT NULL AND print_options != ?')
+      .all('');
+    const updatePrinterOptions = db.prepare('UPDATE printers SET print_options = ? WHERE id = ?');
+    for (const row of printerOptionRows) {
+      try {
+        const parsed = JSON.parse(row.print_options);
+        let changed = false;
+        if (parsed?.template?.enabled === true) {
+          parsed.template = { ...parsed.template, enabled: false };
+          changed = true;
+        }
+        const isReceiptPrinter = String(row.type || 'receipt') === 'receipt';
+        if (isReceiptPrinter && parsed?.encodingMode !== 'win1254') {
+          parsed.encodingMode = 'win1254';
+          changed = true;
+        }
+        if (isReceiptPrinter && parsed?.escT !== 32) {
+          parsed.escT = 32;
+          changed = true;
+        }
+        if (isReceiptPrinter && parsed?.skipPhoenixCmd !== true) {
+          parsed.skipPhoenixCmd = true;
+          changed = true;
+        }
+        if (changed) {
+          updatePrinterOptions.run(JSON.stringify(parsed), row.id);
+        }
+      } catch {
+        // Invalid printer options should not block startup migrations.
+      }
+    }
+  }
 
   let pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_at')) {

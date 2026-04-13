@@ -193,6 +193,7 @@ export function normalizePrintOptions(po, type) {
     template: {
       ...e.template,
       ...(parsed.template && typeof parsed.template === 'object' ? parsed.template : {}),
+      enabled: false,
     },
   };
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';

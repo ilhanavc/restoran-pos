@@ -8,7 +8,7 @@ import iconv from 'iconv-lite';
 /** @type {number} 80 mm termal için tipik karakter genişliği (12 cpi civarı) */
 const DEFAULT_LINE_WIDTH = 42;
 const MIN_LINE_WIDTH = 32;
-const MAX_LINE_WIDTH = 64;
+const MAX_LINE_WIDTH = 42;
 const DEFAULT_STORE_TIMEZONE = 'Europe/Istanbul';
 const DEFAULT_CHAR_FALLBACK = 'transliterate';
 const DEFAULT_ENCODING_MODE = 'win1254';
@@ -872,8 +872,6 @@ function itemUnitAndTotal(item) {
 }
 
 function buildKitchenLines(p) {
-  const templated = buildTemplateLines(p);
-  if (templated) return templated;
   const w = resolveLineWidth(p);
   /** @type {(string|{text?:string,bold?:boolean,large?:boolean,bodyEmphasis?:boolean,underline?:boolean})[]} */
   const out = [];
@@ -997,8 +995,6 @@ function buildKitchenAdjustmentLines(p) {
 }
 
 function buildReceiptLines(p) {
-  const templated = buildTemplateLines(p);
-  if (templated) return templated;
   const w = resolveLineWidth(p);
   /** @type {(string|{text?:string,bold?:boolean,large?:boolean,bodyEmphasis?:boolean,underline?:boolean})[]} */
   const out = [];
@@ -1231,17 +1227,21 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
   const width = resolveLineWidth(p);
   const skipInit = !!printerOptions.skipInit;
 
-  // Encoding mode: "win1254" uses iconv-lite Windows-1254 + ESC t 33.
+  // Encoding mode: "win1254" uses iconv-lite Windows-1254 + ESC t 32.
   // "pc857" uses the manual PC857_MAP + ESC t 12 (or overridden escT).
   const encodingMode = resolveEncodingMode(printerOptions);
   const useWin1254 = encodingMode === 'win1254';
-  const skipPhoenixCmd =
-    printerOptions.skipPhoenixCmd != null ? !!printerOptions.skipPhoenixCmd : useWin1254;
+  const requestedSkipPhoenix =
+    printerOptions.skipPhoenixCmd != null ? !!printerOptions.skipPhoenixCmd : false;
+  // Bu işletmedeki JP80H/Phoenix benzeri yazıcıda Windows-1254 için doğru satır
+  // ESC t 32. FS } & komutu bazı firmware'lerde ESC t seçimini bozduğu için
+  // win1254 modunda kayıtlı ayar false olsa bile güvenli biçimde atlanır.
+  const skipPhoenixCmd = useWin1254 || requestedSkipPhoenix;
 
   // Set render-scoped encoder (Node.js single-threaded: safe for sync render)
   _activeEncoder = useWin1254 ? encodeWin1254 : encodePC857;
 
-  // ESC t: Win1254 defaults to 33, PC857 defaults to 12; explicit printer/env overrides still work.
+  // ESC t: Win1254 defaults to 32, PC857 defaults to 12; explicit printer/env overrides still work.
   const escT = useWin1254
     ? resolveWin1254EscT({ printerOptions, payload: p })
     : resolveEscT({ printerOptions, payload: p });
@@ -1250,7 +1250,6 @@ export function payloadToEscPosBuffer(job, printerOptions = {}) {
     ...p,
     esc_t: escT,
     encoding_mode: encodingMode,
-    _template: printerOptions?.template,
   };
   const parts = [];
   if (!skipInit) parts.push(escInit());

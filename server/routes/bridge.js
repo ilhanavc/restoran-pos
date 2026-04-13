@@ -25,6 +25,36 @@ function parsePayload(raw) {
   }
 }
 
+function normalizeBridgePrintOptions(raw, printerType) {
+  let printOptions = {};
+  if (raw) {
+    try {
+      printOptions = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      printOptions = {};
+    }
+  }
+  if (!printOptions || typeof printOptions !== 'object') printOptions = {};
+
+  const normalized = {
+    ...printOptions,
+    template:
+      printOptions.template && typeof printOptions.template === 'object'
+        ? { ...printOptions.template, enabled: false }
+        : { enabled: false },
+  };
+
+  normalized.encodingMode = normalized.encodingMode === 'pc857' ? 'pc857' : 'win1254';
+
+  if (printerType === 'receipt' || normalized.encodingMode === 'win1254') {
+    normalized.encodingMode = 'win1254';
+    normalized.escT = 32;
+    normalized.skipPhoenixCmd = true;
+  }
+
+  return normalized;
+}
+
 function mapJobRow(row) {
   if (!row) return null;
   return {
@@ -46,19 +76,13 @@ function mapJobRow(row) {
 
 function mapPrinterRow(row) {
   if (!row) return null;
-  let print_options = {};
-  if (row.print_options) {
-    try {
-      print_options = JSON.parse(row.print_options);
-    } catch {
-      print_options = {};
-    }
-  }
+  const type = row.type || 'receipt';
+  const print_options = normalizeBridgePrintOptions(row.print_options, type);
   return {
     id: row.id,
     business_id: row.business_id,
     name: row.name,
-    type: row.type,
+    type,
     connection_type: row.connection_type || 'network',
     ip_address: row.ip_address,
     port: row.port ?? 9100,

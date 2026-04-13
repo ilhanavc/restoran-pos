@@ -61,7 +61,7 @@ function TypePill({ active, onClick, label }) {
   );
 }
 
-/** Sunucuda store-bridge ile aynı satır üreticisi; şablon ve satır genişliği yazdırmayla uyumludur. */
+/** Sunucuda store-bridge ile aynı güvenli satır üreticisini kullanır. */
 function PrinterPreviewPanel({ type, lineWidth, printOptions }) {
   const layout = printOptions?.layout || {};
   const [lines, setLines] = useState([]);
@@ -74,7 +74,7 @@ function PrinterPreviewPanel({ type, lineWidth, printOptions }) {
 
   const lw = useMemo(() => {
     const n = parseInt(String(lineWidth ?? '').trim(), 10);
-    if (Number.isFinite(n) && n >= 32 && n <= 64) return n;
+    if (Number.isFinite(n) && n >= 32 && n <= 42) return n;
     return 42;
   }, [lineWidth]);
 
@@ -429,7 +429,7 @@ export default function PrinterDetailPage() {
       ip_address: ip.trim() || null,
       port: portNum,
       is_active: isActive,
-      line_width: Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 64 ? lwNum : null,
+      line_width: Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 42 ? lwNum : null,
       print_options: poToSave,
     };
 
@@ -661,7 +661,7 @@ export default function PrinterDetailPage() {
                 className="input"
                 type="number"
                 min="32"
-                max="64"
+                max="42"
                 value={lineWidth}
                 onChange={(e) => setLineWidth(e.target.value)}
                 placeholder="42"
@@ -672,7 +672,7 @@ export default function PrinterDetailPage() {
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
                 ESC t kod sayfası <span style={{ fontWeight: 400 }}>— boş = varsayılan (32 / Windows-1254 Türkçe)</span>
               </span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>12 = PC857 Türkçe &nbsp;·&nbsp; 0 = PC437 (US) &nbsp;·&nbsp; 32 = JP80H-UE Türkçe &nbsp;·&nbsp; 33 = Windows-1254 alternatif</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>32 = Windows-1254 Türkçe &nbsp;·&nbsp; 12 = PC857 alternatif &nbsp;·&nbsp; 0 = PC437 (US)</span>
               <input
                 className="input"
                 type="number"
@@ -718,11 +718,11 @@ export default function PrinterDetailPage() {
                 style={{ fontSize: 13 }}
               >
                 <option value="win1254">Windows-1254 — ESC t 32 (önerilen)</option>
-                <option value="pc857">PC857 — ESC t 12 (Epson uyumlu alternatif)</option>
+                <option value="pc857">PC857 — ESC t 12 alternatif</option>
               </select>
               {encodingMode === 'win1254' && (
                 <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                  JP80H-UE gibi Çin yapımı yazıcılarda Windows-1254 daha güvenilir Türkçe karakter desteği sunar. Bu cihazda ESC t 32 komutu düzgün çıktı verdi; "Phoenix FS komutunu atla" seçeneğiyle birlikte kullanın.
+                  Mevcut işletme yazıcısı için doğru görünen ayar Windows-1254 ve ESC t 32'dir.
                 </p>
               )}
             </label>
@@ -980,7 +980,7 @@ export default function PrinterDetailPage() {
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
                 Tür: <strong>{primaryTypeLabel(type)}</strong>
                 <span style={{ display: 'block', marginTop: 4 }}>
-                  Metin kırılımları ve şablon, yazdırmada kullanılan satır üreticisiyle aynıdır. Punto/mm termal
+                  Metin kırılımları yazdırmada kullanılan güvenli satır üreticisiyle aynıdır. Punto/mm termal
                   cihaza göre değişebilir.
                 </span>
               </div>

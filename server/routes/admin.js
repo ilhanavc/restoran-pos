@@ -225,6 +225,7 @@ function mergePrintOptions(rawJson, type) {
     template: {
       ...base.template,
       ...(parsed.template && typeof parsed.template === 'object' ? parsed.template : {}),
+      enabled: false,
     },
   };
   // Preserve printer hardware/encoding overrides
@@ -234,6 +235,7 @@ function mergePrintOptions(rawJson, type) {
   if (parsed.encodingMode === 'pc857' || parsed.encodingMode === 'win1254') {
     merged.encodingMode = parsed.encodingMode;
   }
+  if (merged.encodingMode === 'win1254') merged.skipPhoenixCmd = true;
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
   merged.roles[pk] = true;
   return merged;
@@ -261,6 +263,7 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
     template: {
       ...base.template,
       ...(incomingObj.template && typeof incomingObj.template === 'object' ? incomingObj.template : {}),
+      enabled: false,
     },
   };
   // Preserve printer hardware/encoding overrides
@@ -274,6 +277,7 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
   const encMode = incomingObj.encodingMode != null ? incomingObj.encodingMode : base.encodingMode;
   out.encodingMode = encMode === 'pc857' ? 'pc857' : 'win1254';
   if (!out.skipInit) delete out.skipInit;
+  if (out.encodingMode === 'win1254') out.skipPhoenixCmd = true;
   const pk = type === 'receipt' ? 'receipt' : type === 'kitchen' ? 'kitchen' : 'bar';
   out.roles[pk] = true;
   return out;
@@ -624,7 +628,7 @@ router.post('/printers', (req, res) => {
       return res.status(400).json({ error: 'Geçerli bir port girin' });
     }
     const lwNum = line_width != null ? parseInt(line_width, 10) : null;
-    const lw = Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 64 ? lwNum : null;
+    const lw = Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 42 ? lwNum : null;
     const branch = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId);
     const branchId = branch?.id || null;
     const id = genId();
@@ -743,7 +747,7 @@ router.patch('/printers/:id', (req, res) => {
 
     const lwNum = line_width != null ? parseInt(line_width, 10) : null;
     const nextLw = line_width !== undefined
-      ? (Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 64 ? lwNum : null)
+      ? (Number.isFinite(lwNum) && lwNum >= 32 && lwNum <= 42 ? lwNum : null)
       : (existing.line_width ?? null);
 
     db.prepare(
