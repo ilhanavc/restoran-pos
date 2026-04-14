@@ -1,34 +1,35 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { Suspense, lazy, useState, useCallback, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import Sidebar from './components/layout/Sidebar.jsx';
-import HomeScreen from './components/home/HomeScreen.jsx';
 import LoginScreen from './components/auth/LoginScreen.jsx';
-import TablesScreen from './components/tables/TablesScreen.jsx';
-import OrderScreen from './components/orders/OrderScreen.jsx';
-import PaymentScreen from './components/payments/PaymentScreen.jsx';
-import QuickPaymentModal from './components/payments/QuickPaymentModal.jsx';
-import KitchenScreen from './components/kitchen/KitchenScreen.jsx';
-import CustomersScreen from './components/customers/CustomersScreen.jsx';
-import ReportsScreen from './components/reports/ReportsScreen.jsx';
 import api from './services/api.js';
 import { applyDisplaySettings } from './utils/displayTheme.js';
-import SettingsLayout from './components/settings/SettingsLayout.jsx';
-import SettingsHome from './components/settings/SettingsHome.jsx';
-import BusinessSettingsPage from './components/settings/BusinessSettingsPage.jsx';
-import UsersSettingsPage from './components/settings/UsersSettingsPage.jsx';
-import PrinterSettingsRoutes from './components/settings/PrinterSettingsRoutes.jsx';
-import PrinterListPage from './components/settings/PrinterListPage.jsx';
-import PrinterDetailPage from './components/settings/PrinterDetailPage.jsx';
-import PrinterRoutingPage from './components/settings/PrinterRoutingPage.jsx';
-import DisplaySettingsPage from './components/settings/DisplaySettingsPage.jsx';
-import MenuSettingsPage from './components/settings/MenuSettingsPage.jsx';
-import MenuProductEditorPage from './components/settings/MenuProductEditorPage.jsx';
-import DiningAreasSettingsPage from './components/settings/DiningAreasSettingsPage.jsx';
-import CallerIdScreen from './components/callerid/CallerIdScreen.jsx';
-import ReservationsScreen from './components/reservations/ReservationsScreen.jsx';
-import StockScreen from './components/stock/StockScreen.jsx';
 import UpdateNotification from './components/layout/UpdateNotification.jsx';
+
+const HomeScreen = lazy(() => import('./components/home/HomeScreen.jsx'));
+const TablesScreen = lazy(() => import('./components/tables/TablesScreen.jsx'));
+const OrderScreen = lazy(() => import('./components/orders/OrderScreen.jsx'));
+const PaymentScreen = lazy(() => import('./components/payments/PaymentScreen.jsx'));
+const QuickPaymentModal = lazy(() => import('./components/payments/QuickPaymentModal.jsx'));
+const KitchenScreen = lazy(() => import('./components/kitchen/KitchenScreen.jsx'));
+const CustomersScreen = lazy(() => import('./components/customers/CustomersScreen.jsx'));
+const ReportsScreen = lazy(() => import('./components/reports/ReportsScreen.jsx'));
+const SettingsLayout = lazy(() => import('./components/settings/SettingsLayout.jsx'));
+const SettingsHome = lazy(() => import('./components/settings/SettingsHome.jsx'));
+const BusinessSettingsPage = lazy(() => import('./components/settings/BusinessSettingsPage.jsx'));
+const UsersSettingsPage = lazy(() => import('./components/settings/UsersSettingsPage.jsx'));
+const PrinterSettingsRoutes = lazy(() => import('./components/settings/PrinterSettingsRoutes.jsx'));
+const PrinterListPage = lazy(() => import('./components/settings/PrinterListPage.jsx'));
+const PrinterDetailPage = lazy(() => import('./components/settings/PrinterDetailPage.jsx'));
+const PrinterRoutingPage = lazy(() => import('./components/settings/PrinterRoutingPage.jsx'));
+const DisplaySettingsPage = lazy(() => import('./components/settings/DisplaySettingsPage.jsx'));
+const MenuSettingsPage = lazy(() => import('./components/settings/MenuSettingsPage.jsx'));
+const MenuProductEditorPage = lazy(() => import('./components/settings/MenuProductEditorPage.jsx'));
+const DiningAreasSettingsPage = lazy(() => import('./components/settings/DiningAreasSettingsPage.jsx'));
+const CallerIdScreen = lazy(() => import('./components/callerid/CallerIdScreen.jsx'));
+const ReservationsScreen = lazy(() => import('./components/reservations/ReservationsScreen.jsx'));
+const StockScreen = lazy(() => import('./components/stock/StockScreen.jsx'));
 
 function ProtectedRoute({ children, requiredRoles }) {
   const { user, loading, hasRole } = useAuth();
@@ -166,6 +167,7 @@ export default function App() {
         />
       )}
       <main className={`app-content ${isOrderScreen ? 'no-sidebar' : ''}`}>
+        <Suspense fallback={<AppRouteFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to={defaultPath} replace />} />
           <Route path="/home" element={
@@ -219,25 +221,38 @@ export default function App() {
           
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </main>
 
       {paymentOrder && (
+        <Suspense fallback={null}>
         <PaymentScreen
           order={paymentOrder}
           onClose={handlePaymentClose}
           onComplete={handlePaymentComplete}
         />
+        </Suspense>
       )}
 
       {quickPaymentOrder && (
+        <Suspense fallback={null}>
         <QuickPaymentModal
           order={quickPaymentOrder}
           onClose={handlePaymentClose}
           onComplete={handlePaymentComplete}
         />
+        </Suspense>
       )}
 
       <UpdateNotification />
+    </div>
+  );
+}
+
+function AppRouteFallback() {
+  return (
+    <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>
+      Yükleniyor...
     </div>
   );
 }
@@ -248,8 +263,13 @@ function OrderScreenWrapper({ onPayment, onQuickPayment }) {
   const state = location.state || {};
   const orderType = state.orderType || 'dine_in';
 
-  const goToTables = useCallback(() => {
-    navigate('/tables', { state: { refreshTables: Date.now() } });
+  const goToTables = useCallback((options = {}) => {
+    navigate('/tables', {
+      state: {
+        refreshTables: Date.now(),
+        highlightTableId: options.highlightTableId || null,
+      },
+    });
   }, [navigate]);
 
   return (

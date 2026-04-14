@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import PrinterDeleteModal from './PrinterDeleteModal.jsx';
 import {
@@ -157,6 +159,7 @@ export default function PrinterDetailPage() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
   const [loadedSig, setLoadedSig] = useState('');
   const [config, setConfig] = useState({ defaultPrinterId: null });
 
@@ -177,6 +180,7 @@ export default function PrinterDetailPage() {
   const [skipInit, setSkipInit] = useState(false);
   const [skipPhoenixCmd, setSkipPhoenixCmd] = useState(true);
   const [encodingMode, setEncodingMode] = useState('win1254');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [printOptions, setPrintOptions] = useState(() => normalizePrintOptions({}, 'receipt'));
 
   const showLegacyBar = type === 'bar';
@@ -243,8 +247,6 @@ export default function PrinterDetailPage() {
   const fetchDiscoveredPrinters = useCallback(async () => {
     const data = await api.getDiscoveredPrinters();
     const list = Array.isArray(data.printers) ? data.printers : [];
-    console.log('[PrinterDetailPage] discoveredPrinters:', list.length, 'adet');
-    list.forEach((p, i) => console.log(`  [${i}]`, JSON.stringify(p)));
     setDiscoveredPrinters(list);
     setDiscoveryUpdatedAt(data.updatedAt || '');
     setDiscoveryState(data.scanState || 'never_scanned');
@@ -324,7 +326,7 @@ export default function PrinterDetailPage() {
       snapshotState(prRes.printer, settings.config);
     } catch (e) {
       error(e.message || 'Yazıcı yüklenemedi');
-      navigate('/settings/printers');
+      navigate('/settings/printers', { replace: true });
     } finally {
       setLoading(false);
     }
@@ -382,8 +384,17 @@ export default function PrinterDetailPage() {
   };
 
   const handleBack = () => {
-    if (dirty && !window.confirm('Kaydedilmemiş değişiklikler var. Çıkmak istiyor musunuz?')) return;
-    navigate('/settings/printers');
+    if (dirty) {
+      requestConfirm({
+        title: 'Kaydedilmemiş değişiklikler var',
+        body: 'Yazıcı ayarlarındaki değişiklikler kaybolacak. Çıkmak istiyor musunuz?',
+        confirmLabel: 'Çık',
+        tone: 'danger',
+        onConfirm: () => navigate('/settings/printers', { replace: true }),
+      });
+      return;
+    }
+    navigate('/settings/printers', { replace: true });
   };
 
   const save = async () => {
@@ -481,30 +492,38 @@ export default function PrinterDetailPage() {
   };
 
   const resetToRecommendedDefaults = () => {
-    if (
-      !window.confirm(
-        'Çıktı ayarları (yazı tipi, boşluklar, toggles, mutfak grupları vb.) bu yazıcı tipi için önerilen varsayılanlara sıfırlanacak. Devam edilsin mi?',
-      )
-    ) {
-      return;
-    }
-    setPrintOptions(resetPrintOptionsForType(type));
-    setEscT('');
-    setSkipPhoenixCmd(true);
-    setEncodingMode('win1254');
-    success('Önerilen varsayılanlar uygulandı');
+    requestConfirm({
+      title: 'Çıktı ayarları sıfırlansın mı?',
+      body: 'Yazı tipi, boşluklar, roller ve mutfak grupları bu yazıcı tipi için önerilen varsayılanlara dönecek.',
+      confirmLabel: 'Sıfırla',
+      tone: 'danger',
+      onConfirm: () => {
+        setPrintOptions(resetPrintOptionsForType(type));
+        setEscT('');
+        setSkipPhoenixCmd(true);
+        setEncodingMode('win1254');
+        success('Önerilen varsayılanlar uygulandı');
+      },
+    });
   };
 
   const deactivate = async () => {
     if (isNew) return;
-    if (!window.confirm('Bu yazıcı pasifleştirilsin mi?')) return;
-    try {
-      await api.patchAdminPrinter(id, { is_active: false });
-      success('Yazıcı pasifleştirildi');
-      navigate('/settings/printers');
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    }
+    requestConfirm({
+      title: 'Yazıcı pasifleştirilsin mi?',
+      body: 'Bu yazıcı aktif yazıcı listesinden çıkarılacak. Daha sonra tekrar aktifleştirilebilir.',
+      confirmLabel: 'Pasifleştir',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.patchAdminPrinter(id, { is_active: false });
+          success('Yazıcı pasifleştirildi');
+          navigate('/settings/printers');
+        } catch (e) {
+          error(e.message || 'İşlem başarısız');
+        }
+      },
+    });
   };
 
   useEffect(() => {
@@ -668,64 +687,84 @@ export default function PrinterDetailPage() {
                 style={{ maxWidth: 120 }}
               />
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
-                ESC t kod sayfası <span style={{ fontWeight: 400 }}>— boş = varsayılan (32 / Windows-1254 Türkçe)</span>
-              </span>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>32 = Windows-1254 Türkçe &nbsp;·&nbsp; 12 = PC857 alternatif &nbsp;·&nbsp; 0 = PC437 (US)</span>
-              <input
-                className="input"
-                type="number"
-                min="0"
-                max="255"
-                value={escT}
-                onChange={(e) => setEscT(e.target.value)}
-                placeholder="32"
-                style={{ maxWidth: 120 }}
-              />
-            </label>
-            <ToggleRow
-              label="ESC @ başlatmayı atla"
-              checked={skipInit}
-              onChange={setSkipInit}
-            />
-            {skipInit && (
-              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                Bazı network yazıcılar ESC @ (sıfırlama) komutu sonrasında kod sayfasını varsayılana döndürür. Bu seçenek sorunu giderir.
-              </p>
-            )}
-            <ToggleRow
-              label="Phoenix FS komutunu atla (Çin yazıcı)"
-              checked={skipPhoenixCmd}
-              onChange={setSkipPhoenixCmd}
-            />
-            {skipPhoenixCmd && (
-              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                JP80H-UE ve benzeri Çin yapımı yazıcılarda "Chinese character mode" aktifken FS komutu ESC t'yi eziyor. Bu seçenek FS &#125; &amp; komutunu devre dışı bırakır.
-              </p>
-            )}
-
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Türkçe karakter kodlaması</span>
-              <select
-                className="input"
-                value={encodingMode}
-                onChange={(e) => {
-                  const nextMode = e.target.value;
-                  setEncodingMode(nextMode);
-                  if (nextMode === 'win1254') setSkipPhoenixCmd(true);
-                }}
-                style={{ fontSize: 13 }}
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setAdvancedOpen((v) => !v)}
+                style={{ width: '100%', justifyContent: 'space-between' }}
               >
-                <option value="win1254">Windows-1254 — ESC t 32 (önerilen)</option>
-                <option value="pc857">PC857 — ESC t 12 alternatif</option>
-              </select>
-              {encodingMode === 'win1254' && (
-                <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                  Mevcut işletme yazıcısı için doğru görünen ayar Windows-1254 ve ESC t 32'dir.
+                <span>Gelişmiş yazıcı ayarları</span>
+                <span>{advancedOpen ? 'Gizle' : 'Göster'}</span>
+              </button>
+              {!advancedOpen && (
+                <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                  Kod sayfası ve özel ESC/POS seçenekleri yalnızca yazıcı karakter sorunu yaşandığında değiştirilmelidir.
                 </p>
               )}
-            </label>
+              {advancedOpen && (
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 10 }}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
+                      ESC t kod sayfası <span style={{ fontWeight: 400 }}>— boş = varsayılan (32 / Windows-1254 Türkçe)</span>
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>32 = Windows-1254 Türkçe &nbsp;·&nbsp; 12 = PC857 alternatif &nbsp;·&nbsp; 0 = PC437 (US)</span>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      max="255"
+                      value={escT}
+                      onChange={(e) => setEscT(e.target.value)}
+                      placeholder="32"
+                      style={{ maxWidth: 120 }}
+                    />
+                  </label>
+                  <ToggleRow
+                    label="ESC @ başlatmayı atla"
+                    checked={skipInit}
+                    onChange={setSkipInit}
+                  />
+                  {skipInit && (
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                      Bazı network yazıcılar ESC @ (sıfırlama) komutu sonrasında kod sayfasını varsayılana döndürür. Bu seçenek sorunu giderir.
+                    </p>
+                  )}
+                  <ToggleRow
+                    label="Phoenix FS komutunu atla (Çin yazıcı)"
+                    checked={skipPhoenixCmd}
+                    onChange={setSkipPhoenixCmd}
+                  />
+                  {skipPhoenixCmd && (
+                    <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                      JP80H-UE ve benzeri Çin yapımı yazıcılarda "Chinese character mode" aktifken FS komutu ESC t'yi eziyor. Bu seçenek FS &#125; &amp; komutunu devre dışı bırakır.
+                    </p>
+                  )}
+
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Türkçe karakter kodlaması</span>
+                    <select
+                      className="input"
+                      value={encodingMode}
+                      onChange={(e) => {
+                        const nextMode = e.target.value;
+                        setEncodingMode(nextMode);
+                        if (nextMode === 'win1254') setSkipPhoenixCmd(true);
+                      }}
+                      style={{ fontSize: 13 }}
+                    >
+                      <option value="win1254">Windows-1254 — ESC t 32 (önerilen)</option>
+                      <option value="pc857">PC857 — ESC t 12 alternatif</option>
+                    </select>
+                    {encodingMode === 'win1254' && (
+                      <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                        Mevcut işletme yazıcısı için doğru görünen ayar Windows-1254 ve ESC t 32'dir.
+                      </p>
+                    )}
+                  </label>
+                </div>
+              )}
+            </div>
 
             <div
               style={{
@@ -999,8 +1038,17 @@ export default function PrinterDetailPage() {
         printerId={id}
         printerName={name}
         printerIsActive={isActive}
-        onAfterDeactivate={() => navigate('/settings/printers')}
-        onAfterDelete={() => navigate('/settings/printers')}
+        onAfterDeactivate={() => navigate('/settings/printers', { replace: true })}
+        onAfterDelete={() => navigate('/settings/printers', { replace: true })}
+      />
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
       />
       <style>{`
         @media (max-width: 768px) {

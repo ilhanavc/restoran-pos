@@ -6,6 +6,8 @@ import { useIncomingCall } from '../../context/IncomingCallContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
 import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
+import { getPaymentStateLabel, isOrderFullyPaid } from '../../utils/orderPaymentState.js';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import {
   RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2,
 } from 'lucide-react';
@@ -51,23 +53,34 @@ export default function TablesScreen({
   const [openTakeawayMenuId, setOpenTakeawayMenuId] = useState(null);
   const [takeawayConfirmTarget, setTakeawayConfirmTarget] = useState(null);
   const [takeawayActionLoading, setTakeawayActionLoading] = useState(null);
+  const [recentlyMovedTableId, setRecentlyMovedTableId] = useState(null);
+  const [tableConfirm, setTableConfirm] = useState(null);
   const takeawayMenuRef = useRef(null);
   const toast = useToast();
   const { openOrder: openIncomingCallOrder } = useIncomingCall() || {};
   const location = useLocation();
   const { isConnected, subscribe } = useSocket();
+  const highlightedTableId = location.state?.highlightTableId || null;
+  const activeHighlightTableId = recentlyMovedTableId || highlightedTableId;
 
   const loadTables = useCallback(async () => {
     try {
       const data = await api.getTables();
       setAreas(data);
-      if (!activeArea && data.length > 0) setActiveArea(data[0].id);
+      const highlightedArea = activeHighlightTableId
+        ? data.find((area) => (area.tables || []).some((table) => table.id === activeHighlightTableId))
+        : null;
+      if (highlightedArea) {
+        setActiveArea(highlightedArea.id);
+      } else if (!activeArea && data.length > 0) {
+        setActiveArea(data[0].id);
+      }
     } catch (err) {
       toast.error('Masalar yüklenemedi');
     } finally {
       setLoading(false);
     }
-  }, [activeArea, toast]);
+  }, [activeArea, activeHighlightTableId, toast]);
 
   const loadTakeaway = useCallback(async () => {
     if (!showTakeawaySidebar) return;
@@ -121,16 +134,23 @@ export default function TablesScreen({
   }, []);
 
   useEffect(() => {
-    if (!openTakeawayMenuId && !takeawayConfirmTarget && !tableCancelTarget) return undefined;
+    if (!recentlyMovedTableId) return undefined;
+    const timer = setTimeout(() => setRecentlyMovedTableId(null), 6000);
+    return () => clearTimeout(timer);
+  }, [recentlyMovedTableId]);
+
+  useEffect(() => {
+    if (!openTakeawayMenuId && !takeawayConfirmTarget && !tableCancelTarget && !tableConfirm) return undefined;
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
       if (!tableCancelLoading) setTableCancelTarget(null);
       setOpenTakeawayMenuId(null);
       setTakeawayConfirmTarget(null);
+      setTableConfirm(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openTakeawayMenuId, takeawayConfirmTarget, tableCancelTarget, tableCancelLoading]);
+  }, [openTakeawayMenuId, takeawayConfirmTarget, tableCancelTarget, tableConfirm, tableCancelLoading]);
 
   useEffect(() => {
     if (!openTakeawayMenuId) return undefined;
@@ -189,6 +209,18 @@ export default function TablesScreen({
 
   const currentArea = areas.find(a => a.id === activeArea);
 
+  const performTableTransfer = async (sourceTableId, targetTable) => {
+    try {
+      await api.transferTable(sourceTableId, targetTable.id);
+      toast.success('Masa transfer edildi');
+      setTransferMode(null);
+      setRecentlyMovedTableId(targetTable.id);
+      loadTables();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   const handleTableClick = async (table) => {
     const areaTables = currentArea?.tables || [];
     if (transferMode) {
@@ -202,17 +234,34 @@ export default function TablesScreen({
         setTransferMode(null);
         return;
       }
+      if (table.status !== 'empty') {
+        toast.error(table.status === 'reserved' ? 'Rezerve masaya taşıma yapılamaz' : 'Hedef masa boş olmalı');
+        return;
+      }
       const fromLabel = masaLabelInArea(sourceTable, areaTables);
       const toLabel = masaLabelInArea(table, areaTables);
-      if (!window.confirm(`${fromLabel} → ${toLabel} masasına taşınsın mı?`)) return;
-      try {
-        await api.transferTable(transferMode, table.id);
-        toast.success('Masa transfer edildi');
-        setTransferMode(null);
-        loadTables();
-      } catch (err) {
-        toast.error(err.message);
-      }
+      setTableConfirm({
+        title: 'Masa taşınsın mı?',
+        body: `${fromLabel} siparişi ${toLabel} masasına taşınacak.`,
+        confirmLabel: 'Masayı Taşı',
+        tone: 'primary',
+        onConfirm: () => performTableTransfer(transferMode, table),
+      });
+      return;
+    }
+    if (table.status === 'reserved' && !table.current_order_id) {
+      const label = masaLabelInArea(table, areaTables);
+      setTableConfirm({
+        title: 'Rezerve masa açılsın mı?',
+        body: `${label} rezerve görünüyor. Rezervasyonu kullanarak sipariş açılacak.`,
+        confirmLabel: 'Sipariş Aç',
+        tone: 'primary',
+        onConfirm: () => onOpenOrder({
+          ...table,
+          area_name: currentArea?.name,
+          displayName: masaLabelInArea(table, areaTables),
+        }),
+      });
       return;
     }
     onOpenOrder({
@@ -234,15 +283,14 @@ export default function TablesScreen({
     };
   };
 
-  const isTableBillPaid = (table) => (
-    table?.status === 'occupied'
-    && Boolean(table?.current_order_id)
-    && Number(table?.order_total || 0) > 0
-    && Number(table?.order_paid_total || 0) + 0.02 >= Number(table?.order_total || 0)
-  );
+  const isTableBillPaid = (table) => table?.status === 'occupied' && isOrderFullyPaid(table);
 
   const handleTableMenuAction = async (action, table, e) => {
-    e.stopPropagation();
+    e?.stopPropagation();
+    if (action === 'open') {
+      handleTableClick(table);
+      return;
+    }
     if (action === 'transfer') {
       if (!table.current_order_id) {
         toast.error('Taşınacak sipariş yok');
@@ -529,6 +577,7 @@ export default function TablesScreen({
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gridAutoRows: 180,
                 gap: 18,
               }}
             >
@@ -537,6 +586,7 @@ export default function TablesScreen({
                 const isOccupied = table.status === 'occupied';
                 const isReserved = table.status === 'reserved';
                 const isTransferSource = transferMode === table.id;
+                const isHighlighted = activeHighlightTableId === table.id;
                 const hasReady = isOccupied && (Number(table.has_ready_items) === 1 || table.has_ready_items === true);
                 const isPaid = isOccupied
                   && Number(table.order_total || 0) > 0
@@ -585,11 +635,14 @@ export default function TablesScreen({
                       borderRadius: 'var(--radius-md)',
                       padding: '22px',
                       cursor: 'pointer',
-                      transition: 'all var(--transition-fast)',
+                      transition: 'border-color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast)',
                       position: 'relative',
-                      minHeight: 150,
+                      height: 180,
+                      boxSizing: 'border-box',
+                      overflow: 'hidden',
                       display: 'flex',
                       flexDirection: 'column',
+                      boxShadow: isHighlighted ? '0 0 0 3px var(--accent-muted), var(--shadow-lg)' : 'var(--shadow-soft)',
                     }}
                     onMouseEnter={e => {
                       if (!isTransferSource) {
@@ -658,7 +711,7 @@ export default function TablesScreen({
                           <button
                             type="button"
                             className="btn btn-ghost btn-icon"
-                            style={{ padding: 4, minHeight: 'auto', flexShrink: 0 }}
+                            style={{ flexShrink: 0 }}
                             title="İşlemler"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -749,6 +802,8 @@ export default function TablesScreen({
             )}
             {takeawayOrders.map((o) => {
               const isOut = Boolean(o.takeaway_out_at);
+              const paymentState = getPaymentStateLabel(o);
+              const canMarkDelivered = isOut;
               const isBusy = takeawayActionLoading?.orderId === o.id;
               const isPrinting = isBusy && takeawayActionLoading?.action === 'print';
               const isCancelling = isBusy && takeawayActionLoading?.action === 'cancel';
@@ -952,6 +1007,22 @@ export default function TablesScreen({
                         <Clock size={11} />
                         {isOut ? 'Teslimatta' : 'Hazırlanıyor'}
                       </span>
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          borderRadius: 8,
+                          padding: '4px 8px',
+                          border: `1px solid ${paymentState.color}`,
+                          background: paymentState.bg,
+                          color: paymentState.color,
+                          fontSize: 10,
+                          fontWeight: 850,
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {paymentState.label}
+                      </span>
                     </div>
                   </button>
                   <div
@@ -982,15 +1053,15 @@ export default function TablesScreen({
                     </button>
                     <button
                       type="button"
-                      disabled={!isOut || isBusy}
+                      disabled={!canMarkDelivered || isBusy}
                       onClick={(e) => handleTakeawayDelivery(o.id, 'delivered', e)}
                       style={{
                         ...btnBase,
-                        background: isOut ? 'var(--success-muted)' : 'var(--bg-tertiary)',
-                        color: isOut ? 'var(--success)' : 'var(--text-muted)',
-                        borderColor: isOut ? 'var(--success)' : 'var(--border)',
-                        cursor: isOut && !isBusy ? 'pointer' : 'not-allowed',
-                        opacity: isOut && !isBusy ? 1 : 0.65,
+                        background: canMarkDelivered ? 'var(--success-muted)' : 'var(--bg-tertiary)',
+                        color: canMarkDelivered ? 'var(--success)' : 'var(--text-muted)',
+                        borderColor: canMarkDelivered ? 'var(--success)' : 'var(--border)',
+                        cursor: canMarkDelivered && !isBusy ? 'pointer' : 'not-allowed',
+                        opacity: canMarkDelivered && !isBusy ? 1 : 0.65,
                       }}
                     >
                       {isMarkingDelivered ? 'İşleniyor...' : 'Teslim Edildi'}
@@ -1052,26 +1123,39 @@ export default function TablesScreen({
             </div>
             <div className="modal-body" style={{ paddingTop: 8 }}>
               <div className="table-action-sheet-grid">
-                {actionTable.current_order_id && (
+                {isTableBillPaid(actionTable) ? (
                   <button
                     type="button"
-                    style={actionTileBase}
-                    onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
+                    style={{
+                      ...actionTileBase,
+                      gridColumn: '1 / -1',
+                      minHeight: 72,
+                      borderColor: 'var(--success)',
+                      color: 'var(--success)',
+                      background: 'var(--success-muted)',
+                    }}
+                    onClick={(e) => handleTableMenuAction('close-paid-table', actionTable, e)}
                   >
-                    <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
-                    Masayı Taşı
+                    <CheckCircle2 size={26} color="var(--success)" strokeWidth={2} />
+                    Masayı Kapat
                   </button>
-                )}
-                {onPayment && actionTable.current_order_id && (
+                ) : onPayment && actionTable.current_order_id ? (
                   <button
                     type="button"
-                    style={actionTileBase}
+                    style={{
+                      ...actionTileBase,
+                      gridColumn: '1 / -1',
+                      minHeight: 72,
+                      borderColor: 'var(--accent)',
+                      color: 'var(--accent)',
+                      background: 'var(--accent-muted)',
+                    }}
                     onClick={(e) => handleTableMenuAction('payment', actionTable, e)}
                   >
                     <CreditCard size={26} color="var(--accent)" strokeWidth={2} />
                     Öde
                   </button>
-                )}
+                ) : null}
                 {onQuickPayment && actionTable.current_order_id && (
                   <button
                     type="button"
@@ -1082,6 +1166,16 @@ export default function TablesScreen({
                     Hızlı Öde
                   </button>
                 )}
+                {actionTable.current_order_id && (
+                  <button
+                    type="button"
+                    style={actionTileBase}
+                    onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
+                  >
+                    <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
+                    Masayı Taşı
+                  </button>
+                )}
                 <button
                   type="button"
                   style={actionTileBase}
@@ -1090,25 +1184,12 @@ export default function TablesScreen({
                   <Printer size={26} color="var(--accent)" strokeWidth={2} />
                   Yazdır
                 </button>
-                {isTableBillPaid(actionTable) && (
-                  <button
-                    type="button"
-                    style={{
-                      ...actionTileBase,
-                      borderColor: 'var(--success)',
-                      color: 'var(--success)',
-                      background: 'var(--success-muted)',
-                    }}
-                    onClick={(e) => handleTableMenuAction('close-paid-table', actionTable, e)}
-                  >
-                    <CheckCircle2 size={26} color="var(--success)" strokeWidth={2} />
-                    Masayı Kapat
-                  </button>
-                )}
                 <button
                   type="button"
                   style={{
                     ...actionTileBase,
+                    gridColumn: '1 / -1',
+                    minHeight: 68,
                     borderColor: 'var(--danger)',
                     color: 'var(--danger)',
                     background: 'var(--danger-muted)',
@@ -1123,6 +1204,20 @@ export default function TablesScreen({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!tableConfirm}
+        title={tableConfirm?.title}
+        body={tableConfirm?.body}
+        confirmLabel={tableConfirm?.confirmLabel}
+        tone={tableConfirm?.tone}
+        onCancel={() => setTableConfirm(null)}
+        onConfirm={() => {
+          const onConfirm = tableConfirm?.onConfirm;
+          setTableConfirm(null);
+          onConfirm?.();
+        }}
+      />
 
       {tableCancelTarget && (
         <div

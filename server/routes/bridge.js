@@ -15,6 +15,18 @@ const DISCOVERY_STATES = new Set([
   'bridge_unreachable',
   'auth_error',
 ]);
+const PRINT_JOB_LEASE_SECONDS = 90;
+const PRINT_JOB_ERROR_CODES = new Set([
+  'printer_missing',
+  'printer_inactive',
+  'network_timeout',
+  'usb_print_failed',
+  'unsupported_connection',
+  'printer_config_missing',
+  'render_failed',
+  'api_error',
+  'unknown_error',
+]);
 
 function parsePayload(raw) {
   if (!raw) return null;
@@ -71,6 +83,10 @@ function mapJobRow(row) {
     printed_at: row.printed_at,
     claimed_at: row.claimed_at || null,
     claimed_by: row.claimed_by || null,
+    claimed_until: row.claimed_until || null,
+    attempt_count: Number(row.attempt_count) || 0,
+    last_attempt_at: row.last_attempt_at || null,
+    last_error_code: row.last_error_code || null,
   };
 }
 
@@ -309,7 +325,7 @@ router.get('/print-jobs', (req, res) => {
     let sql = `SELECT * FROM print_jobs WHERE business_id = ? AND status = ?`;
     const params = [req.businessId, status];
     if (unclaimedOnly && status === 'pending') {
-      sql += ` AND claimed_at IS NULL`;
+      sql += ` AND (claimed_until IS NULL OR datetime(claimed_until) <= datetime('now'))`;
     }
     sql += ` ORDER BY datetime(created_at) ASC LIMIT ?`;
     params.push(limit);
@@ -324,22 +340,34 @@ router.get('/print-jobs', (req, res) => {
 
 /**
  * POST /api/bridge/print-jobs/:id/claim
- * Atomik: yalnızca pending ve claimed_at boşsa claim eder.
+ * Atomik: yalnızca pending ve claim lease boş/süresi geçmişse claim eder.
  */
 router.post('/print-jobs/:id/claim', (req, res) => {
   try {
     const claimId = String(req.body?.claim_id || 'store-bridge').slice(0, 128);
+    const leaseSecondsRaw = parseInt(req.body?.lease_seconds || PRINT_JOB_LEASE_SECONDS, 10);
+    const leaseSeconds = Math.min(Math.max(Number.isFinite(leaseSecondsRaw) ? leaseSecondsRaw : PRINT_JOB_LEASE_SECONDS, 30), 600);
     const info = db
       .prepare(
-        `UPDATE print_jobs SET claimed_at = datetime('now'), claimed_by = ?
-         WHERE id = ? AND business_id = ? AND status = 'pending' AND claimed_at IS NULL`,
+        `UPDATE print_jobs
+         SET claimed_at = datetime('now'),
+             claimed_by = ?,
+             claimed_until = datetime('now', '+' || ? || ' seconds'),
+             attempt_count = COALESCE(attempt_count, 0) + 1,
+             last_attempt_at = datetime('now'),
+             error_message = NULL,
+             last_error_code = NULL
+         WHERE id = ?
+           AND business_id = ?
+           AND status = 'pending'
+           AND (claimed_until IS NULL OR datetime(claimed_until) <= datetime('now'))`,
       )
-      .run(claimId, req.params.id, req.businessId);
+      .run(claimId, leaseSeconds, req.params.id, req.businessId);
 
     if (info.changes === 0) {
       const row = db.prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`).get(req.params.id, req.businessId);
       if (!row) return res.status(404).json({ error: 'İş bulunamadı' });
-      return res.status(409).json({ error: 'claim_failed', reason: 'not_pending_or_already_claimed', job: mapJobRow(row) });
+      return res.status(409).json({ error: 'claim_failed', reason: 'not_pending_or_lease_active', job: mapJobRow(row) });
     }
 
     const row = db.prepare(`SELECT * FROM print_jobs WHERE id = ?`).get(req.params.id);
@@ -357,21 +385,50 @@ router.post('/print-jobs/:id/claim', (req, res) => {
 router.patch('/print-jobs/:id', (req, res) => {
   try {
     const { status, error_message: errMsg } = req.body || {};
+    const claimId = req.body?.claim_id != null ? String(req.body.claim_id).slice(0, 128) : null;
+    const rawErrorCode = req.body?.error_code != null ? String(req.body.error_code).trim() : '';
+    const errorCode = PRINT_JOB_ERROR_CODES.has(rawErrorCode) ? rawErrorCode : rawErrorCode ? 'unknown_error' : null;
     if (status !== 'printed' && status !== 'failed') {
       return res.status(400).json({ error: 'status: printed veya failed olmalı' });
     }
 
     const existing = db.prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`).get(req.params.id, req.businessId);
     if (!existing) return res.status(404).json({ error: 'İş bulunamadı' });
+    if (existing.status !== 'pending') {
+      return res.status(409).json({ error: 'invalid_job_state', reason: 'job_not_pending', job: mapJobRow(existing) });
+    }
+    if (claimId && existing.claimed_by && existing.claimed_by !== claimId) {
+      return res.status(409).json({ error: 'claim_mismatch', reason: 'claimed_by_another_bridge', job: mapJobRow(existing) });
+    }
+    const claimedUntilMs = existing.claimed_until
+      ? new Date(`${String(existing.claimed_until).replace(' ', 'T')}Z`).getTime()
+      : NaN;
+    if (Number.isFinite(claimedUntilMs) && claimedUntilMs <= Date.now()) {
+      return res.status(409).json({ error: 'claim_expired', reason: 'lease_expired', job: mapJobRow(existing) });
+    }
 
     if (status === 'printed') {
       db.prepare(
-        `UPDATE print_jobs SET status = 'printed', printed_at = datetime('now'), error_message = NULL WHERE id = ? AND business_id = ?`,
+        `UPDATE print_jobs
+         SET status = 'printed',
+             printed_at = datetime('now'),
+             error_message = NULL,
+             last_error_code = NULL,
+             claimed_until = NULL
+         WHERE id = ? AND business_id = ?`,
       ).run(req.params.id, req.businessId);
     } else {
       const em = errMsg != null && String(errMsg).trim() ? String(errMsg).trim() : 'Yazdırma başarısız';
-      db.prepare(`UPDATE print_jobs SET status = 'failed', error_message = ? WHERE id = ? AND business_id = ?`).run(
+      db.prepare(
+        `UPDATE print_jobs
+         SET status = 'failed',
+             error_message = ?,
+             last_error_code = ?,
+             claimed_until = NULL
+         WHERE id = ? AND business_id = ?`,
+      ).run(
         em,
+        errorCode,
         req.params.id,
         req.businessId,
       );

@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Pencil, Printer, TestTube2, Trash2, UserMinus } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import PrinterDeleteModal from './PrinterDeleteModal.jsx';
 import { connectionSummary, listTypeLabel } from './printerDefaults.js';
@@ -30,6 +32,7 @@ export default function PrinterListPage() {
   const [testingId, setTestingId] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [savingAdjRule, setSavingAdjRule] = useState(false);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -78,14 +81,21 @@ export default function PrinterListPage() {
   };
 
   const deactivate = async (p) => {
-    if (!window.confirm(`"${p.name}" pasifleştirilsin mi? Liste dışında kalır; sonra tekrar açılabilir.`)) return;
-    try {
-      await api.patchAdminPrinter(p.id, { is_active: false });
-      success('Yazıcı pasifleştirildi');
-      await load();
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    }
+    requestConfirm({
+      title: 'Yazıcı pasifleştirilsin mi?',
+      body: `"${p.name}" aktif yazıcı listesinden çıkarılacak. Daha sonra tekrar aktifleştirilebilir.`,
+      confirmLabel: 'Pasifleştir',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.patchAdminPrinter(p.id, { is_active: false });
+          success('Yazıcı pasifleştirildi');
+          await load();
+        } catch (e) {
+          error(e.message || 'İşlem başarısız');
+        }
+      },
+    });
   };
 
   return (
@@ -314,6 +324,15 @@ export default function PrinterListPage() {
         printerIsActive={deleteTarget?.isActive !== false}
         onAfterDeactivate={load}
         onAfterDelete={load}
+      />
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
       />
     </div>
   );

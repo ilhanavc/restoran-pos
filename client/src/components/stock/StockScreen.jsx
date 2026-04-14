@@ -3,6 +3,8 @@ import { Package, Plus, X, TrendingUp, TrendingDown, AlertTriangle, Edit2, Rotat
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useAuth } from '../../context/AuthContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 
 const MOVEMENT_TYPES = {
   in:         { label: 'Giriş',      color: 'var(--success)', icon: TrendingUp },
@@ -149,6 +151,7 @@ export default function StockScreen() {
   const toast = useToast();
   const { hasRole } = useAuth();
   const isAdmin = hasRole('admin');
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -161,9 +164,16 @@ export default function StockScreen() {
   useEffect(() => { load(); }, [load]);
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Bu stok kalemini silmek istiyor musunuz?')) return;
-    try { await api.deleteStockItem(id); load(); toast.success('Silindi'); }
-    catch (err) { toast.error(err.message); }
+    requestConfirm({
+      title: 'Stok kalemi silinsin mi?',
+      body: 'Bu stok kalemi listeden kaldırılacak. Geçmiş hareket kayıtları etkilenmeyebilir.',
+      confirmLabel: 'Sil',
+      tone: 'danger',
+      onConfirm: async () => {
+        try { await api.deleteStockItem(id); load(); toast.success('Silindi'); }
+        catch (err) { toast.error(err.message); }
+      },
+    });
   };
 
   const lowStock = items.filter(i => i.min_quantity > 0 && i.quantity <= i.min_quantity);
@@ -277,6 +287,15 @@ export default function StockScreen() {
           onSave={() => { setMovementModal(null); load(); toast.success('Hareket kaydedildi'); }}
         />
       )}
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

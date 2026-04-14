@@ -73,6 +73,11 @@ describe('POST /api/orders', () => {
     // Mutfak ürünleri otomatik gönderilir → status 'new' veya 'in_kitchen'
     expect(['new', 'in_kitchen', 'preparing']).toContain(res.body.status);
     expect(res.body.grand_total).toBe(160); // 80 * 2
+    expect(res.body.table_name_snapshot).toBe('Masa 1');
+    expect(res.body.user_name_snapshot).toBe('Test Admin');
+    expect(res.body.items[0].category_id_snapshot).toBe(seeds.categoryId);
+    expect(res.body.items[0].category_name_snapshot).toBe('Ana Yemek');
+    expect(res.body.items[0].printer_target_snapshot).toBe('kitchen');
   });
 
   it('token olmadan 401 döner', async () => {
@@ -88,6 +93,19 @@ describe('POST /api/orders', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({ table_id: seeds.tableId, order_type: 'gecersiz', items: [] });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('DB tarafında desteklenmeyen delivery order_type değerini API seviyesinde reddeder', async () => {
+    const res = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'delivery',
+        items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
+      });
 
     expect(res.status).toBe(400);
   });
@@ -201,15 +219,52 @@ describe('PATCH /api/orders/:id/status', () => {
     expect(res.status).toBe(200);
   });
 
-  it('geçersiz status değeri hata döner (400 veya 500)', async () => {
+  it('geçersiz status değeri 400 döner', async () => {
     if (!orderId) return;
     const res = await request(app)
       .patch(`/api/orders/${orderId}/status`)
       .set('Authorization', authHeader)
       .send({ status: 'gecersiz_durum' });
 
-    // Zod validation 400, SQLite CHECK constraint 500 dönebilir — ikisi de başarısızlık
-    expect([400, 500]).toContain(res.status);
+    expect(res.status).toBe(400);
     expect(res.body).toHaveProperty('error');
+  });
+});
+
+describe('PATCH /api/orders/:orderId/items/:itemId', () => {
+  let orderId;
+  let itemId;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'dine_in',
+        items: [{ product_id: seeds.productId, quantity: 2, modifiers: [] }],
+      });
+    orderId = res.body?.id;
+    itemId = res.body?.items?.[0]?.id;
+  });
+
+  it('geçersiz ürün adedi için 400 döner', async () => {
+    if (!orderId || !itemId) return;
+    const res = await request(app)
+      .patch(`/api/orders/${orderId}/items/${itemId}`)
+      .set('Authorization', authHeader)
+      .send({ quantity: -1 });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('geçersiz ürün status değerini 400 ile reddeder', async () => {
+    if (!orderId || !itemId) return;
+    const res = await request(app)
+      .patch(`/api/orders/${orderId}/items/${itemId}`)
+      .set('Authorization', authHeader)
+      .send({ status: 'mutfakta_kayboldu' });
+
+    expect(res.status).toBe(400);
   });
 });

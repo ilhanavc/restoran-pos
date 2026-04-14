@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>00 - Genel Repo Denetimi</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 14mm 18mm;
+    }
+
+    :root {
+      color-scheme: light;
+      --ink: #16202a;
+      --muted: #607080;
+      --line: #d9e0e7;
+      --soft: #f5f7fa;
+      --accent: #0b6b6e;
+      --accent-2: #b13f2b;
+      --warn: #b7791f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 10.4pt;
+      line-height: 1.54;
+    }
+
+    .cover {
+      border-bottom: 4px solid var(--accent);
+      margin-bottom: 22px;
+      padding: 10px 0 18px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .cover h1 {
+      border: 0;
+      color: #0e252b;
+      font-size: 25pt;
+      line-height: 1.12;
+      margin: 0 0 10px;
+      padding: 0;
+    }
+
+    .meta {
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 9.5pt;
+    }
+
+    .content {
+      max-width: 100%;
+    }
+
+    h1, h2, h3, h4 {
+      color: #102a32;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    h1 {
+      border-bottom: 2px solid var(--line);
+      font-size: 20pt;
+      margin: 24px 0 12px;
+      padding-bottom: 8px;
+    }
+
+    h2 {
+      border-left: 5px solid var(--accent);
+      font-size: 15.5pt;
+      margin: 22px 0 10px;
+      padding-left: 10px;
+    }
+
+    h3 {
+      color: var(--accent-2);
+      font-size: 12.5pt;
+      margin: 16px 0 8px;
+    }
+
+    h4 {
+      font-size: 11pt;
+      margin: 12px 0 6px;
+    }
+
+    p {
+      margin: 7px 0;
+    }
+
+    ul, ol {
+      margin: 7px 0 10px 21px;
+      padding: 0;
+    }
+
+    li {
+      margin: 3px 0;
+      padding-left: 2px;
+    }
+
+    code {
+      background: #eef3f6;
+      border: 1px solid #d7e1e8;
+      border-radius: 4px;
+      color: #143947;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9.2pt;
+      padding: 1px 4px;
+    }
+
+    pre {
+      background: #101820;
+      border-radius: 6px;
+      color: #f3f7fb;
+      font-size: 8.7pt;
+      line-height: 1.45;
+      margin: 10px 0 14px;
+      overflow: hidden;
+      padding: 11px 12px;
+      white-space: pre-wrap;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
+    }
+
+    .table-wrap {
+      margin: 11px 0 15px;
+      overflow: visible;
+      page-break-inside: avoid;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 8.2pt;
+      table-layout: fixed;
+    }
+
+    th {
+      background: #16323a;
+      color: #ffffff;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 6px 7px;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: var(--soft);
+    }
+
+    strong {
+      color: #0d2830;
+    }
+
+    .page-break {
+      break-before: page;
+      page-break-before: always;
+    }
+
+    .package h1:first-child {
+      margin-top: 0;
+    }
+
+    @media print {
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div class="eyebrow">Restoran POS V3 Audit Raporu</div>
+    <h1>00 - Genel Repo Denetimi</h1>
+    <div class="meta">
+      <span>Olusturulma: 14 Nisan 2026 19:49</span>
+      <span>Kaynak: docs/audit</span>
+      <span>Format: Tekil rapor</span>
+    </div>
+  </section>
+  <main class="content ">
+    <h1>00 - Genel Repo Denetimi</h1>
+<p>Tarih: 2026-04-13 Kapsam: Genel repo taraması, mimari çıkarımı, kritik akışların ilk değerlendirmesi. Sınır: Bu raporda kod davranışı değiştirilmedi; yalnızca denetim dokümanı oluşturuldu.</p>
+<h2>1. Proje özeti</h2>
+<p>Bu repo, restoran POS kullanım senaryosu için masa, sipariş, mutfak, ödeme, müşteri, stok, rezervasyon, caller ID ve yazıcı akışlarını kapsayan masaüstü/web hibrit bir üründür.</p>
+<p>Ana mimari:</p>
+<ul>
+<li>Frontend: React 18 + Vite. Giriş dosyaları <code>client/src/main.jsx</code> ve <code>client/src/App.jsx</code>. Route/top-level ekran orkestrasyonu <code>client/src/App.jsx:46</code> sonrası tek dosyada yoğunlaşmış.</li>
+<li>Backend: Node.js + Express + SQLite. API entrypoint <code>server/index.js</code>; route kayıtları <code>server/index.js:111-127</code>.</li>
+<li>Veritabanı: <code>better-sqlite3</code>, WAL modu ve foreign key açık. Kanıt: <code>server/config/database.js:11-16</code>.</li>
+<li>Desktop shell: Electron, Express backend&#39;i child process olarak başlatıyor. Kanıt: <code>electron/main.cjs:1-5</code>, child env kurulumu <code>electron/main.cjs:170-204</code>.</li>
+<li>Yerel donanım köprüsü: <code>store-bridge</code>, API&#39;den print job poll ediyor ve USB/network yazıcıya ESC/POS buffer gönderiyor. Kanıt: <code>store-bridge/jobs/poller.js:5-13</code>, <code>store-bridge/jobs/poller.js:72-99</code>.</li>
+<li>Yazdırma modeli: POS backend <code>print_jobs</code> üretir; StoreBridge claim edip fiziksel yazıcıya yollar. Kanıt: <code>server/services/printJobs.js:50-82</code>, <code>store-bridge/jobs/poller.js:19-31</code>.</li>
+</ul>
+<p>Kritik iş akışları:</p>
+<ul>
+<li>Auth: JWT bearer token, kullanıcı/rol DB&#39;den okunuyor. Kanıt: <code>server/middleware/auth.js:5-33</code>.</li>
+<li>Business scoping: route middleware <code>req.businessId</code> atıyor. Kanıt: <code>server/middleware/auth.js:45-49</code>.</li>
+<li>Sipariş: <code>server/routes/orders.js</code> hem listeleme, paket sipariş, mutfak job üretimi, item lifecycle gibi çok sayıda davranışı taşıyor. Kanıt: <code>server/routes/orders.js:1-18</code>, <code>server/routes/orders.js:52-67</code>.</li>
+<li>Ödeme: tekil ve parçalı ödeme, masa kapatma, müşteri istatistiği ve fiş job üretimi aynı route dosyasında. Kanıt: <code>server/routes/payments.js:164-183</code>, <code>server/routes/payments.js:197-240</code>.</li>
+<li>Yazıcı kod sayfası: StoreBridge renderer içinde PC857 ve Windows-1254 desteği var. Kanıt: <code>store-bridge/printers/renderers.js:16-28</code>, <code>store-bridge/printers/renderers.js:38-44</code>, <code>store-bridge/printers/renderers.js:115-154</code>, <code>store-bridge/printers/renderers.js:278-287</code>.</li>
+</ul>
+<h2>2. Güçlü yönler</h2>
+<ul>
+<li>P1 olumlu: Yazdırma, doğrudan HTTP mock&#39;tan job queue + bridge modeline taşınmış görünüyor. <code>client/src/services/api.js:195-199</code> eski <code>/api/print/*</code> uçlarının deprecated olduğunu açıkça söylüyor; aktif akışın <code>print_jobs + StoreBridge</code> olduğu not edilmiş. Bu doğru mimari yöndür.</li>
+<li>P1 olumlu: Print job idempotency düşünülmüş. <code>server/services/printJobs.js:63-80</code> <code>INSERT OR IGNORE</code> ve <code>idempotency_key</code> kullanıyor; mutfak job&#39;larında hash tabanlı anahtar var (<code>server/services/printJobs.js:168-173</code>).</li>
+<li>P1 olumlu: Backend startup&#39;ta production JWT secret zorunluluğu var. <code>server/config/index.js:22-27</code> production&#39;da fallback secret ile açılışı engelliyor.</li>
+<li>P1 olumlu: API 404&#39;leri JSON dönüyor; SPA fallback&#39;in API hatalarını HTML&#39;e çevirmemesi için özel blok var. Kanıt: <code>server/index.js:129-139</code>.</li>
+<li>P2 olumlu: Server test klasörü mevcut ve iş kritik alanlardan bazılarını kapsıyor: auth middleware, validation, migration idempotency, order transaction, printer encoding, print job idempotency ve integration testleri. Kanıt: <code>server/tests/*.test.js</code>.</li>
+<li>P2 olumlu: Client build üretilebiliyor. <code>npm run build --prefix client</code> başarılı bitti; ancak bundle boyutu uyarısı var.</li>
+</ul>
+<h2>3. Kritik problemler</h2>
+<h3>P0 - Net P0 bulunmadı</h3>
+<p>Bu ilk genel taramada uygulamayı doğrudan veri kaybına, yetkisiz toplu erişime veya açılışın tamamen imkansız hale gelmesine götüren kanıtlanmış P0 saptanmadı. Ancak aşağıdaki P1&#39;ler üretim kalitesi için sert biçimde ele alınmalı.</p>
+<h3>P1 - Server test komutu çalışmıyor</h3>
+<p>Kanıt:</p>
+<ul>
+<li>Root test script&#39;i server testine delegasyon yapıyor: <code>package.json:13</code>.</li>
+<li>Server test script&#39;i <code>vitest run</code>: <code>server/package.json:9</code>.</li>
+<li><code>vitest</code> devDependency olarak tanımlı: <code>server/package.json:27-30</code>.</li>
+<li>Çalıştırılan komut sonucu: <code>npm test --prefix server</code> -&gt; <code>&#39;vitest&#39; is not recognized as an internal or external command</code>.</li>
+</ul>
+<p>Etki: Repo testleri varmış gibi görünüyor ama mevcut çalışma ortamında test kapısı kırık. Bu, yapılan her düzeltmenin regresyon riskini yükseltir. Özellikle POS, ödeme ve yazdırma gibi para/donanım akışlarında kabul edilemez.</p>
+<p>Öneri: <code>server/node_modules</code> bağımlılıklarını temiz ve eksiksiz kur; CI/yerel doğrulama için root <code>npm test</code> komutunu güvenilir hale getir. Ek olarak lockfile ve workspace stratejisini sadeleştir; şu anda root, client, server, store-bridge ayrı package-lock ile yönetiliyor.</p>
+<h3>P1 - Monolitik dosyalar ürün kalitesini düşürüyor</h3>
+<p>Kanıtlanan büyük dosyalar:</p>
+<ul>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: 1428 satır.</li>
+<li><code>store-bridge/printers/renderers.js</code>: 1271 satır.</li>
+<li><code>client/src/components/settings/PrinterDetailPage.jsx</code>: 972 satır.</li>
+<li><code>electron/main.cjs</code>: 860 satır.</li>
+<li><code>server/migrations/run.js</code>: 673 satır.</li>
+<li><code>server/routes/orders.js</code>: 627 satır.</li>
+<li><code>client/src/components/payments/PaymentScreen.jsx</code>: 497 satır.</li>
+<li><code>server/routes/payments.js</code>: 389 satır.</li>
+</ul>
+<p>Etki: Bu dosyalar tek sorumluluk ilkesini zorluyor. POS ekranı, ödeme, yazıcı ayarı ve ESC/POS rendering gibi en riskli alanlar aynı zamanda en büyük ve en kırılgan dosyalar. Yeni özellik ekleme maliyeti artar; küçük düzeltmeler yan etki üretir.</p>
+<p>Öneri: Öncelik sırası: <code>OrderScreen.jsx</code>, <code>renderers.js</code>, <code>PrinterDetailPage.jsx</code>, <code>electron/main.cjs</code>. Her biri için önce davranışı sabitleyen test/snapshot, sonra küçük servis/hook/component ayrıştırması yapılmalı.</p>
+<h3>P1 - Yazdırma karakter seti karmaşıklığı tek dosyada yoğun ve cihaz bağımlı</h3>
+<p>Kanıt:</p>
+<ul>
+<li>PC857 ESC t kod sayfası sabiti: <code>store-bridge/printers/renderers.js:16-22</code>.</li>
+<li>Windows-1254 ESC t sabiti: <code>store-bridge/printers/renderers.js:23-28</code>.</li>
+<li><code>encodeWin1254</code> TL fallback ile çalışıyor: <code>store-bridge/printers/renderers.js:38-44</code>.</li>
+<li>PC857 manuel tablo içeriyor: <code>store-bridge/printers/renderers.js:67-106</code>.</li>
+<li>Runtime encoding mode çözümü <code>win1254</code> default: <code>store-bridge/printers/renderers.js:278-287</code>.</li>
+<li>Bridge, receipt veya win1254 için <code>escT = 32</code> ve <code>skipPhoenixCmd = true</code> zorluyor: <code>server/routes/bridge.js:47-53</code>.</li>
+</ul>
+<p>Etki: Türkçe karakter bozulması tek bir yerde değil; backend printer option normalizasyonu, bridge renderer, fiziksel yazıcı firmware&#39;i ve env/pos-config override zincirinin birleşiminde oluşabilir. Kodda farklı cihazlar için doğru düşünülmüş parçalar var, fakat tek büyük dosyada ve env tabanlı koşullarla yönetildiği için hata ayıklama maliyeti yüksek.</p>
+<p>Öneri: Yazdırma için ayrı bir <code>encoding</code> modülü çıkar; PC857/WIN1254 encode testlerini hem byte snapshot hem ESC/POS komut snapshot olarak büyüt. Her fiziksel yazıcı profili için <code>encodingMode</code>, <code>escT</code>, <code>skipPhoenixCmd</code>, <code>lineWidth</code> değerleri tek profil objesinde tutulmalı.</p>
+<h3>P1 - Paketleme çıktıları ve node_modules repo içinde taramayı kırıyor</h3>
+<p>Kanıt:</p>
+<ul>
+<li>Repo kökünde <code>dist-electron</code>, <code>node_modules</code>, <code>client/node_modules</code>, <code>server/node_modules</code>, <code>store-bridge/node_modules</code> mevcut.</li>
+<li>Dosya tarama sırasında <code>server/node_modules/restoran-pos/...</code> altında recursive <code>file:..</code> bağlantıları nedeniyle PowerShell <code>Could not find a part of the path ... node_modules\restoran-pos\...</code> hataları verdi.</li>
+<li><code>client/package.json:17</code>, <code>server/package.json:22</code>, <code>store-bridge/package.json</code> içinde <code>restoran-pos: file:..</code> bağımlılığı var.</li>
+</ul>
+<p>Etki: Yerel paket bağımlılığı repo kökünü alt paketlerin <code>node_modules</code> içine tekrar taşıyor. Bu, taramayı, paketlemeyi, antivirüs/Windows path davranışını ve CI sürelerini gereksiz kırılgan hale getirir.</p>
+<p>Öneri: npm workspaces veya açık paket sınırı kullan. Alt paketlerin root projeyi dependency olarak çekmesi gerçekten gerekiyorsa bunun nedenini belgeleyip publish/workspace protokolüne taşı.</p>
+<h3>P1 - Frontend bundle uyarısı: tek parça uygulama büyüyor</h3>
+<p>Kanıt:</p>
+<ul>
+<li><code>npm run build --prefix client</code> başarılı.</li>
+<li>Vite uyarısı: minified chunk 500 kB üstü.</li>
+<li>Üretilen ana JS: <code>assets/index-CwuMQpUU.js</code> 948.07 kB, gzip 264.37 kB.</li>
+<li>XLSX chunk: <code>assets/xlsx-D_0l8YDs.js</code> 429.03 kB, gzip 143.08 kB.</li>
+</ul>
+<p>Etki: POS genelde düşük donanımlı Windows kasalarda çalışır. Büyük ilk yükleme, Electron içinde de startup ve memory baskısı yaratır.</p>
+<p>Öneri: Route bazlı lazy loading; müşteri import/export için <code>xlsx</code> modülünü yalnız ilgili ekranda dynamic import ile yükle; rapor/chart ekranlarını ayrı chunk&#39;a ayır.</p>
+<h2>4. Amatör görünen alanlar</h2>
+<ul>
+<li>P1: <code>OrderScreen.jsx</code> 1428 satır. Sipariş ekranı bir ekran bileşeni olmaktan çıkıp iş kuralı, navigasyon, state, API orchestration ve UI davranışını aynı yerde toplama riski taşıyor. Bu profesyonel POS ürününde bakım sorunudur.</li>
+<li>P1: <code>store-bridge/printers/renderers.js</code> 1271 satır. Encoding, layout, ESC/POS komutları, metin sarma, diagnostik ve template render aynı dosyada. Yazıcı sorunu çıktığında nokta atışı izolasyon zorlaşır.</li>
+<li>P1: <code>electron/main.cjs</code> 860 satır. Config okuma, JWT üretimi, DB taşıma, backend process, bridge process, caller ID helper ve pencere yönetimi aynı dosyada. Masaüstü lifecycle hataları bu yapıda pahalı olur.</li>
+<li>P2: <code>client/src/App.jsx:46-245</code> top-level route, auth role, modal state, quick payment state ve navigation fallback&#39;lerini aynı komponentte yönetiyor. Şimdilik çalışabilir ama büyüme yönü yanlış.</li>
+<li>P2: API client tek sınıfta tüm domainleri topluyor. <code>client/src/services/api.js:77-210</code> auth, masa, ürün, sipariş, ödeme, müşteri, caller ID, rapor, stok, waiter call ve print uçlarını aynı dosyaya yığmış.</li>
+<li>P2: Root scriptlerde Windows <code>.bat</code>, cross-env, Electron paketleme ve server/client komutları karışık. <code>package.json:8-37</code> tek dosyada çok sayıda operasyonel sorumluluk taşıyor.</li>
+</ul>
+<h2>5. Teknik borç alanları</h2>
+<ul>
+<li>P1: Test altyapısı yerelde kırık. Test dosyaları var ama <code>vitest</code> bulunmadığı için çalıştırılamıyor.</li>
+<li>P1: Alt paketlerde <code>file:..</code> bağımlılığı tarama ve dependency graph üzerinde recursive karmaşa yaratıyor.</li>
+<li>P1: Yazıcı profilleri env/JSON/DB seçeneklerine dağılmış. Kanıt: Electron bridge env üretimi <code>electron/main.cjs:211-226</code>, bridge normalize <code>server/routes/bridge.js:28-55</code>, renderer çözümleme <code>store-bridge/printers/renderers.js:253-287</code>.</li>
+<li>P2: Frontend test script&#39;i yok. <code>client/package.json:6-9</code> yalnız <code>dev</code>, <code>build</code>, <code>preview</code> içeriyor.</li>
+<li>P2: Lint/typecheck script&#39;i yok. Root scripts <code>package.json:8-37</code>, client scripts <code>client/package.json:6-9</code>, server scripts <code>server/package.json:6-10</code> içinde lint veya typecheck bulunmuyor.</li>
+<li>P2: Migration dosyası 673 satır ve hem schema hem veri düzeltme mantığı taşıyor. Uzun vadede migration sürümleme ve rollback disiplini zayıflar.</li>
+<li>P2: Runtime config kaynakları çok: <code>.env</code>, <code>pos-config.json</code>, Electron-generated env, bridge env, DB settings. Bu esneklik iyi ama tek doğruluk kaynağı belirsiz.</li>
+</ul>
+<h2>6. Hızlı kazanımlar</h2>
+<ul>
+<li>P1: Server test kurulumunu düzelt: <code>npm install --prefix server</code>, ardından <code>npm test --prefix server</code>. CI yoksa minimum yerel gate olarak belgeye ekle.</li>
+<li>P1: Yazıcı encoding testlerini genişlet: <code>ÇĞİÖŞÜ çğıöşü</code>, TL sembolü, uzun ürün adı, sağ/sol hizalama ve farklı <code>escT</code> profilleri.</li>
+<li>P1: <code>client/src/components/orders/OrderScreen.jsx</code> için ilk parçalama: API orchestration hook, order total hesapları utility, UI alt komponentleri.</li>
+<li>P1: <code>store-bridge/printers/renderers.js</code> için ilk parçalama: <code>encoding</code>, <code>layout</code>, <code>escposCommands</code>, <code>templates</code>.</li>
+<li>P2: Vite code splitting: <code>xlsx</code>, reports/charts, settings/printer pages lazy load.</li>
+<li>P2: <code>docs/audit</code> altında her derin konu için ayrı rapor: <code>01-printing-flow.md</code>, <code>02-order-payment-integrity.md</code>, <code>03-frontend-state.md</code>, <code>04-packaging-electron.md</code>.</li>
+</ul>
+<h2>7. Uygulanmış düzeltmeler</h2>
+<ul>
+<li><code>docs/audit/00-overall-audit.md</code> oluşturuldu.</li>
+<li>Kod davranışı değiştirilmedi.</li>
+<li>Düşük riskli kod düzeltmesi uygulanmadı; çünkü bu turun açık kapsamı “ilk iş olarak sadece genel repo taraması” idi.</li>
+</ul>
+<h2>8. Çalıştırılan komutlar ve sonuçlar</h2>
+<ul>
+<li><code>Get-ChildItem -Force</code>: repo kök yapısı çıkarıldı. Ana klasörler: <code>client</code>, <code>server</code>, <code>electron</code>, <code>store-bridge</code>, <code>scripts</code>, <code>tools</code>, <code>resources</code>, <code>dist-electron</code>, <code>data</code>.</li>
+<li><code>rg --files</code>: çalışmadı. Hata: WindowsApps içindeki <code>rg.exe</code> için erişim engellendi. Alternatif olarak PowerShell <code>Get-ChildItem</code> kullanıldı.</li>
+<li><code>git status --short --branch</code>: branch <code>main...origin/main</code>. Mevcut kullanıcı/depo değişiklikleri görüldü: silinmiş <code>Restoran-POS-v3-Ilerleme-Raporu.html</code>, untracked <code>ANALIZ_RAPORU_2026.html</code>, untracked PDF. Bu dosyalara dokunulmadı.</li>
+<li><code>Get-Content package.json</code>, <code>client/package.json</code>, <code>server/package.json</code>, <code>store-bridge/package.json</code>: script ve dependency yüzeyi incelendi.</li>
+<li><code>Get-Content README.md -TotalCount 220</code>: ürün amacı, modlar ve kurulum bilgileri incelendi.</li>
+<li><code>Get-Content server/index.js</code>, <code>client/src/App.jsx</code>, <code>client/src/services/api.js</code>, <code>server/config/database.js</code>: ana entrypoint ve request akışı incelendi.</li>
+<li><code>Get-Content server/routes/orders.js</code>, <code>server/routes/payments.js</code>, <code>server/services/printJobs.js</code>, <code>server/routes/bridge.js</code>, <code>store-bridge/jobs/poller.js</code>, <code>store-bridge/printers/renderers.js</code>: sipariş, ödeme ve yazdırma akışı örneklendi.</li>
+<li><code>npm test --prefix server</code>: başarısız. <code>vitest</code> komutu bulunamadı.</li>
+<li><code>npm run build --prefix client</code>: başarılı. Vite build tamamlandı; büyük chunk uyarısı verdi.</li>
+</ul>
+<h2>9. Sonraki önerilen adımlar</h2>
+<ol>
+<li><code>01-printing-flow.md</code>: Frontend&#39;de yazdırma tetikleyen bütün UI noktaları, backend job üretimi, bridge claim/send akışı ve Türkçe karakter bozulma noktaları uçtan uca çıkarılmalı. Bu, ilk kullanıcı fotoğrafındaki gerçek problemi hedefler.</li>
+<li><code>02-order-payment-integrity.md</code>: Sipariş oluşturma, item ekleme/iptal/azaltma, ödeme kapatma, masa temizleme ve müşteri istatistiği transactional bütünlük açısından denetlenmeli.</li>
+<li><code>03-frontend-state.md</code>: <code>OrderScreen.jsx</code>, <code>PaymentScreen.jsx</code>, <code>App.jsx</code> state ve navigation davranışları çıkarılmalı; amatör/kırılgan UI koşulları listelenmeli.</li>
+<li><code>04-test-and-build-health.md</code>: Server test kurulumu onarılmalı, frontend test eksikliği ve CI gate önerisi raporlanmalı.</li>
+<li><code>05-electron-packaging.md</code>: <code>file:..</code> dependency döngüsü, dist-electron kaynak kopyaları, native sqlite rebuild ve bridge/caller ID process lifecycle denetlenmeli.</li>
+</ol>
+  </main>
+</body>
+</html>

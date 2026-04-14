@@ -37,6 +37,62 @@ let callerIdHelperStopped = false;
 let mainWindow = null;
 /** @type {Record<string, unknown>} */
 let posConfig = {};
+/** @type {fs.WriteStream | null} */
+let logStream = null;
+
+function formatLogArg(arg) {
+  if (arg instanceof Error) return `${arg.stack || arg.message}`;
+  if (typeof arg === 'string') return arg;
+  try {
+    return JSON.stringify(arg);
+  } catch {
+    return String(arg);
+  }
+}
+
+function setupFileLogging() {
+  const logsDir = path.join(app.getPath('userData'), 'logs');
+  fs.mkdirSync(logsDir, { recursive: true });
+  const logPath = path.join(logsDir, 'electron-main.log');
+  logStream = fs.createWriteStream(logPath, { flags: 'a' });
+
+  const original = {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+  };
+
+  const write = (level, args) => {
+    const line = `[${new Date().toISOString()}] [${level}] ${args.map(formatLogArg).join(' ')}\n`;
+    try {
+      logStream?.write(line);
+    } catch {
+      /* logging must never crash the app */
+    }
+  };
+
+  console.log = (...args) => {
+    write('info', args);
+    original.log(...args);
+  };
+  console.warn = (...args) => {
+    write('warn', args);
+    original.warn(...args);
+  };
+  console.error = (...args) => {
+    write('error', args);
+    original.error(...args);
+  };
+
+  process.on('uncaughtException', (err) => {
+    console.error('[electron] uncaughtException', err);
+  });
+  process.on('unhandledRejection', (err) => {
+    console.error('[electron] unhandledRejection', err);
+  });
+
+  console.log('[electron] log file:', logPath);
+}
 
 // ---------------------------------------------------------------------------
 // pos-config.json
@@ -218,6 +274,8 @@ function buildBridgeEnv(port) {
   if (b.businessId != null) env.BRIDGE_BUSINESS_ID = String(b.businessId);
   if (b.dryRun != null) env.BRIDGE_DRY_RUN = b.dryRun ? '1' : '0';
   if (b.pollIntervalMs != null) env.POLL_INTERVAL_MS = String(b.pollIntervalMs);
+  if (b.apiTimeoutMs != null) env.BRIDGE_API_TIMEOUT_MS = String(b.apiTimeoutMs);
+  if (b.healthRetryMs != null) env.BRIDGE_HEALTH_RETRY_MS = String(b.healthRetryMs);
   if (b.claimId) env.BRIDGE_CLAIM_ID = String(b.claimId);
   if (b.socketTimeoutMs != null) env.PRINT_SOCKET_TIMEOUT_MS = String(b.socketTimeoutMs);
   // ESC t kod sayfası: 12 = PC857 (Turkish), 28 = WPC1254 — yazıcı modeline göre ayarla
@@ -228,6 +286,9 @@ function buildBridgeEnv(port) {
   if (c.enabled != null) env.CID812_ENABLED = c.enabled ? '1' : '0';
   if (c.mode) env.CID812_MODE = String(c.mode);
   if (c.debounceMs != null) env.CID812_DEBOUNCE_MS = String(c.debounceMs);
+  if (c.postRetryAttempts != null) env.CID812_POST_RETRY_ATTEMPTS = String(c.postRetryAttempts);
+  if (c.postRetryMs != null) env.CID812_POST_RETRY_MS = String(c.postRetryMs);
+  if (c.postQueueMax != null) env.CID812_POST_QUEUE_MAX = String(c.postQueueMax);
   if (c.enableParse != null) env.CID812_ENABLE_PARSE = c.enableParse ? '1' : '0';
   if (c.phoneRegex) env.CID812_PHONE_REGEX = String(c.phoneRegex);
 
@@ -831,6 +892,7 @@ app.whenReady().then(async () => {
   // app.getPath('userData') bunu kullandığı için %APPDATA%\restoran-pos\ olur.
   // Kullanıcıya görünen doğru ad ("Restoran POS") ile userData yolunu garantile.
   app.setName('Restoran POS');
+  setupFileLogging();
 
   posConfig = readPosConfig();
   if (Object.keys(posConfig).length) {
@@ -972,5 +1034,13 @@ app.on('before-quit', () => {
   if (bridgeProcess && !bridgeProcess.killed) {
     killProcess(bridgeProcess);
     forceKillAfterTimeout(bridgeProcess);
+  }
+  if (logStream) {
+    try {
+      logStream.end();
+    } catch {
+      /* ignore */
+    }
+    logStream = null;
   }
 });

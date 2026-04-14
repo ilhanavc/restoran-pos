@@ -6,10 +6,20 @@ import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency, ORDER_ITEM_LINE_STATUS } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
+  canEditOrderItem,
+  canOpenOrderPayment,
+  canSaveOrderDraft,
+  canVoidOrderItem,
+  getOrderTotalsForDisplay,
+  hasUnsavedOrderChanges,
+  isOrderClosedOrCancelled,
+} from '../../utils/orderActionPolicy.js';
+import {
   ArrowLeft, Search, Plus, Minus, Trash2, Save,
   CreditCard, X, ArrowRightLeft, Phone, User,
 } from 'lucide-react';
 import OrderProductDetailModal from './OrderProductDetailModal.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
 
 export default function OrderScreen({
   table,
@@ -45,6 +55,7 @@ export default function OrderScreen({
   const [newCustomerMode, setNewCustomerMode] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', address_title: 'Ev' });
   const [selectedTakeawayAddress, setSelectedTakeawayAddress] = useState(customer?.selectedAddress || '');
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
@@ -322,8 +333,9 @@ export default function OrderScreen({
   };
 
   const handleSaveOrder = async ({ skipNavigate = false } = {}) => {
-    if (cartItems.length === 0) { toast.error('Sipariş boş'); return null; }
-    if (orderType === 'takeaway' && !selectedCustomer?.id) {
+    const draftState = canSaveOrderDraft({ cartItems, orderType, selectedCustomer });
+    if (!draftState.ok && draftState.reason === 'empty') { toast.error('Sipariş boş'); return null; }
+    if (!draftState.ok && draftState.reason === 'customer-required') {
       openCustomerModal();
       toast.error('Paket sipariş için müşteri seçimi zorunludur');
       return null;
@@ -340,7 +352,7 @@ export default function OrderScreen({
         })));
         setExistingOrder(result);
         setCartItems([]);
-        toast.success('Ürünler eklendi');
+        toast.success('Ürünler kaydedildi');
         if (!skipNavigate && onNavigateToTables) onNavigateToTables();
         return { order: result, isNew: false };
       }
@@ -381,21 +393,28 @@ export default function OrderScreen({
   };
 
   const handleVoidItem = async (itemId) => {
-    if (!window.confirm('Bu ürünü iptal (void) etmek istediğinize emin misiniz?')) return;
-    try {
-      setSaving(true);
-      await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
-      toast.success('Ürün iptal edildi');
-      const updated = await api.getOrder(existingOrder.id);
-      setExistingOrder(updated);
-      if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
-        onNavigateToTables();
-      }
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
+    setConfirmDialog({
+      title: 'Ürün iptal edilsin mi?',
+      body: 'Bu ürün siparişten iptal edilecek.',
+      confirmLabel: 'Ürünü İptal Et',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          setSaving(true);
+          await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
+          toast.success('Ürün iptal edildi');
+          const updated = await api.getOrder(existingOrder.id);
+          setExistingOrder(updated);
+          if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
+            onNavigateToTables();
+          }
+        } catch (err) {
+          toast.error(err.message);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   };
 
   const refreshOrder = async () => {
@@ -410,21 +429,28 @@ export default function OrderScreen({
     if (!item || item.status !== 'new' || item.is_comped) return;
     const next = item.quantity + delta;
     if (next <= 0) {
-      if (!window.confirm('Bu satırı iptal etmek istiyor musunuz?')) return;
-      try {
-        setSaving(true);
-        await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
-        toast.success('Satır iptal edildi');
-        const updated = await api.getOrder(existingOrder.id);
-        setExistingOrder(updated);
-        if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
-          onNavigateToTables();
-        }
-      } catch (err) {
-        toast.error(err.message);
-      } finally {
-        setSaving(false);
-      }
+      setConfirmDialog({
+        title: 'Satır iptal edilsin mi?',
+        body: 'Adet sıfıra düşürüldüğü için bu satır siparişten iptal edilecek.',
+        confirmLabel: 'Satırı İptal Et',
+        tone: 'danger',
+        onConfirm: async () => {
+          try {
+            setSaving(true);
+            await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
+            toast.success('Satır iptal edildi');
+            const updated = await api.getOrder(existingOrder.id);
+            setExistingOrder(updated);
+            if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
+              onNavigateToTables();
+            }
+          } catch (err) {
+            toast.error(err.message);
+          } finally {
+            setSaving(false);
+          }
+        },
+      });
       return;
     }
     try {
@@ -461,18 +487,25 @@ export default function OrderScreen({
     const target = emptyTables.find((x) => x.id === targetTableId);
     const fromLabel = table.displayName || 'Masa';
     const toLabel = target?.displayName || 'Masa';
-    if (!window.confirm(`${fromLabel} → ${toLabel} masasına taşınsın mı?`)) return;
-    try {
-      setSaving(true);
-      await api.transferTable(table.id, targetTableId);
-      toast.success('Sipariş hedef masaya taşındı');
-      setMoveModalOpen(false);
-      if (onNavigateToTables) onNavigateToTables();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
+    setConfirmDialog({
+      title: 'Masa taşınsın mı?',
+      body: `${fromLabel} siparişi ${toLabel} masasına taşınacak.`,
+      confirmLabel: 'Masayı Taşı',
+      tone: 'primary',
+      onConfirm: async () => {
+        try {
+          setSaving(true);
+          await api.transferTable(table.id, targetTableId);
+          toast.success('Sipariş hedef masaya taşındı');
+          setMoveModalOpen(false);
+          if (onNavigateToTables) onNavigateToTables({ highlightTableId: targetTableId });
+        } catch (err) {
+          toast.error(err.message);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   };
 
   const loadCustomersForModal = async (q = '') => {
@@ -530,7 +563,7 @@ export default function OrderScreen({
       setSelectedTakeawayAddress(defaultAddr?.address || '');
     }
     setCustomerModalOpen(false);
-    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
+    if (existingOrder?.id && !isOrderClosedOrCancelled(existingOrder)) {
       try {
         setSaving(true);
         const updated = await api.patchOrderCustomer(existingOrder.id, cust.id);
@@ -549,7 +582,7 @@ export default function OrderScreen({
     if (orderType === 'takeaway') return;
     setSelectedCustomer(null);
     setCustomerModalOpen(false);
-    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
+    if (existingOrder?.id && !isOrderClosedOrCancelled(existingOrder)) {
       try {
         setSaving(true);
         const updated = await api.patchOrderCustomer(existingOrder.id, null);
@@ -579,15 +612,11 @@ export default function OrderScreen({
   };
 
   // Fiyatlar KDV dahil; grand_total = satır toplamı − indirim
-  const cartSubtotal = cartItems.reduce((sum, ci) => sum + ci.unit_price * ci.quantity, 0);
-  const savedTotal = Number(existingOrder?.grand_total) || 0;
-  const displayTotal = savedTotal + cartSubtotal;
-  const araTotal = (Number(existingOrder?.subtotal) || 0) + cartSubtotal;
+  const { displayTotal, araTotal } = getOrderTotalsForDisplay(existingOrder, cartItems);
 
   const allExistingItems = existingOrder?.items || [];
-  const activeExistingItems = allExistingItems.filter((i) => i.status !== 'cancelled');
-  const hasUnsavedChanges = cartItems.length > 0;
-  const canOpenPayment = Boolean(existingOrder && !hasUnsavedChanges && existingOrder.status !== 'closed' && activeExistingItems.length > 0);
+  const hasUnsavedChanges = hasUnsavedOrderChanges(cartItems);
+  const canOpenPayment = canOpenOrderPayment(existingOrder, cartItems);
   const tableDisplayName = table
     ? (table.displayName || `Masa ${table.name}`)
     : existingOrder?.table_name || null;
@@ -845,6 +874,8 @@ export default function OrderScreen({
                           color: 'inherit',
                           cursor: 'pointer',
                           padding: 4,
+                          minWidth: 34,
+                          minHeight: 34,
                           lineHeight: 1,
                           fontSize: 18,
                           fontWeight: 700,
@@ -867,6 +898,8 @@ export default function OrderScreen({
                           color: 'inherit',
                           cursor: 'pointer',
                           padding: 4,
+                          minWidth: 34,
+                          minHeight: 34,
                           lineHeight: 1,
                           fontSize: 18,
                           fontWeight: 700,
@@ -939,7 +972,7 @@ export default function OrderScreen({
                 const mods = JSON.parse(item.modifiers || '[]');
                 const st = ORDER_ITEM_LINE_STATUS[item.status] || ORDER_ITEM_LINE_STATUS.sent;
                 const lineBadge = item.status && item.status !== 'new' ? st : null;
-                const canEditQty = item.status === 'new' && !item.is_comped && existingOrder.status !== 'closed';
+                const canEditQty = canEditOrderItem(item, existingOrder);
                 return (
                   <div
                     key={item.id}
@@ -966,11 +999,11 @@ export default function OrderScreen({
                   >
                     {canEditQty ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, -1)} disabled={saving}>
+                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minWidth: 40, minHeight: 40 }} onClick={() => handleUpdateExistingQty(item.id, -1)} disabled={saving}>
                           <Minus size={14} />
                         </button>
                         <span style={{ fontSize: 15, fontWeight: 700, minWidth: 26, textAlign: 'center' }}>{item.quantity}</span>
-                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, 1)} disabled={saving}>
+                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minWidth: 40, minHeight: 40 }} onClick={() => handleUpdateExistingQty(item.id, 1)} disabled={saving}>
                           <Plus size={14} />
                         </button>
                       </div>
@@ -1012,13 +1045,13 @@ export default function OrderScreen({
                       {item.note && <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 2 }}>📝 {item.note}</div>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                      {!item.is_comped && item.status === 'new' && existingOrder.status !== 'closed' && (
-                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }} onClick={() => handleVoidItem(item.id)} title="Satırı iptal">
+                      {canVoidOrderItem(item, existingOrder, false) && (
+                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, minWidth: 40, minHeight: 40 }} onClick={() => handleVoidItem(item.id)} title="Satırı iptal">
                           <Trash2 size={16} />
                         </button>
                       )}
-                      {hasRole('admin', 'cashier') && existingOrder.status !== 'closed' && item.status !== 'new' && !item.is_comped && (
-                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }} onClick={() => handleVoidItem(item.id)} title="İptal (void)">
+                      {item.status !== 'new' && canVoidOrderItem(item, existingOrder, hasRole('admin', 'cashier')) && (
+                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, minWidth: 40, minHeight: 40 }} onClick={() => handleVoidItem(item.id)} title="İptal (void)">
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -1033,8 +1066,19 @@ export default function OrderScreen({
           {cartItems.length > 0 && (
             <div style={{ padding: '8px 0' }}>
               {allExistingItems.length > 0 && (
-                <div style={{ padding: '6px 18px', fontSize: 11, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Yeni Eklenen
+                <div style={{ padding: '6px 18px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <span>Yeni Eklenen</span>
+                  <span style={{
+                    borderRadius: 6,
+                    border: '1px solid var(--accent)',
+                    padding: '2px 6px',
+                    color: 'var(--accent)',
+                    background: 'var(--accent-muted)',
+                    letterSpacing: 0,
+                    textTransform: 'none',
+                  }}>
+                    Kaydedilmedi
+                  </span>
                 </div>
               )}
               {cartItems.map((item, idx) => {
@@ -1063,12 +1107,12 @@ export default function OrderScreen({
                     {/* Quantity Controls */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} onClick={(e) => e.stopPropagation()}>
                       <button type="button" className="btn btn-ghost" onClick={() => updateQuantity(idx, -1)}
-                        style={{ padding: 6, minHeight: 'auto', borderRadius: 4 }}>
+                        style={{ padding: 6, minWidth: 40, minHeight: 40, borderRadius: 4 }}>
                         <Minus size={14} />
                       </button>
                       <span style={{ fontSize: 15, fontWeight: 700, width: 28, textAlign: 'center' }}>{item.quantity}</span>
                       <button type="button" className="btn btn-ghost" onClick={() => updateQuantity(idx, 1)}
-                        style={{ padding: 6, minHeight: 'auto', borderRadius: 4 }}>
+                        style={{ padding: 6, minWidth: 40, minHeight: 40, borderRadius: 4 }}>
                         <Plus size={14} />
                       </button>
                     </div>
@@ -1094,7 +1138,7 @@ export default function OrderScreen({
 
                     {/* Actions */}
                     <div style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
-                      <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }}
+                      <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, minWidth: 40, minHeight: 40 }}
                         onClick={() => removeItem(idx)}>
                         <Trash2 size={16} />
                       </button>
@@ -1293,6 +1337,20 @@ export default function OrderScreen({
           onClose={() => setModifierModal(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          const onConfirm = confirmDialog?.onConfirm;
+          setConfirmDialog(null);
+          onConfirm?.();
+        }}
+      />
 
       {customerModalOpen && (
         <div className="modal-overlay" onClick={() => setCustomerModalOpen(false)}>

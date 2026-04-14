@@ -53,6 +53,15 @@ beforeAll(async () => {
   ).run(seeds.businessId, seeds.tableId, seeds.userId);
 
   db.prepare(
+    `INSERT OR IGNORE INTO order_items (
+      id, order_id, product_id, product_name, quantity, unit_price, status,
+      category_id_snapshot, category_name_snapshot, printer_target_snapshot, created_by
+    ) VALUES ('rpt-item-1', 'rpt-order-1', ?, 'Lahmacun', 2, 125, 'served', ?, 'Eski Kategori', 'kitchen', ?)`,
+  ).run(seeds.productId, seeds.categoryId, seeds.userId);
+
+  db.prepare(`UPDATE categories SET name = 'Yeni Kategori' WHERE id = ?`).run(seeds.categoryId);
+
+  db.prepare(
     `INSERT OR IGNORE INTO payments (id, order_id, business_id, amount, payment_type, created_at, created_by)
      VALUES ('rpt-pay-1', 'rpt-order-1', ?, 250, 'cash', datetime('now'), ?)`,
   ).run(seeds.businessId, seeds.userId);
@@ -81,6 +90,7 @@ describe('GET /api/reports/daily', () => {
     expect(res.body.orderStats.total_orders).toBe(1);
     expect(res.body.revenue).toBe(250);
     expect(res.body.avgOrderValue).toBe(250);
+    expect(res.body.categoryBreakdown[0].category_name).toBe('Eski Kategori');
   });
 
   it('?date parametresiyle belirli gün raporu döner', async () => {

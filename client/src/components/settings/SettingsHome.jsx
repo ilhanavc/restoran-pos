@@ -4,9 +4,9 @@ import { useNavigate } from 'react-router-dom';
 const sections = [
   { icon: Store, label: 'İşletme Bilgileri', desc: 'Ad, adres, vergi bilgileri, fiş ayarları', to: '/settings/business' },
   { icon: Users, label: 'Kullanıcı Yönetimi', desc: 'Personel ekleme, rol atama, yetkilendirme', to: '/settings/users' },
-  { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller, kategori yönlendirme (Ayarlar > Yazıcılar)', to: '/settings/printers' },
+  { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller ve kategori yönlendirme', to: '/settings/printers' },
   { icon: Monitor, label: 'Ekran Ayarları', desc: 'Tema, düzen, dil tercihleri', to: '/settings/display' },
-  { icon: Phone, label: 'Gelen arama (Caller ID)', desc: 'Arama geçmişi ve gelen arama simülasyonu (test)', to: '/settings/caller-id' },
+  { icon: Phone, label: 'Gelen arama (Caller ID)', desc: 'Arama geçmişi ve gelen arama yönetimi', to: '/settings/caller-id' },
 ];
 
 export default function SettingsHome() {

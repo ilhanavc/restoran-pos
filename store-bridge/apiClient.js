@@ -25,27 +25,48 @@ export function createApiClient(cfg) {
     'X-Bridge-Token': cfg.token,
   };
 
+  async function request(path, options = {}) {
+    const controller = new AbortController();
+    const timeoutMs = Math.max(1000, Number(cfg.apiTimeoutMs) || 8000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${cfg.apiBase}${path}`, {
+        ...options,
+        headers: {
+          ...headers,
+          ...(options.headers || {}),
+        },
+        signal: controller.signal,
+      });
+      return await parseJson(res);
+    } catch (err) {
+      if (err?.name === 'AbortError') {
+        const timeoutErr = new Error(`API timeout (${timeoutMs}ms): ${path}`);
+        timeoutErr.code = 'api_timeout';
+        throw timeoutErr;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function get(path) {
-    const res = await fetch(`${cfg.apiBase}${path}`, { headers });
-    return parseJson(res);
+    return request(path);
   }
 
   async function post(path, body) {
-    const res = await fetch(`${cfg.apiBase}${path}`, {
+    return request(path, {
       method: 'POST',
-      headers,
       body: body != null ? JSON.stringify(body) : '{}',
     });
-    return parseJson(res);
   }
 
   async function patch(path, body) {
-    const res = await fetch(`${cfg.apiBase}${path}`, {
+    return request(path, {
       method: 'PATCH',
-      headers,
       body: JSON.stringify(body),
     });
-    return parseJson(res);
   }
 
   return {
@@ -58,7 +79,8 @@ export function createApiClient(cfg) {
     listPendingJobs: (limit = 20) =>
       get(`/bridge/print-jobs?status=pending&limit=${limit}&unclaimed_only=1`),
     claimJob: (jobId) => post(`/bridge/print-jobs/${encodeURIComponent(jobId)}/claim`, { claim_id: cfg.claimId }),
-    updateJob: (jobId, body) => patch(`/bridge/print-jobs/${encodeURIComponent(jobId)}`, body),
+    updateJob: (jobId, body) =>
+      patch(`/bridge/print-jobs/${encodeURIComponent(jobId)}`, { ...(body || {}), claim_id: cfg.claimId }),
     getPrinter: (printerId) => get(`/bridge/printers/${encodeURIComponent(printerId)}`),
     postDiscoveredPrinters: (payload) => post('/bridge/printers/discovered', payload),
     requestDiscoveryRefresh: () => post('/bridge/printers/discovered/refresh', {}),

@@ -17,6 +17,47 @@ import { linkCallLogToOrder } from '../services/callerIdService.js';
 const router = Router();
 router.use(authenticate, businessScope);
 
+function round2(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function getOrderPaidTotal(orderId) {
+  const row = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = ?').get(orderId);
+  return round2(row?.total || 0);
+}
+
+function isOrderFullyPaid(order) {
+  return getOrderPaidTotal(order.id) + 0.02 >= round2(order.grand_total || 0);
+}
+
+function recordTakeawayDeliveryPaymentIfNeeded(order, businessId, userId) {
+  const total = round2(order?.grand_total || 0);
+  const paid = getOrderPaidTotal(order.id);
+  const due = round2(Math.max(0, total - paid));
+  if (due <= 0.02) return null;
+
+  const paymentId = genId();
+  const idempotencyKey = `takeaway-delivery:${order.id}`;
+  const existing = db.prepare(
+    `SELECT id FROM payments WHERE business_id = ? AND order_id = ? AND idempotency_key = ?`,
+  ).get(businessId, order.id, idempotencyKey);
+  if (existing) return existing.id;
+
+  db.prepare(`INSERT INTO payments (
+    id, business_id, order_id, payment_type, amount, cash_received, change_amount, note, idempotency_key, source, created_by
+  ) VALUES (?, ?, ?, 'other', ?, ?, 0, ?, ?, 'system_takeaway_delivery', ?)`).run(
+    paymentId,
+    businessId,
+    order.id,
+    due,
+    due,
+    'Paket teslim edildiğinde otomatik ödendi olarak işlendi',
+    idempotencyKey,
+    userId,
+  );
+  return paymentId;
+}
+
 const orderItemSchema = z.object({
   product_id: z.string().min(1),
   quantity: z.number().int().positive().max(999).default(1),
@@ -27,7 +68,7 @@ const orderItemSchema = z.object({
 
 const createOrderSchema = {
   body: z.object({
-    order_type: z.enum(['dine_in', 'takeaway', 'delivery']).optional(),
+    order_type: z.enum(['dine_in', 'takeaway']).optional(),
     table_id: z.string().optional().nullable(),
     customer_id: z.string().optional().nullable(),
     call_log_id: z.string().optional().nullable(),
@@ -46,11 +87,87 @@ const addItemsSchema = {
   }),
 };
 
+const orderStatuses = ['new', 'saved', 'in_kitchen', 'preparing', 'ready', 'served', 'cancelled', 'closed'];
+const orderItemStatuses = ['new', 'sent', 'preparing', 'ready', 'served', 'cancelled', 'comped'];
+
+const updateOrderStatusSchema = {
+  body: z.object({
+    status: z.enum(orderStatuses, {
+      errorMap: () => ({ message: 'Geçerli sipariş durumu gerekli' }),
+    }),
+  }),
+};
+
+const updateOrderItemSchema = {
+  body: z.object({
+    status: z.enum(orderItemStatuses).optional(),
+    quantity: z.number().int().positive().max(999).optional(),
+    note: z.string().max(500).optional().nullable(),
+    is_comped: z.boolean().optional(),
+    comp_reason: z.string().max(500).optional().nullable(),
+    portion_id: z.string().optional().nullable(),
+  }).refine((body) => Object.keys(body).length > 0, {
+    message: 'En az bir güncellenecek alan gerekli',
+  }),
+};
+
+function assertAllowedItemStatusTransition(currentStatus, nextStatus) {
+  if (!nextStatus || nextStatus === currentStatus) return;
+  const allowed = {
+    new: ['sent', 'cancelled', 'comped'],
+    sent: ['preparing', 'ready', 'served', 'cancelled', 'comped'],
+    preparing: ['ready', 'served', 'cancelled', 'comped'],
+    ready: ['served', 'cancelled', 'comped'],
+    served: ['cancelled', 'comped'],
+    cancelled: [],
+    comped: [],
+  };
+  if (!(allowed[currentStatus] || []).includes(nextStatus)) {
+    const err = new Error('Bu ürün için geçersiz durum geçişi');
+    err.status = 400;
+    throw err;
+  }
+}
+
+function selectProductForOrder(productId, businessId) {
+  return db.prepare(`
+    SELECT p.*, c.name AS category_name, c.printer_target AS category_printer_target
+    FROM products p
+    JOIN categories c ON c.id = p.category_id AND c.business_id = p.business_id
+    WHERE p.id = ? AND p.business_id = ? AND p.is_deleted = 0
+  `).get(productId, businessId);
+}
+
+function orderItemSnapshot(product) {
+  return {
+    category_id_snapshot: product.category_id || null,
+    category_name_snapshot: product.category_name || null,
+    printer_target_snapshot: product.printer_target || product.category_printer_target || 'kitchen',
+  };
+}
+
+function orderHeaderSnapshot({ tableId, customerId, userId, businessId }) {
+  const table = tableId
+    ? db.prepare('SELECT name FROM tables WHERE id = ? AND business_id = ?').get(tableId, businessId)
+    : null;
+  const customer = customerId
+    ? db.prepare('SELECT full_name FROM customers WHERE id = ? AND business_id = ?').get(customerId, businessId)
+    : null;
+  const user = userId
+    ? db.prepare('SELECT full_name FROM users WHERE id = ? AND business_id = ?').get(userId, businessId)
+    : null;
+
+  return {
+    table_name_snapshot: table?.name || null,
+    customer_name_snapshot: customer?.full_name || null,
+    user_name_snapshot: user?.full_name || null,
+  };
+}
+
 const staff = authorize('admin', 'cashier', 'waiter');
 const staffAndKitchen = authorize('admin', 'cashier', 'waiter', 'kitchen');
 
-/** Yeni eklenen kalemler için mutfak job + satır sent + sipariş mutfakta (kapalı/iptal hariç). */
-function finalizeKitchenForNewItems(businessId, orderId, itemIds, userId) {
+function queueKitchenForNewItems(businessId, orderId, itemIds, userId) {
   if (!itemIds?.length) return;
   const placeholders = itemIds.map(() => '?').join(',');
   db.prepare(
@@ -63,7 +180,6 @@ function finalizeKitchenForNewItems(businessId, orderId, itemIds, userId) {
   ).run(userId, orderId, businessId);
 
   enqueueKitchenJobsForSentItems(businessId, orderId, itemIds, userId);
-  processPendingJobsSync(businessId, userId);
 }
 
 // GET /api/orders
@@ -101,6 +217,7 @@ router.get('/takeaway/open', staff, (req, res) => {
     const rows = db.prepare(`
       SELECT o.id, o.order_no, o.grand_total, o.created_at, o.status,
         o.takeaway_out_at as takeaway_out_at, o.takeaway_delivered_at as takeaway_delivered_at,
+        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.order_id = o.id), 0) as paid_total,
         u.full_name as user_name, c.full_name as customer_name
       FROM orders o
       LEFT JOIN users u ON o.user_id = u.id
@@ -120,6 +237,7 @@ router.get('/takeaway/open', staff, (req, res) => {
       id: o.id,
       order_no: o.order_no,
       total: o.grand_total,
+      paid_total: o.paid_total || 0,
       created_at: o.created_at,
       status: o.status,
       user_name: o.user_name || null,
@@ -151,14 +269,14 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
     if (o.order_type !== 'takeaway') {
       return res.status(400).json({ error: 'Sadece paket siparişleri güncellenebilir' });
     }
-    if (['closed', 'cancelled'].includes(o.status)) {
-      return res.status(400).json({ error: 'Sipariş kapalı' });
-    }
     if (o.takeaway_delivered_at) {
       if (action === 'out_for_delivery') {
         return res.status(400).json({ error: 'Teslim edilmiş sipariş teslimata çıkarılamaz' });
       }
       return res.json({ ok: true, skipped: 'already_delivered' });
+    }
+    if (['closed', 'cancelled'].includes(o.status)) {
+      return res.status(400).json({ error: 'Sipariş kapalı' });
     }
     if (action === 'out_for_delivery') {
       if (o.takeaway_out_at) {
@@ -172,13 +290,21 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
     if (!o.takeaway_out_at) {
       return res.status(400).json({ error: 'Önce teslimata çıkarılmalı' });
     }
-    db.prepare(`
-      UPDATE orders SET takeaway_delivered_at = datetime('now'), status = 'closed', closed_at = datetime('now'),
-        updated_at = datetime('now'), updated_by = ? WHERE id = ?
-    `).run(req.user.id, req.params.id);
-    auditLog(req.businessId, req.user.id, 'takeaway_delivered', 'order', req.params.id, {});
+    const fullOrder = db.prepare('SELECT id, grand_total FROM orders WHERE id = ? AND business_id = ?')
+      .get(req.params.id, req.businessId);
+
+    const paymentId = db.transaction(() => {
+      const createdPaymentId = recordTakeawayDeliveryPaymentIfNeeded(fullOrder, req.businessId, req.user.id);
+      db.prepare(`
+        UPDATE orders SET takeaway_delivered_at = datetime('now'), status = 'closed', closed_at = datetime('now'),
+          updated_at = datetime('now'), updated_by = ? WHERE id = ?
+      `).run(req.user.id, req.params.id);
+      return createdPaymentId;
+    })();
+
+    auditLog(req.businessId, req.user.id, 'takeaway_delivered', 'order', req.params.id, { auto_payment_id: paymentId });
     emitToRoom(req.businessId, 'order:takeaway_delivery', { orderId: req.params.id, action });
-    return res.json({ ok: true });
+    return res.json({ ok: true, auto_payment_id: paymentId });
   } catch (err) {
     console.error('Takeaway delivery error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -285,16 +411,18 @@ router.patch('/:id/customer', staff, (req, res) => {
     }
 
     let cid = customer_id != null && customer_id !== '' ? String(customer_id) : null;
+    let customerNameSnapshot = null;
     if (cid) {
-      const cust = db.prepare('SELECT id FROM customers WHERE id = ? AND business_id = ?').get(cid, req.businessId);
+      const cust = db.prepare('SELECT id, full_name FROM customers WHERE id = ? AND business_id = ?').get(cid, req.businessId);
       if (!cust) return res.status(400).json({ error: 'Müşteri bulunamadı' });
+      customerNameSnapshot = cust.full_name;
     } else {
       cid = null;
     }
 
     db.prepare(
-      `UPDATE orders SET customer_id = ?, updated_at = datetime('now'), updated_by = ? WHERE id = ? AND business_id = ?`,
-    ).run(cid, req.user.id, req.params.id, req.businessId);
+      `UPDATE orders SET customer_id = ?, customer_name_snapshot = ?, updated_at = datetime('now'), updated_by = ? WHERE id = ? AND business_id = ?`,
+    ).run(cid, customerNameSnapshot, req.user.id, req.params.id, req.businessId);
 
     auditLog(req.businessId, req.user.id, 'order_customer', 'order', req.params.id, { customer_id: cid });
 
@@ -334,7 +462,7 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
       const lines = [];
 
       for (const item of items) {
-        const product = db.prepare('SELECT * FROM products WHERE id = ? AND business_id = ?').get(item.product_id, req.businessId);
+        const product = selectProductForOrder(item.product_id, req.businessId);
         if (!product) {
           const err = new Error(`Ürün bulunamadı: ${item.product_id}`);
           err.isBadRequest = true;
@@ -360,31 +488,46 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
           note: item.note || null,
           portion_id: item.portion_id || null,
           portion_label: portionLabel,
+          snapshot: orderItemSnapshot(product),
         });
       }
 
       const vatTotal = 0;
       const grandTotal = subtotal;
+      const headerSnapshot = orderHeaderSnapshot({
+        tableId: table_id || null,
+        customerId: customer_id || null,
+        userId: req.user.id,
+        businessId: req.businessId,
+      });
 
       db.prepare(`INSERT INTO orders (id, business_id, branch_id, order_no, order_type, table_id, customer_id, user_id, 
-        subtotal, vat_total, grand_total, note, delivery_address, delivery_note, courier_note, guest_count, status, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)`).run(
+        subtotal, vat_total, grand_total, note, delivery_address, delivery_note, courier_note, guest_count,
+        table_name_snapshot, customer_name_snapshot, user_name_snapshot, status, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)`).run(
         orderId, req.businessId, req.branchId, orderNo, order_type || 'dine_in',
         table_id || null, customer_id || null, req.user.id,
         subtotal, vatTotal, grandTotal, note || null,
         delivery_address || null, delivery_note || null, courier_note || null,
-        guest_count || 0, req.user.id
+        guest_count || 0,
+        headerSnapshot.table_name_snapshot, headerSnapshot.customer_name_snapshot, headerSnapshot.user_name_snapshot,
+        req.user.id
       );
 
-      const insertItem = db.prepare(`INSERT INTO order_items (id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate, created_by, portion_id, portion_label)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const insertItem = db.prepare(`INSERT INTO order_items (
+        id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate,
+        category_id_snapshot, category_name_snapshot, printer_target_snapshot,
+        created_by, portion_id, portion_label
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       createdItemIds = [];
       for (const line of lines) {
         const itemId = genId();
         createdItemIds.push(itemId);
         insertItem.run(
           itemId, orderId, line.product.id, line.product.name, line.qty, line.itemPrice,
-          JSON.stringify(line.resolved), line.note, 0, req.user.id,
+          JSON.stringify(line.resolved), line.note, 0,
+          line.snapshot.category_id_snapshot, line.snapshot.category_name_snapshot, line.snapshot.printer_target_snapshot,
+          req.user.id,
           line.portion_id || null, line.portion_label || null,
         );
       }
@@ -393,19 +536,20 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
         db.prepare("UPDATE tables SET status = 'occupied', current_order_id = ?, guest_count = ?, updated_at = datetime('now') WHERE id = ?")
           .run(orderId, guest_count || 0, table_id);
       }
+
+      if ((order_type || 'dine_in') === 'takeaway') {
+        enqueueTakeawayLabelJob(req.businessId, orderId, req.user.id);
+      }
+
+      if (call_log_id) {
+        linkCallLogToOrder(req.businessId, call_log_id, orderId);
+      }
+
+      queueKitchenForNewItems(req.businessId, orderId, createdItemIds, req.user.id);
     });
 
     txn();
-
-    if ((order_type || 'dine_in') === 'takeaway') {
-      enqueueTakeawayLabelJob(req.businessId, orderId, req.user.id);
-    }
-
-    if (call_log_id) {
-      linkCallLogToOrder(req.businessId, call_log_id, orderId);
-    }
-
-    finalizeKitchenForNewItems(req.businessId, orderId, createdItemIds, req.user.id);
+    processPendingJobsSync(req.businessId, req.user.id);
 
     auditLog(req.businessId, req.user.id, 'order_create', 'order', orderId, { order_type, table_id });
 
@@ -441,7 +585,7 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
       let addedSubtotal = 0;
 
       for (const item of items) {
-        const product = db.prepare('SELECT * FROM products WHERE id = ? AND business_id = ?').get(item.product_id, req.businessId);
+        const product = selectProductForOrder(item.product_id, req.businessId);
         if (!product) {
           const err = new Error(`Ürün bulunamadı: ${item.product_id}`);
           err.isBadRequest = true;
@@ -460,10 +604,16 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
 
         const itemId = genId();
         newItemIds.push(itemId);
-        db.prepare(`INSERT INTO order_items (id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate, created_by, portion_id, portion_label)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        const snapshot = orderItemSnapshot(product);
+        db.prepare(`INSERT INTO order_items (
+          id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate,
+          category_id_snapshot, category_name_snapshot, printer_target_snapshot,
+          created_by, portion_id, portion_label
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
           itemId, order.id, product.id, product.name, qty, itemPrice,
-          JSON.stringify(resolved), item.note || null, 0, req.user.id,
+          JSON.stringify(resolved), item.note || null, 0,
+          snapshot.category_id_snapshot, snapshot.category_name_snapshot, snapshot.printer_target_snapshot,
+          req.user.id,
           item.portion_id || null, portionLabel,
         );
       }
@@ -471,10 +621,11 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
       db.prepare(`UPDATE orders SET subtotal = subtotal + ?, vat_total = 0, 
         grand_total = grand_total + ?, updated_at = datetime('now'), updated_by = ? WHERE id = ?`)
         .run(addedSubtotal, addedSubtotal, req.user.id, order.id);
+
+      queueKitchenForNewItems(req.businessId, order.id, newItemIds, req.user.id);
     });
     txn();
-
-    finalizeKitchenForNewItems(req.businessId, order.id, newItemIds, req.user.id);
+    processPendingJobsSync(req.businessId, req.user.id);
 
     const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.id);
     updated.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
@@ -489,7 +640,7 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
 });
 
 // PATCH /api/orders/:id/status
-router.patch('/:id/status', staffAndKitchen, (req, res) => {
+router.patch('/:id/status', staffAndKitchen, validate(updateOrderStatusSchema), (req, res) => {
   try {
     const { status } = req.body;
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
@@ -538,6 +689,9 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
     const params = [status, req.user.id];
 
     if (status === 'closed') {
+      if (!isOrderFullyPaid(order)) {
+        return res.status(400).json({ error: 'Ödeme tamamlanmadan sipariş kapatılamaz' });
+      }
       updates.push(`closed_at = datetime('now')`);
     }
     params.push(req.params.id, req.businessId);
@@ -582,7 +736,7 @@ router.patch('/:id/status', staffAndKitchen, (req, res) => {
 });
 
 // PATCH /api/orders/:orderId/items/:itemId
-router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
+router.patch('/:orderId/items/:itemId', staffAndKitchen, validate(updateOrderItemSchema), (req, res) => {
   try {
     const { status, quantity, note, is_comped, comp_reason, portion_id: portionIdBody } = req.body;
     const item = db.prepare(`SELECT oi.*, o.status AS order_status FROM order_items oi 
@@ -592,6 +746,7 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
     if (['closed', 'cancelled'].includes(item.order_status)) {
       return res.status(400).json({ error: 'Kapalı siparişte satır değiştirilemez' });
     }
+    assertAllowedItemStatusTransition(item.status, status);
 
     const prevStatus = item.status;
     const prevQty = item.quantity;
@@ -638,20 +793,23 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
       sets.push('portion_label = ?'); params.push(portionLabel);
     }
 
-    if (sets.length) {
-      params.push(req.params.itemId);
-      db.prepare(`UPDATE order_items SET ${sets.join(', ')} WHERE id = ?`).run(...params);
-    }
+    const shouldEnqueueCancel = status === 'cancelled' && prevStatus !== 'cancelled';
+    const nq = quantity !== undefined ? Number(quantity) : null;
+    const shouldEnqueueReduce = quantity !== undefined && prevStatus !== 'cancelled' && Number.isFinite(nq) && nq >= 1 && nq < prevQty;
+    let shouldProcessPrintJobs = false;
+    db.transaction(() => {
+      if (sets.length) {
+        params.push(req.params.itemId);
+        db.prepare(`UPDATE order_items SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+      }
 
-    recalcOrderTotals(req.params.orderId);
-    autoCancelOrderIfNoActiveItems(req.params.orderId, req.businessId, req.user.id);
+      recalcOrderTotals(req.params.orderId);
+      autoCancelOrderIfNoActiveItems(req.params.orderId, req.businessId, req.user.id);
 
-    if (status === 'cancelled' && prevStatus !== 'cancelled') {
-      enqueueKitchenAdjustmentJobs(req.businessId, req.params.orderId, beforeSnap, { type: 'cancel' }, req.user.id);
-      processPendingJobsSync(req.businessId, req.user.id);
-    } else if (quantity !== undefined && prevStatus !== 'cancelled') {
-      const nq = parseInt(String(quantity), 10);
-      if (Number.isFinite(nq) && nq >= 1 && nq < prevQty) {
+      if (shouldEnqueueCancel) {
+        enqueueKitchenAdjustmentJobs(req.businessId, req.params.orderId, beforeSnap, { type: 'cancel' }, req.user.id);
+        shouldProcessPrintJobs = true;
+      } else if (shouldEnqueueReduce) {
         enqueueKitchenAdjustmentJobs(
           req.businessId,
           req.params.orderId,
@@ -659,8 +817,12 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
           { type: 'reduce', previousQty: prevQty, newQty: nq },
           req.user.id,
         );
-        processPendingJobsSync(req.businessId, req.user.id);
+        shouldProcessPrintJobs = true;
       }
+    })();
+
+    if (shouldProcessPrintJobs) {
+      processPendingJobsSync(req.businessId, req.user.id);
     }
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(req.params.orderId);
@@ -668,6 +830,7 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, (req, res) => {
     emitToRoom(req.businessId, 'order:item_updated', { order });
     res.json(order);
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -699,17 +862,14 @@ function autoCancelOrderIfNoActiveItems(orderId, businessId, userId) {
   const payments = db.prepare('SELECT COUNT(*) as c FROM payments WHERE order_id = ?').get(orderId);
   if (payments.c > 0) return;
 
-  const txn = db.transaction(() => {
-    db.prepare(
-      `UPDATE orders SET status = 'cancelled', updated_at = datetime('now'), updated_by = ? WHERE id = ? AND business_id = ?`,
-    ).run(userId, orderId, businessId);
-    db.prepare(
-      `UPDATE tables SET status = 'empty', current_order_id = NULL, guest_count = 0, updated_at = datetime('now')
-       WHERE business_id = ? AND current_order_id = ?`,
-    ).run(businessId, orderId);
-    db.prepare(`UPDATE order_items SET status = 'cancelled' WHERE order_id = ?`).run(orderId);
-  });
-  txn();
+  db.prepare(
+    `UPDATE orders SET status = 'cancelled', updated_at = datetime('now'), updated_by = ? WHERE id = ? AND business_id = ?`,
+  ).run(userId, orderId, businessId);
+  db.prepare(
+    `UPDATE tables SET status = 'empty', current_order_id = NULL, guest_count = 0, updated_at = datetime('now')
+     WHERE business_id = ? AND current_order_id = ?`,
+  ).run(businessId, orderId);
+  db.prepare(`UPDATE order_items SET status = 'cancelled' WHERE order_id = ?`).run(orderId);
 
   auditLog(businessId, userId, 'order_cancelled_empty_items', 'order', orderId);
 }

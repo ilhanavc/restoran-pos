@@ -89,6 +89,9 @@ export class Cid812Provider {
     this._reconnectTimer = null;
 
     this._debounce = { key: '', at: 0 };
+    this._postQueue = [];
+    this._postRetryTimer = null;
+    this._postDrainRunning = false;
     this._phoneRegex = null;
     this._frameCount = 0;
     this._traceSample = [];
@@ -166,6 +169,7 @@ export class Cid812Provider {
   stop() {
     this._stopped = true;
     this._clearReconnectTimer();
+    this._clearPostRetryTimer();
     try {
       if (this._device) {
         try {
@@ -198,6 +202,7 @@ export class Cid812Provider {
       HID = mod.default || mod;
     } catch (e) {
       this.log.error?.('[cid812][hid] node-hid paketi yok veya yüklenemedi:', e?.message || e);
+      this._scheduleReconnect();
       return;
     }
 
@@ -208,6 +213,7 @@ export class Cid812Provider {
     const devices = HID.devices ? HID.devices() : [];
     if (!Array.isArray(devices) || devices.length === 0) {
       this.log.warn?.('[cid812][hid] HID cihaz listesi boş');
+      this._scheduleReconnect();
       return;
     }
 
@@ -223,6 +229,7 @@ export class Cid812Provider {
         '[cid812][hid] eşleşen cihaz bulunamadı. Filtre:',
         { hidVids, hidPids, hidSerial, devicesCount: devices.length },
       );
+      this._scheduleReconnect();
       return;
     }
 
@@ -243,6 +250,7 @@ export class Cid812Provider {
     } catch (e) {
       this.log.error?.('[cid812][hid] cihaz açma hatası:', e?.message || e);
       this._device = null;
+      this._scheduleReconnect();
       return;
     }
 
@@ -287,6 +295,13 @@ export class Cid812Provider {
     if (this._reconnectTimer) {
       clearTimeout(this._reconnectTimer);
       this._reconnectTimer = null;
+    }
+  }
+
+  _clearPostRetryTimer() {
+    if (this._postRetryTimer) {
+      clearTimeout(this._postRetryTimer);
+      this._postRetryTimer = null;
     }
   }
 
@@ -360,9 +375,7 @@ export class Cid812Provider {
       device: { ...info },
     };
 
-    this._postIncoming(phone, rawPayload).catch((e) => {
-      this.log.error?.('[cid812][hid] API POST hatası:', e?.message || e);
-    });
+    this._enqueueIncoming(phone, rawPayload);
   }
 
   _captureFrameAndAnalyze(ts, buf, info) {
@@ -562,6 +575,60 @@ export class Cid812Provider {
       source_type: 'cid812',
     });
     this.log.log?.(`[cid812][hid] gönderildi: ${phone}`);
+  }
+
+  _enqueueIncoming(phone, rawPayload) {
+    const max = Number(this.cfg.cid812PostQueueMax) || 25;
+    if (this._postQueue.length >= max) {
+      const dropped = this._postQueue.shift();
+      this.log.warn?.('[cid812][hid] POST kuyruğu dolu; en eski olay düşürüldü:', dropped?.phone || '-');
+    }
+    this._postQueue.push({ phone, rawPayload, attempts: 0 });
+    this._drainPostQueue().catch((e) => {
+      this.log.error?.('[cid812][hid] POST kuyruğu işlenemedi:', e?.message || e);
+    });
+  }
+
+  _schedulePostRetry() {
+    if (this._stopped || this._postRetryTimer || this._postQueue.length === 0) return;
+    const retryMs = Number(this.cfg.cid812PostRetryMs) || 1500;
+    this._postRetryTimer = setTimeout(() => {
+      this._postRetryTimer = null;
+      this._drainPostQueue().catch((e) => {
+        this.log.error?.('[cid812][hid] POST retry hatası:', e?.message || e);
+      });
+    }, retryMs);
+    this._postRetryTimer.unref?.();
+  }
+
+  async _drainPostQueue() {
+    if (this._postDrainRunning || this._stopped) return;
+    this._postDrainRunning = true;
+    const maxAttempts = Number(this.cfg.cid812PostRetryAttempts) || 3;
+    try {
+      while (this._postQueue.length && !this._stopped) {
+        const item = this._postQueue[0];
+        try {
+          item.attempts += 1;
+          await this._postIncoming(item.phone, item.rawPayload);
+          this._postQueue.shift();
+        } catch (e) {
+          this.log.error?.(
+            `[cid812][hid] API POST hatası attempt=${item.attempts}/${maxAttempts}:`,
+            e?.message || e,
+          );
+          if (item.attempts >= maxAttempts) {
+            this.log.error?.('[cid812][hid] Caller ID olayı retry limiti sonrası düşürüldü:', item.phone);
+            this._postQueue.shift();
+            continue;
+          }
+          this._schedulePostRetry();
+          return;
+        }
+      }
+    } finally {
+      this._postDrainRunning = false;
+    }
   }
 
   get started() {

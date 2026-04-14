@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>Uygulanan İyileştirmeler Raporu</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 14mm 18mm;
+    }
+
+    :root {
+      color-scheme: light;
+      --ink: #16202a;
+      --muted: #607080;
+      --line: #d9e0e7;
+      --soft: #f5f7fa;
+      --accent: #0b6b6e;
+      --accent-2: #b13f2b;
+      --warn: #b7791f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 10.4pt;
+      line-height: 1.54;
+    }
+
+    .cover {
+      border-bottom: 4px solid var(--accent);
+      margin-bottom: 22px;
+      padding: 10px 0 18px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .cover h1 {
+      border: 0;
+      color: #0e252b;
+      font-size: 25pt;
+      line-height: 1.12;
+      margin: 0 0 10px;
+      padding: 0;
+    }
+
+    .meta {
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 9.5pt;
+    }
+
+    .content {
+      max-width: 100%;
+    }
+
+    h1, h2, h3, h4 {
+      color: #102a32;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    h1 {
+      border-bottom: 2px solid var(--line);
+      font-size: 20pt;
+      margin: 24px 0 12px;
+      padding-bottom: 8px;
+    }
+
+    h2 {
+      border-left: 5px solid var(--accent);
+      font-size: 15.5pt;
+      margin: 22px 0 10px;
+      padding-left: 10px;
+    }
+
+    h3 {
+      color: var(--accent-2);
+      font-size: 12.5pt;
+      margin: 16px 0 8px;
+    }
+
+    h4 {
+      font-size: 11pt;
+      margin: 12px 0 6px;
+    }
+
+    p {
+      margin: 7px 0;
+    }
+
+    ul, ol {
+      margin: 7px 0 10px 21px;
+      padding: 0;
+    }
+
+    li {
+      margin: 3px 0;
+      padding-left: 2px;
+    }
+
+    code {
+      background: #eef3f6;
+      border: 1px solid #d7e1e8;
+      border-radius: 4px;
+      color: #143947;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9.2pt;
+      padding: 1px 4px;
+    }
+
+    pre {
+      background: #101820;
+      border-radius: 6px;
+      color: #f3f7fb;
+      font-size: 8.7pt;
+      line-height: 1.45;
+      margin: 10px 0 14px;
+      overflow: hidden;
+      padding: 11px 12px;
+      white-space: pre-wrap;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
+    }
+
+    .table-wrap {
+      margin: 11px 0 15px;
+      overflow: visible;
+      page-break-inside: avoid;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 8.2pt;
+      table-layout: fixed;
+    }
+
+    th {
+      background: #16323a;
+      color: #ffffff;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 6px 7px;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: var(--soft);
+    }
+
+    strong {
+      color: #0d2830;
+    }
+
+    .page-break {
+      break-before: page;
+      page-break-before: always;
+    }
+
+    .package h1:first-child {
+      margin-top: 0;
+    }
+
+    @media print {
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div class="eyebrow">Restoran POS V3 Audit Raporu</div>
+    <h1>Uygulanan İyileştirmeler Raporu</h1>
+    <div class="meta">
+      <span>Olusturulma: 14 Nisan 2026 19:49</span>
+      <span>Kaynak: docs/audit</span>
+      <span>Format: Tekil rapor</span>
+    </div>
+  </section>
+  <main class="content ">
+    <h1>Uygulanan İyileştirmeler Raporu</h1>
+<p>Tarih: 2026-04-14 Kapsam: Audit raporlarında belirlenen ürün, UX/UI ve frontend mimarisi eksiklerine göre uygulanan kalıcı iyileştirmeler. Hedef okuyucu: Ürün sahibi, işletmeci, operasyon yöneticisi ve teknik ekip.</p>
+<h2>1. Yönetici Özeti</h2>
+<p>Bu çalışmada restoran POS uygulamasında daha önce raporlanan sorunlar içinden kullanıcıya doğrudan yansıyan ve ürün kalitesini düşüren alanlar ele alındı. Amaç hızlı bir geçici düzeltme yapmak değil; ödeme, sipariş, masa ve ayarlar ekranlarında daha tutarlı, güvenilir ve sürdürülebilir bir temel oluşturmaktı.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Alan</th><th>Önceki Durum</th><th>Yeni Durum</th><th>Kullanıcıya Etkisi</th></tr></thead>
+<tbody>
+<tr><td>Ödeme kuralları</td><td>Farklı ekranlarda ayrı ayrı hesaplanıyordu</td><td>Tek merkezden yönetiliyor</td><td>Ödeme, hızlı ödeme ve masa durumları daha tutarlı</td></tr>
+<tr><td>Sipariş aksiyonları</td><td>Kaydetme, ödeme açma ve satır düzenleme koşulları ekran içine dağılmıştı</td><td>Ortak karar fonksiyonlarına taşındı</td><td>Hatalı veya zamansız aksiyon riski azaldı</td></tr>
+<tr><td>Onay pencereleri</td><td>Bazı yerlerde tarayıcıya ait kaba onay kutuları kullanılıyordu</td><td>Uygulama içi ortak onay penceresi kullanılıyor</td><td>Daha profesyonel ve daha anlaşılır deneyim</td></tr>
+<tr><td>Ayarlar ekranları</td><td>Çıkış, silme, pasifleştirme gibi kritik işlemler tutarsızdı</td><td>Aynı onay standardına bağlandı</td><td>Yönetim tarafında güven ve tutarlılık arttı</td></tr>
+<tr><td>API altyapısı</td><td>HTTP iletişimi ve domain endpointleri aynı dosyada büyüyordu</td><td>HTTP çekirdeği ayrıldı</td><td>Sonraki geliştirmeler için daha sağlam temel oluştu</td></tr>
+</tbody></table></div>
+<h2>2. Neler İyileştirildi?</h2>
+<h3>2.1 Ödeme ve Masa Durumu Daha Güvenilir Hale Getirildi</h3>
+<p>Ödeme ekranı, hızlı ödeme ekranı ve masa ekranı daha önce &quot;bu sipariş ödendi mi?&quot;, &quot;ne kadar kaldı?&quot;, &quot;masa kapatılabilir mi?&quot; gibi soruları kendi içinde ayrı ayrı cevaplıyordu. Bu durum ileride bir ekranın doğru, diğerinin yanlış davranmasına yol açabilecek bir riskti.</p>
+<p>Yeni yapıda ödeme durumu tek merkezden hesaplanıyor.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>İyileştirme</th><th>Açıklama</th><th>Kazanç</th></tr></thead>
+<tbody>
+<tr><td>Toplam ödeme hesabı ortaklaştırıldı</td><td>Sipariş toplamı, ödenen tutar ve kalan tutar aynı yardımcı yapıdan geliyor</td><td>Ekranlar arası tutarsızlık riski azaldı</td></tr>
+<tr><td>Tam ödeme kontrolü ortaklaştırıldı</td><td>&quot;Tam ödendi&quot; kararı tek yerden veriliyor</td><td>Masa kapatma ve hızlı ödeme davranışı daha güvenli</td></tr>
+<tr><td>Paket sipariş ödeme etiketi ortaklaştırıldı</td><td>Ödendi, kısmi ödendi, ödenmedi gibi durumlar aynı mantıkla gösteriliyor</td><td>Paket ve masa siparişi dili daha tutarlı</td></tr>
+</tbody></table></div>
+<p>Etkilenen kullanıcı deneyimi:</p>
+<ul>
+<li>Kasiyer hızlı ödeme yaptıktan sonra masa durumunun yanlış görünme riski azaldı.</li>
+<li>Paket siparişlerde ödeme etiketi daha tutarlı hale geldi.</li>
+<li>Masa kapatma gibi kritik işlemler ödeme durumuyla daha net bağlandı.</li>
+</ul>
+<h2>3. Sipariş Ekranında Karar Mantığı Toparlandı</h2>
+<p>Sipariş ekranı POS uygulamasının en yoğun kullanılan alanı. Bu ekranda &quot;kaydet&quot;, &quot;ödeme al&quot;, &quot;ürün düzenle&quot;, &quot;ürün iptal et&quot; gibi kararlar daha önce ekran kodunun içine dağılmış durumdaydı.</p>
+<p>Bu turda bu kararların bir kısmı merkezi ve okunabilir kurallara taşındı.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Kural</th><th>Önceki Risk</th><th>Yeni Yaklaşım</th></tr></thead>
+<tbody>
+<tr><td>Sipariş kaydedilebilir mi?</td><td>Sepet boşken veya paket siparişte müşteri yokken dağınık kontroller vardı</td><td>Tek karar fonksiyonuyla kontrol ediliyor</td></tr>
+<tr><td>Ödeme ekranı açılabilir mi?</td><td>Kaydedilmemiş ürün varken ödeme açma riski ekran içine gömülüydü</td><td>Merkezi aksiyon kuralına taşındı</td></tr>
+<tr><td>Ürün satırı düzenlenebilir mi?</td><td>Satır durumu ve sipariş durumu kontrolleri dağınıktı</td><td>Ortak policy fonksiyonuyla yönetiliyor</td></tr>
+<tr><td>Ürün iptal edilebilir mi?</td><td>Yetki ve satır durumu kontrolleri ekranda karışıyordu</td><td>Daha net bir karar katmanına alındı</td></tr>
+</tbody></table></div>
+<p>Bu iyileştirme kullanıcıya nasıl yansır?</p>
+<ul>
+<li>Kaydedilmemiş ürün varken yanlışlıkla ödeme akışına girme riski azalır.</li>
+<li>Kapalı siparişlerde yanlış düzenleme aksiyonları daha güvenli engellenir.</li>
+<li>Paket siparişlerde müşteri zorunluluğu daha anlaşılır şekilde korunur.</li>
+</ul>
+<h2>4. Uygulama İçi Onay Deneyimi Standartlaştırıldı</h2>
+<p>Audit raporlarında &quot;amatör görünen alanlar&quot; içinde en net sorunlardan biri native tarayıcı onay kutularıydı. Bunlar görsel olarak uygulamanın geri kalanından kopuk, açıklama açısından zayıf ve yoğun POS kullanımında güven vermeyen bir deneyim oluşturuyordu.</p>
+<p>Bu turda ortak bir onay penceresi ve onu yöneten ortak kullanım yapısı eklendi.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Nerede Kullanılıyor?</th><th>Örnek Aksiyon</th><th>Yeni Davranış</th></tr></thead>
+<tbody>
+<tr><td>İşletme ayarları</td><td>Kaydetmeden çıkış, değişiklikleri atma</td><td>Açıklamalı uygulama içi onay</td></tr>
+<tr><td>Ekran ayarları</td><td>Kaydetmeden çıkış</td><td>Açıklamalı uygulama içi onay</td></tr>
+<tr><td>Menü yönetimi</td><td>Kategori silme, ürün kaldırma, toplu pasifleştirme</td><td>Standart tehlikeli işlem onayı</td></tr>
+<tr><td>Yazıcı ayarları</td><td>Kaydetmeden çıkış, varsayılanlara dönme, pasifleştirme</td><td>Daha kontrollü onay akışı</td></tr>
+<tr><td>Kullanıcı yönetimi</td><td>Kullanıcı pasifleştirme</td><td>Net etki açıklamasıyla onay</td></tr>
+<tr><td>Rezervasyonlar</td><td>Rezervasyon silme</td><td>Standart silme onayı</td></tr>
+<tr><td>Stok</td><td>Stok kalemi silme</td><td>Standart silme onayı</td></tr>
+<tr><td>Salon bölgeleri</td><td>Bölge silme</td><td>Risk açıklamalı onay</td></tr>
+</tbody></table></div>
+<p>Kullanıcı açısından fark:</p>
+<ul>
+<li>Kritik işlemlerde &quot;ne olacak?&quot; sorusu daha net cevaplanıyor.</li>
+<li>Uygulama artık tarayıcı penceresi gibi değil, kendi içinde tutarlı bir ürün gibi davranıyor.</li>
+<li>Silme, pasifleştirme ve çıkış işlemleri daha güvenli hissediliyor.</li>
+</ul>
+<h2>5. Ayarlar ve Yönetim Ekranlarında Profesyonellik Artırıldı</h2>
+<p>Ayarlar ekranları işletme sahibi veya yönetici tarafından kullanılıyor. Bu alanlarda küçük tutarsızlıklar bile ürüne olan güveni azaltır. Yapılan çalışma özellikle şu hissi iyileştirmeyi hedefledi:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Önceki İzlenim</th><th>Yeni İzlenim</th></tr></thead>
+<tbody>
+<tr><td>Bazı işlemler tarayıcı onayıyla, bazıları uygulama modalıyla ilerliyordu</td><td>Tüm kritik onaylar aynı ürün standardıyla ilerliyor</td></tr>
+<tr><td>Silme/pasifleştirme aksiyonları bazen az açıklamalıydı</td><td>İşlemin sonucu açıkça yazılıyor</td></tr>
+<tr><td>Ayarlar ekranları birbirinden kopuk davranıyordu</td><td>Ortak onay altyapısı ile davranış standardı başladı</td></tr>
+</tbody></table></div>
+<p>Bu, özellikle kurulum sonrası işletme ayarları, yazıcı ayarları, kullanıcı yönetimi ve menü yönetimi gibi alanlarda daha profesyonel bir ürün hissi sağlar.</p>
+<h2>6. API Altyapısında Sağlamlaştırma Yapıldı</h2>
+<p>Kullanıcının günlük kullanımda görmediği ama ürünün uzun vadeli kalitesini etkileyen bir altyapı iyileştirmesi de yapıldı.</p>
+<p>Önceden API dosyası hem sunucuyla konuşma mantığını hem de tüm ürün endpointlerini aynı yerde taşıyordu. Bu yapı büyüdükçe bakım zorlaşıyor, test etmek ve domainlere ayırmak riskli hale geliyordu.</p>
+<p>Bu turda HTTP iletişim çekirdeği ayrı bir dosyaya çıkarıldı. Mevcut ekranların kullandığı <code>api</code> arayüzü korunarak davranış kırılmadı.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Değişiklik</th><th>Neden Önemli?</th></tr></thead>
+<tbody>
+<tr><td>HTTP/token/request çekirdeği ayrıldı</td><td>Gelecekte sipariş, masa, ödeme, yazıcı gibi API grupları daha rahat ayrılabilecek</td></tr>
+<tr><td>Mevcut <code>api.*</code> kullanımı korundu</td><td>Ekranlarda kırıcı değişiklik yapılmadı</td></tr>
+<tr><td>Davranış korunarak mimari sınır açıldı</td><td>Büyük refactorlara daha güvenli geçiş zemini oluştu</td></tr>
+</tbody></table></div>
+<h2>7. Temizlenen Amatör İzler</h2>
+<p>Bu turda özellikle ürün kalitesini düşüren küçük ama görünür izler temizlendi.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Alan</th><th>Temizlenen Sorun</th></tr></thead>
+<tbody>
+<tr><td>Native onay kutuları</td><td><code>window.confirm</code> kullanımları kaldırıldı</td></tr>
+<tr><td>Debug çıktıları</td><td>Yazıcı keşif ekranındaki gereksiz <code>console.log</code> çıktıları kaldırıldı</td></tr>
+<tr><td>Tekrar eden ödeme hesabı</td><td>Ödeme hesapları ortak yapıya taşındı</td></tr>
+<tr><td>Dağınık sipariş kararları</td><td>İlk karar katmanı sipariş policy dosyasına alındı</td></tr>
+<tr><td>API monolit başlangıcı</td><td>HTTP çekirdeği servis dosyasından ayrıldı</td></tr>
+</tbody></table></div>
+<h2>8. Doğrulama Sonuçları</h2>
+<p>Uygulanan değişikliklerden sonra temel doğrulamalar çalıştırıldı.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Komut</th><th>Sonuç</th><th>Açıklama</th></tr></thead>
+<tbody>
+<tr><td><code>npm run build</code></td><td>Başarılı</td><td>Frontend production build sorunsuz tamamlandı</td></tr>
+<tr><td><code>npm test</code></td><td>Başarılı</td><td>Server testlerinde 12 test dosyası, 108 test geçti</td></tr>
+<tr><td><code>npm run lint --if-present</code></td><td>Çalıştı, çıktı üretmedi</td><td>Repo içinde lint scripti tanımlı değil</td></tr>
+<tr><td>Statik arama</td><td>Temiz</td><td><code>window.confirm</code> ve debug <code>console.log</code> kalmadı</td></tr>
+</tbody></table></div>
+<h2>9. Bu Çalışmanın Ürün Değeri</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Değer</th><th>Açıklama</th></tr></thead>
+<tbody>
+<tr><td>Daha az hata riski</td><td>Ödeme ve sipariş kuralları tek merkezden yönetilmeye başlandı</td></tr>
+<tr><td>Daha profesyonel görünüm</td><td>Kritik onaylar artık uygulamanın kendi tasarım diliyle gösteriliyor</td></tr>
+<tr><td>Daha güvenli operasyon</td><td>Silme, pasifleştirme, çıkış ve sıfırlama işlemleri daha açıklamalı hale geldi</td></tr>
+<tr><td>Daha kolay bakım</td><td>Büyük dosyaları parçalamaya başlamadan önce güvenli ortak katmanlar kuruldu</td></tr>
+<tr><td>Daha iyi test zemini</td><td>Saf yardımcı fonksiyonlar ileride kolayca unit test kapsamına alınabilir</td></tr>
+</tbody></table></div>
+<h2>10. Kalan Açık Alanlar</h2>
+<p>Bu tur kalıcı ve sağlam bir temel attı; ancak daha büyük frontend mimari iyileştirmeleri kontrollü şekilde sonraki turlara bırakılmalı.</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Kalan Alan</th><th>Neden Hemen Tamamlanmadı?</th><th>Önerilen Sonraki Adım</th></tr></thead>
+<tbody>
+<tr><td><code>OrderScreen</code> parçalama</td><td>Çok yoğun ekran; tek hamlede bölmek regresyon riski doğurur</td><td>Katalog, sepet, müşteri ve işlem hookları ayrı ayrı çıkarılmalı</td></tr>
+<tr><td><code>TablesScreen</code> parçalama</td><td>Masa, paket, transfer, caller ID ve refresh akışı aynı ekranda</td><td><code>useTablesData</code>, <code>TakeawaySidebar</code>, <code>TableCard</code> ayrımı yapılmalı</td></tr>
+<tr><td><code>PrinterDetailPage</code> parçalama</td><td>Yazıcı formu, keşif, önizleme ve encoding aynı dosyada</td><td>Form modelini hook&#39;a, önizlemeyi ayrı bileşene almak</td></tr>
+<tr><td>Test altyapısı</td><td>Frontend için özel test scripti yok</td><td>Utility unit testleri ve Playwright smoke testleri eklenmeli</td></tr>
+<tr><td>Lint standardı</td><td>Repo lint scripti tanımlı değil</td><td>ESLint/format kontrolü standart build pipeline&#39;a eklenmeli</td></tr>
+</tbody></table></div>
+<h2>11. Sonraki Geliştirme Planı</h2>
+<h3>Hemen Devam Edilecekler</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Öncelik</th><th>İş</th><th>Beklenen Kazanç</th></tr></thead>
+<tbody>
+<tr><td>P1</td><td>Sipariş ekranını küçük hooklara ayırma</td><td>Daha az kırılgan sipariş geliştirmesi</td></tr>
+<tr><td>P1</td><td>Masa ekranı veri yenileme mantığını merkezi hook&#39;a alma</td><td>Socket/polling/manuel refresh karmaşasını azaltma</td></tr>
+<tr><td>P1</td><td>Frontend utility testleri ekleme</td><td>Ödeme ve sipariş kurallarını otomatik koruma</td></tr>
+</tbody></table></div>
+<h3>Bu Hafta Ele Alınacaklar</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Öncelik</th><th>İş</th><th>Beklenen Kazanç</th></tr></thead>
+<tbody>
+<tr><td>P2</td><td>Yazıcı detay ekranını form ve önizleme parçalarına ayırma</td><td>Yazıcı ayarlarında bakım kolaylığı</td></tr>
+<tr><td>P2</td><td>API servislerini domain gruplarına bölmeye devam etme</td><td>Daha temiz entegrasyon mimarisi</td></tr>
+<tr><td>P2</td><td>Settings shell / ortak ayarlar layout&#39;u</td><td>Yönetim ekranlarında daha tutarlı ürün hissi</td></tr>
+</tbody></table></div>
+<h3>Sonraya Bırakılacaklar</h3>
+<div class="table-wrap"><table>
+<thead><tr><th>Öncelik</th><th>İş</th><th>Gerekçe</th></tr></thead>
+<tbody>
+<tr><td>P2</td><td>React Query veya hafif cache katmanı</td><td>Daha geniş veri mimarisi kararı gerektirir</td></tr>
+<tr><td>P2</td><td>Route state yerine URL/server hydrate modeli</td><td>Davranış etkisi yüksek, planlı yapılmalı</td></tr>
+<tr><td>P2</td><td>Inline style borcunun tasarım sistemine taşınması</td><td>Görsel regresyon testiyle ilerlemeli</td></tr>
+</tbody></table></div>
+<h2>12. Kısa Sonuç</h2>
+<p>Bu turda uygulamanın görünmeyen ama güvenilirliği belirleyen temeli güçlendirildi. Ödeme, sipariş ve masa davranışları daha merkezi hale geldi; yönetim ekranlarındaki kritik onaylar profesyonel bir standarda kavuştu; API tarafında daha temiz bir mimari sınır açıldı.</p>
+<p>Ürün artık bir sonraki geliştirme turuna daha sağlam bir zeminden devam edebilir. En doğru devam adımı, büyük ekranları küçük ama güvenli parçalara ayırmak ve bu kuralları otomatik testlerle koruma altına almak olacaktır.</p>
+  </main>
+</body>
+</html>

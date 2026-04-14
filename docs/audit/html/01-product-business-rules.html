@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>01 - Product &amp; Business Rules Audit</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 14mm 18mm;
+    }
+
+    :root {
+      color-scheme: light;
+      --ink: #16202a;
+      --muted: #607080;
+      --line: #d9e0e7;
+      --soft: #f5f7fa;
+      --accent: #0b6b6e;
+      --accent-2: #b13f2b;
+      --warn: #b7791f;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 10.4pt;
+      line-height: 1.54;
+    }
+
+    .cover {
+      border-bottom: 4px solid var(--accent);
+      margin-bottom: 22px;
+      padding: 10px 0 18px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: 9pt;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .cover h1 {
+      border: 0;
+      color: #0e252b;
+      font-size: 25pt;
+      line-height: 1.12;
+      margin: 0 0 10px;
+      padding: 0;
+    }
+
+    .meta {
+      color: var(--muted);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 9.5pt;
+    }
+
+    .content {
+      max-width: 100%;
+    }
+
+    h1, h2, h3, h4 {
+      color: #102a32;
+      break-after: avoid;
+      page-break-after: avoid;
+    }
+
+    h1 {
+      border-bottom: 2px solid var(--line);
+      font-size: 20pt;
+      margin: 24px 0 12px;
+      padding-bottom: 8px;
+    }
+
+    h2 {
+      border-left: 5px solid var(--accent);
+      font-size: 15.5pt;
+      margin: 22px 0 10px;
+      padding-left: 10px;
+    }
+
+    h3 {
+      color: var(--accent-2);
+      font-size: 12.5pt;
+      margin: 16px 0 8px;
+    }
+
+    h4 {
+      font-size: 11pt;
+      margin: 12px 0 6px;
+    }
+
+    p {
+      margin: 7px 0;
+    }
+
+    ul, ol {
+      margin: 7px 0 10px 21px;
+      padding: 0;
+    }
+
+    li {
+      margin: 3px 0;
+      padding-left: 2px;
+    }
+
+    code {
+      background: #eef3f6;
+      border: 1px solid #d7e1e8;
+      border-radius: 4px;
+      color: #143947;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9.2pt;
+      padding: 1px 4px;
+    }
+
+    pre {
+      background: #101820;
+      border-radius: 6px;
+      color: #f3f7fb;
+      font-size: 8.7pt;
+      line-height: 1.45;
+      margin: 10px 0 14px;
+      overflow: hidden;
+      padding: 11px 12px;
+      white-space: pre-wrap;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      color: inherit;
+      padding: 0;
+    }
+
+    .table-wrap {
+      margin: 11px 0 15px;
+      overflow: visible;
+      page-break-inside: avoid;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 8.2pt;
+      table-layout: fixed;
+    }
+
+    th {
+      background: #16323a;
+      color: #ffffff;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 6px 7px;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: var(--soft);
+    }
+
+    strong {
+      color: #0d2830;
+    }
+
+    .page-break {
+      break-before: page;
+      page-break-before: always;
+    }
+
+    .package h1:first-child {
+      margin-top: 0;
+    }
+
+    @media print {
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <div class="eyebrow">Restoran POS V3 Audit Raporu</div>
+    <h1>01 - Product &amp; Business Rules Audit</h1>
+    <div class="meta">
+      <span>Olusturulma: 14 Nisan 2026 19:49</span>
+      <span>Kaynak: docs/audit</span>
+      <span>Format: Tekil rapor</span>
+    </div>
+  </section>
+  <main class="content ">
+    <h1>01 - Product &amp; Business Rules Audit</h1>
+<p>Tarih: 2026-04-14 Kapsam: masa, siparis, odeme, hizli odeme, masa kapatma/tasima, paket siparis, yazici/mutfak ve Caller ID is akislari. Kaynak baglam: <code>docs/audit/00-overall-audit.md</code>, <code>docs/audit/00a-prioritized-action-plan.md</code>, <code>docs/audit/00b-first-hardening-pass.md</code>.</p>
+<p>Bu rapor kod degisikligi yapmadan, repo icindeki mevcut davranisi urun/operasyon kurallari acisindan cikarmak icin hazirlanmistir.</p>
+<h2>1. Urun akisi ozeti</h2>
+<p>Uygulama restoran POS icin iki ana siparis tipini destekliyor:</p>
+<ul>
+<li><code>dine_in</code>: masa uzerinden acilan salon siparisi.</li>
+<li><code>takeaway</code>: paket siparis / al-gotur akisi.</li>
+</ul>
+<p>Ana urun modeli su sekilde calisiyor:</p>
+<ol>
+<li>Kullanici masa ekranindan bos/dolu/rezerve masaya tiklar.</li>
+<li>Siparis ekraninda urunler once lokal sepete eklenir.</li>
+<li><code>Kaydet</code> ile siparis olusturulur veya kayitli siparise yeni kalemler eklenir.</li>
+<li>Backend, kaydedilen yeni kalemleri otomatik mutfaga gonderir.</li>
+<li>Kaydedilmemis urun varken odeme aksiyonlari frontend tarafinda gizlenir.</li>
+<li>Odeme ayrintili odeme ekrani veya hizli odeme modalindan alinir.</li>
+<li>Masa kapatma sadece odenmis hesap icin masalar ekraninda veya odeme ekraninda mumkundur.</li>
+<li>Masa tasima hem masalar ekranindan hem siparis ekranindan yapilabilir; her iki durumda da hedef siparise yonlendirme yerine masalar ekranina donulur.</li>
+<li>Paket sipariste musteri secimi zorunludur; teslimat durumu masalar ekranindaki paket siparis yan panelinden yonetilir.</li>
+<li>Caller ID gelen aramayi paket siparis acisina baglar; siparis kaydedildiginde call log ile order iliskilendirilir.</li>
+</ol>
+<p>Kritik urun gercegi: Frontend &quot;Kaydet&quot; islemini siparisin olusturulmasi/urun eklenmesi gibi sunuyor; backend ise kaydedilen her yeni kalemi hemen mutfaga gonderip siparis durumunu <code>in_kitchen</code> yapabiliyor. Bu, POS dilinde &quot;kaydet&quot; ile &quot;mutfaga gonder&quot; davranisinin ayni islemde birlesmesi anlamina geliyor.</p>
+<h2>2. Kritik kullanici akislari</h2>
+<h3>2.1 Masa acma</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Kullanici <code>TablesScreen</code> uzerinde herhangi bir masaya tiklar.</li>
+<li>Transfer modu aktif degilse <code>onOpenOrder(table)</code> calisir.</li>
+<li><code>App.jsx</code> bu masayi <code>/order/table/:id</code> rotasina <code>table</code>, <code>existingOrderId</code>, <code>orderType: dine_in</code> state&#39;i ile tasir.</li>
+<li>Masa bos ise <code>existingOrderId</code> yoktur; siparis ekrani yeni sepet ile acilir.</li>
+<li>Masa dolu ise <code>existingOrderId</code> vardir; mevcut siparis yuklenir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/tables/TablesScreen.jsx</code>: masa tiklama ve transfer modu ayrimi.</li>
+<li><code>client/src/App.jsx</code>: <code>handleOpenOrder</code> ile masa siparis ekranina yonlendirme.</li>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: <code>existingOrderId || table?.current_order_id</code> ile mevcut siparis yukleme.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Bos masa acma davranisi dogru.</li>
+<li>Rezerve masa icin ayri bir onay/kural yok; rezerve masa da siparis ekranina normal giriyor. Bu urun kuralı belirsiz.</li>
+</ul>
+<h3>2.2 Siparis olusturma</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Kullanici urun secerek lokal sepete ekler.</li>
+<li>Ayni urun/portion/modifier/not kombinasyonu tekrar eklenirse sepette miktar artar.</li>
+<li>Kaydet butonu sadece sepette urun varken anlamlidir.</li>
+<li>Yeni masa siparisinde <code>api.createOrder</code> cagrilir.</li>
+<li>Backend siparisi <code>saved</code> status ile olusturur, masayi <code>occupied</code> yapar.</li>
+<li>Backend hemen yeni kalemleri mutfak icin finalize eder, kalemleri <code>sent</code>, siparisi <code>in_kitchen</code> yapar.</li>
+<li>Frontend basarili kayit sonrasi varsayilan olarak masalar ekranina doner.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: <code>cartItems</code>, <code>quickAddFromGrid</code>, <code>handleSaveOrder</code>.</li>
+<li><code>server/routes/orders.js</code>: <code>POST /orders</code>, masa durumunu guncelleme ve <code>finalizeKitchenForNewItems</code>.</li>
+<li><code>server/services/printJobs.js</code>: mutfak yazdirma islerinin olusturulmasi.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>&quot;Kaydet&quot; aksiyonu kullaniciya sadece siparisi kaydediyor gibi gorunur, fakat fiilen mutfaga gonderir.</li>
+<li>Profesyonel POS&#39;ta bu ya bilincli olarak &quot;Mutfaga Gonder&quot; diye adlandirilmali ya da &quot;Kaydet&quot; ve &quot;Gonder&quot; ayrilmalidir.</li>
+</ul>
+<h3>2.3 Urun ekleme</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Urun gridinden urun secilir.</li>
+<li>Urun aktif degilse veya fiyat/portion bulunamazsa hata verilir.</li>
+<li>Urun lokal sepete eklenir.</li>
+<li>Mevcut siparise eklenen yeni urunler de once lokal sepette tutulur.</li>
+<li>Kaydedilene kadar mevcut siparisin backend toplamlarina dahil degildir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: <code>quickAddFromGrid</code>, <code>addItemToCart</code>, <code>cartSubtotal</code>, <code>savedTotal</code>, <code>displayTotal</code>.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Kayitli siparise yeni urun ekleme davranisi guvenli: odeme aksiyonlari kaydedilmemis urun varken gizleniyor.</li>
+<li>Ancak &quot;ekrandaki toplam&quot; ile &quot;backendde odenebilir toplam&quot; ayrimi kullaniciya yeterince net anlatilmiyor.</li>
+</ul>
+<h3>2.4 Siparisi kaydetme</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Sepet bos ise kaydetme reddedilir.</li>
+<li>Paket siparis ise musteri secimi zorunludur.</li>
+<li>Yeni siparis icin <code>api.createOrder</code>, kayitli siparis icin <code>api.addOrderItems</code> cagrilir.</li>
+<li>Basarili kayit sonrasi lokal sepet temizlenir.</li>
+<li>Dine-in ve takeaway icin varsayilan yonlendirme masalar ekraninadir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: <code>handleSaveOrder</code>.</li>
+<li><code>server/routes/orders.js</code>: <code>POST /orders</code>, <code>POST /orders/:id/items</code>.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Masa siparisi kaydedildikten sonra masalar ekranina donmek salon operasyonu icin kabul edilebilir.</li>
+<li>Paket sipariste kayit sonrasi masalar ekranina donmek urun acisindan tartismali; paket akisinin kendi listesine/aktif paket siparise odaklanmasi daha profesyoneldir.</li>
+</ul>
+<h3>2.5 Kaydedilmis siparise yeni urun ekleme</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Kayitli siparis acilir.</li>
+<li>Yeni urunler mevcut siparis kalemlerinden ayri olarak lokal sepete eklenir.</li>
+<li>Kaydedilmemis degisiklik varken odeme ve hizli odeme aksiyonlari gizlenir.</li>
+<li>Kaydet ile backend <code>addOrderItems</code> calisir.</li>
+<li>Backend yeni kalemleri hemen mutfaga gonderir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: <code>hasUnsavedChanges</code>, <code>canOpenPayment</code>, bottom actions.</li>
+<li><code>server/routes/orders.js</code>: <code>POST /orders/:id/items</code>, <code>finalizeKitchenForNewItems</code>.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Bu akista &quot;once kaydet, sonra odeme&quot; kuralı dogru ve risk azaltici.</li>
+<li>Fakat kullanici yeni urunleri ekledikten sonra &quot;Kaydet&quot; yaptiginda bunun mutfaga fis olarak gittigi daha acik olmalidir.</li>
+</ul>
+<h3>2.6 Odeme alma</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Odeme ekrani yalnizca kayitli, kapanmamis ve aktif kalemi olan siparis icin acilir.</li>
+<li>Kismi odeme desteklenir.</li>
+<li>&quot;Odeme al&quot;, &quot;Ode ve kapat&quot;, &quot;Ode ve yazdir&quot;, &quot;Ode, yazdir ve kapat&quot; aksiyonlari vardir.</li>
+<li>Kapatma seciliyse kalan tutarin tamami odenmeden islem engellenir.</li>
+<li>Tamamen odenmis sipariste odeme inputu yerine &quot;Yazdir&quot; ve &quot;Masayi Kapat&quot; aksiyonlari gosterilir.</li>
+<li>Backend odemeyi kaydeder, <code>close_order</code> true ise tam odendi mi kontrol eder; tam degilse transaction rollback olur.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/payments/PaymentScreen.jsx</code>: aksiyon tipleri, tam odeme kontrolu, kapatma/yazdirma davranisi.</li>
+<li><code>server/routes/payments.js</code>: <code>POST /payments</code>, <code>closeOrderAndTableIfPaid</code>.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Kismi odeme + kapatma engeli dogru.</li>
+<li>&quot;Ode ve Yazdir&quot; aksiyonu kapatmadan fis basabilir. Bu bilincli olabilir, ancak POS terminolojisinde &quot;ara hesap/fis&quot; ile &quot;final fis&quot; ayrimi yok.</li>
+<li>Tamamen odenmis sipariste tekrar hizli odeme modalindan kapatma mumkun degil; kapatma icin masalar ekranindaki &quot;Masayi Kapat&quot; veya ayrintili odeme ekranindaki kapatma aksiyonu kullaniliyor.</li>
+</ul>
+<h3>2.7 Hizli odeme</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Hizli odeme kalan tutarin tamamini odetir.</li>
+<li>Sadece nakit/kart secimi vardir.</li>
+<li>Kismi tutar girilemez.</li>
+<li>&quot;Odeme al&quot;, &quot;Ode ve kapat&quot;, &quot;Ode ve yazdir&quot;, &quot;Ode, yazdir ve kapat&quot; aksiyonlari vardir.</li>
+<li>Kalan tutar sifirsa modal aksiyonlari disabled olur; mevcut odenmis masayi bu modal ile kapatmak mumkun degildir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/payments/QuickPaymentModal.jsx</code>: <code>totalDue</code> uzerinden tam odeme, action type&#39;lar, disabled butonlar.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Hizli odemenin tam bakiye odemesi almasi dogru bir POS kısayolu.</li>
+<li>Ancak &quot;hesap zaten odenmis ama masa kapanmamis&quot; durumunda hizli odeme modalinin kapatma sunmamasi operasyonel belirsizlik yaratir.</li>
+</ul>
+<h3>2.8 Masayi kapatma</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Masa karti odenmis siparisi <code>HESAP ODENDI</code> olarak gosterir.</li>
+<li>Masalar ekraninda &quot;Masayi Kapat&quot; aksiyonu yalnizca paid hesapta gorunur.</li>
+<li>Kapatma <code>api.updateOrderStatus(orderId, &#39;closed&#39;)</code> ile yapilir.</li>
+<li>Backend siparisi kapatir, masayi bosaltir, musteri istatistiklerini gunceller, dine-in icin receipt job ekleyebilir.</li>
+<li>Odeme ekraninda da tam odenmis siparis icin &quot;Masayi Kapat&quot; vardir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/tables/TablesScreen.jsx</code>: <code>isTableBillPaid</code>, masa aksiyon modali, <code>handleClosePaidTable</code>.</li>
+<li><code>client/src/components/payments/PaymentScreen.jsx</code>: <code>closePaidOrder</code>.</li>
+<li><code>server/routes/orders.js</code>: <code>PATCH /orders/:id/status</code> <code>closed</code> branch.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Odenmis masa ile kapali masa arasinda ara durum vardir. Bu dogru bir isletme kuralidir: hesap odendi, masa fiziksel olarak henuz bosalmamis olabilir.</li>
+<li>Ancak bu ara durumun adi ve aksiyon sahipligi net degil. Kullanici bazen odeme ekranindan, bazen masa ekranindan kapatir.</li>
+</ul>
+<h3>2.9 Masa tasima</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Masalar ekraninda dolu kaynak masa icin &quot;Masayi Tasi&quot; baslatilir.</li>
+<li>Hedef masa secilir.</li>
+<li>Backend hedef masa <code>occupied</code> ise reddeder; rezerve masa icin acik engel yoktur.</li>
+<li>Source order hedef table_id&#39;ye tasinir.</li>
+<li>Source masa bosaltilir, hedef masa kaynak masa status/current_order_id/guest_count degerlerini alir.</li>
+<li>Frontend reload yapar ve masalar ekraninda kalir.</li>
+<li>Siparis ekranindan tasima da mumkundur; basarili tasima sonrasi masalar ekranina doner.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/components/tables/TablesScreen.jsx</code>: transfer mode, <code>handleTableTransfer</code>.</li>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: <code>openMoveDialog</code>, <code>handleMoveTable</code>.</li>
+<li><code>server/routes/tables.js</code>: <code>POST /tables/:id/transfer</code>.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Hedef rezerve masaya tasima belirsiz ve risklidir.</li>
+<li>Tasima sonrasi hedef masanin siparisine otomatik gecilmemesi operasyon acisindan ekstra adim yaratir.</li>
+</ul>
+<h3>2.10 Paket siparis akisi</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Paket siparis <code>/order/takeaway</code> rotasindan acilir.</li>
+<li>Caller ID veya paket yan panelinden mevcut paket siparise gecilebilir.</li>
+<li>Yeni paket sipariste musteri secimi zorunludur.</li>
+<li>Siparis kaydedilince takeaway label print job eklenir.</li>
+<li>Acik paket siparisler masalar ekraninda yan panelde listelenir.</li>
+<li>Paket siparis durumlari yan panelden <code>out_for_delivery</code> ve <code>delivered</code> olarak ilerletilir.</li>
+<li><code>delivered</code> aksiyonu backendde siparisi <code>closed</code> yapar.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>client/src/App.jsx</code>: <code>handleNewTakeawayOrder</code>.</li>
+<li><code>client/src/components/orders/OrderScreen.jsx</code>: takeaway customer zorunlulugu.</li>
+<li><code>client/src/components/tables/TablesScreen.jsx</code>: open takeaway sidebar ve delivery action buttonlari.</li>
+<li><code>server/routes/orders.js</code>: takeaway open list, label print, delivery status update.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Paket sipariste musteri zorunlulugu dogru.</li>
+<li>Teslim edildi aksiyonunun direkt <code>closed</code> yapmasi urun olarak kabul edilebilir; fakat odeme alinmadan teslim edildi yapilabiliyorsa bu buyuk is kuralı riskidir. Kodda delivery status update icin odeme kontrolu gorunmuyor.</li>
+</ul>
+<h3>2.11 Yazici / mutfak akisi</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Yeni siparis veya yeni eklenen kalemler kaydedildiginde mutfak print job olusur.</li>
+<li>Mutfak print job item bazli printer routing yapar.</li>
+<li>Iptal veya miktar azaltma gibi degisiklikler icin mutfak adjustment job olusabilir.</li>
+<li>Masa kapatma veya print receipt aksiyonu receipt job olusturur.</li>
+<li>Paket siparis olusunca label job olusur.</li>
+<li>Print job idempotency key ile duplicate basim engellenmeye calisilir.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>server/routes/orders.js</code>: <code>finalizeKitchenForNewItems</code>, item update/cancel.</li>
+<li><code>server/routes/payments.js</code>: odeme sonrasi receipt job.</li>
+<li><code>server/services/printJobs.js</code>: kitchen, adjustment, receipt, takeaway label enqueue akislari.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Mutfak ve siparis yasam dongusu birbirine sikica bagli.</li>
+<li>&quot;Kaydet&quot; = &quot;mutfaga gonder&quot; oldugu icin UI metinleri ve operasyon egitimi bu gercege uygun olmali.</li>
+</ul>
+<h3>2.12 Caller ID akisi</h3>
+<p>Mevcut davranis:</p>
+<ol>
+<li>Backend gelen aramayi <code>call_logs</code> icine <code>ringing</code> olarak yazar.</li>
+<li>Frontend admin/cashier icin her 4 saniyede yeni ringing call log poll eder.</li>
+<li>Popup&#39;ta musteri ve gecmis siparis bilgileri gosterilir.</li>
+<li>&quot;Siparisi Ac&quot; kullaniciyi paket siparis ekranina goturur.</li>
+<li>Siparis kaydedilirse <code>call_log_id</code> order ile iliskilendirilir ve call log status <code>opened_order</code> olur.</li>
+<li>Kullanici siparis ekranini kaydetmeden terk ederse server tarafinda call log <code>ringing</code> kalabilir; frontend sadece session bazli suppress yapar.</li>
+</ol>
+<p>Kanıt:</p>
+<ul>
+<li><code>server/services/callerIdService.js</code>: <code>processIncomingCall</code>, <code>linkCallLogToOrder</code>.</li>
+<li><code>server/routes/callerid.js</code>: recent/history/status endpointleri.</li>
+<li><code>client/src/context/IncomingCallContext.jsx</code>: popup polling, dismiss, open order navigation.</li>
+<li><code>server/routes/orders.js</code>: order create sonrasi call log link.</li>
+</ul>
+<p>Urun yorumu:</p>
+<ul>
+<li>Caller ID&#39;nin paket siparise baglanmasi dogru.</li>
+<li>&quot;Siparisi Ac&quot; tiklaninca call log durumunun hemen <code>opened_order</code> veya <code>in_progress</code> yapilmamasi amatör bir bosluk; kaydedilmeden terk edilen aramalar operasyon ekraninda tekrar belirebilir veya yanlis durumla kalabilir.</li>
+</ul>
+<h2>3. Mevcut is kuralı matrisi</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Durum</th><th>Kullanici ne goruyor</th><th>Ana aktif aksiyon</th><th>Gizli/engelli olmasi gerekenler</th><th>Mevcut risk</th></tr></thead>
+<tbody>
+<tr><td>Bos masa</td><td>Bos masa karti</td><td>Masaya tiklayip siparis acma</td><td>Odeme, hizli odeme, yazdir, kapat</td><td>Uygun</td></tr>
+<tr><td>Rezerve masa</td><td>Rezerve masa karti</td><td>Masaya tiklayip siparis acma</td><td>Normal siparis acma onaysiz olmamali</td><td>Rezerve kuralı belirsiz</td></tr>
+<tr><td>Dolu masa, kaydedilmis siparis</td><td>Masa dolu, toplam/tutar bilgisi</td><td>Siparisi ac, ode, hizli ode, yazdir, tasi, iptal</td><td>Masa kapat sadece tam odenmisse gorunmeli</td><td>Genel olarak uygun</td></tr>
+<tr><td>Dolu masa, hesap odenmemis</td><td>Dolu masa</td><td>Odeme / hizli odeme</td><td>Masayi kapat</td><td>Uygun</td></tr>
+<tr><td>Dolu masa, hesap tam odenmis ama kapanmamis</td><td><code>HESAP ODENDI</code> rozeti</td><td>Masayi kapat, yazdir</td><td>Yeni odeme alma</td><td>Ara durum dogru ama sahiplik belirsiz</td></tr>
+<tr><td>Yeni siparis, sepette urun var</td><td>Sepet ve Kaydet</td><td>Kaydet</td><td>Odeme, hizli odeme</td><td>Uygun</td></tr>
+<tr><td>Yeni siparis, sepet bos</td><td>Bos sepet</td><td>Urun ekleme</td><td>Kaydet, odeme, hizli odeme</td><td>Uygun</td></tr>
+<tr><td>Kayitli siparis, yeni urun eklenmis</td><td>Kayitli kalemler + lokal sepet</td><td>Kaydet</td><td>Odeme, hizli odeme</td><td>Uygun, ama &quot;mutfaga gider&quot; metni eksik</td></tr>
+<tr><td>Kayitli siparis, kaydedilmemis degisiklik yok</td><td>Kalemler ve toplam</td><td>Odeme, hizli odeme, urun ekleme</td><td>Kaydet</td><td>Uygun</td></tr>
+<tr><td>Siparis kapali</td><td>Kapali siparis</td><td>Geri don / goruntuleme</td><td>Urun ekleme, odeme, iptal</td><td>Frontend/route bazinda daha net kilitlenmeli</td></tr>
+<tr><td>Siparis iptal</td><td>Iptal siparis</td><td>Geri don / goruntuleme</td><td>Urun ekleme, odeme, kapatma</td><td>Backend koruyor, UI netligi denetlenmeli</td></tr>
+<tr><td>Paket siparis yeni</td><td>Musteri secimi + sepet</td><td>Musteri sec, urun ekle, kaydet</td><td>Musterisiz kaydet</td><td>Uygun</td></tr>
+<tr><td>Paket siparis acik</td><td>Yan panelde kart</td><td>Siparisi ac, label yazdir, iptal, teslimat durum ilerlet</td><td>Odeme alinmadan teslim edildi tartismali</td><td>Odeme/teslim kuralı eksik</td></tr>
+<tr><td>Paket siparis teslimata cikti</td><td>Yan panelde durum</td><td>Teslim edildi</td><td>Tekrar teslimata cikar</td><td>Uygun</td></tr>
+<tr><td>Paket siparis teslim edildi</td><td>Listeden dusmeli / kapanir</td><td>Kapali kayit</td><td>Aktif panel aksiyonlari</td><td>Backend kapatiyor</td></tr>
+<tr><td>Hizli odeme, borc var</td><td>Modal, kalan tutar</td><td>Tam tutari nakit/kart ode</td><td>Kismi odeme</td><td>Uygun</td></tr>
+<tr><td>Hizli odeme, borc yok</td><td>Modal aksiyonlari disabled</td><td>Kapatma beklenebilir</td><td>Odeme alma</td><td>Kapatma yok, operasyonel bosluk</td></tr>
+<tr><td>Masa tasima, kaynak dolu hedef bos</td><td>Transfer modu</td><td>Hedef sec ve tasi</td><td>Dolu hedef</td><td>Uygun</td></tr>
+<tr><td>Masa tasima, hedef rezerve</td><td>Transfer mumkun gorunebilir</td><td>Tasi</td><td>Rezerve hedefe onaysiz tasima</td><td>Riskli</td></tr>
+<tr><td>Caller ID ringing</td><td>Popup</td><td>Siparisi ac / kapat</td><td>Tekrar popup spam</td><td>Kaydetmeden terk edilirse server durumu kalir</td></tr>
+</tbody></table></div>
+<h2>4. Celiskiler ve belirsizlikler</h2>
+<h3>4.1 Kullanici beklentisi ile mevcut davranis farki</h3>
+<p>P1 - &quot;Kaydet&quot; aksiyonu fiilen mutfaga gonderiyor.</p>
+<ul>
+<li>Etki: Garson sadece siparisi kaydettigini sanabilir; mutfakta fis basilmis olur.</li>
+<li>Kok neden: Backend <code>createOrder</code> ve <code>addOrderItems</code> sonrasi <code>finalizeKitchenForNewItems</code> calistiriyor.</li>
+<li>Oneri: V1&#39;de buton metni &quot;Kaydet ve Mutfaga Gonder&quot; yapilmali veya UI&#39;da net yardim metni verilmeli. Daha ileri surumde &quot;Kaydet&quot; ve &quot;Mutfaga Gonder&quot; ayrilabilir.</li>
+</ul>
+<p>P1 - Paket siparis teslim edildi aksiyonu odeme kontrolu olmadan siparisi kapatiyor olabilir.</p>
+<ul>
+<li>Etki: Tahsilatsiz paket siparis kapatilabilir, kasa/acik hesap uyumsuzlugu olusur.</li>
+<li>Kok neden: Delivery status endpointinde payment total kontrolu gorunmuyor.</li>
+<li>Oneri: &quot;Teslim edildi&quot; icin odeme zorunlulugu urun karari olarak netlestirilmeli. Kapida odeme desteklenecekse teslimde odeme modalina zorunlu yonlendirme gerekir.</li>
+</ul>
+<p>P2 - &quot;Ode ve Yazdir&quot; ile &quot;Ode, Yazdir ve Kapat&quot; ayrimi UI&#39;da yeterince keskin degil.</p>
+<ul>
+<li>Etki: Kullanici fis bastiginda masanin kapandigini sanabilir.</li>
+<li>Kok neden: Payment action type&#39;lari close/print kombinasyonlari ile calisiyor, fakat receipt tipi/semantigi ayrilmamis.</li>
+<li>Oneri: Ara hesap, tahsilat fisi, final fis ayrimi urun dilinde netlestirilmeli.</li>
+</ul>
+<h3>4.2 Yeni masa / kayitli masa farki</h3>
+<p>P2 - Bos/rezerve/dolu masa acilis kuralı ayni tik davranisina bagli.</p>
+<ul>
+<li>Etki: Rezerve masa yanlislikla normal siparise donusebilir.</li>
+<li>Kok neden: Table click handler sadece transfer mode kontrolu yapiyor, reservation icin ayri confirm/kural yok.</li>
+<li>Oneri: Rezerve masada &quot;Rezervasyonu kullanarak siparis ac&quot; onayi veya rezervasyon iptali/oturma akisi olmalidir.</li>
+</ul>
+<p>P2 - Yeni siparis ve kayitli siparis ayni ekranda dogru ayriliyor; ancak kullaniciya durum etiketi zayif.</p>
+<ul>
+<li>Etki: Garson &quot;bu siparis kayitli mi, sepette bekleyen var mi&quot; ayrimini kacirabilir.</li>
+<li>Kok neden: Lokal sepet ve kayitli siparis birlikte gosteriliyor, metinsel uyari sinirli.</li>
+<li>Oneri: &quot;Kaydedilmemis urunler&quot; ve &quot;Mutfaga gonderilmis urunler&quot; ayrimi daha belirgin yapilmali.</li>
+</ul>
+<h3>4.3 Kaydetmeden once / kaydettikten sonra aksiyonlar</h3>
+<p>P1 - Kaydedilmemis urun varken odeme gizleniyor; bu dogru. Fakat mevcut kayitli kalemler icin kismi odeme almak istenirse engellenir.</p>
+<ul>
+<li>Etki: Gercek operasyonda misafir bir kismi odeyip masada kalirken garson yeni urun eklemis olabilir; odeme almak icin once yeni urunu mutfaga gondermek zorunda kalir.</li>
+<li>Kok neden: <code>canOpenPayment</code> tum unsaved cart varligini global kilit gibi kullaniyor.</li>
+<li>Oneri: V1 icin mevcut kural korunabilir. V2&#39;de &quot;kaydedilmemis urunleri iptal et/kaydetmeden odemeye git&quot; karari sunulabilir.</li>
+</ul>
+<p>P2 - Kayit sonrasi otomatik masalar ekranina donus her akista ayni.</p>
+<ul>
+<li>Etki: Paket sipariste veya ek urun girisinde kullanici bekledigi siparis detayinda kalmayabilir.</li>
+<li>Kok neden: <code>handleSaveOrder</code> default navigate tables.</li>
+<li>Oneri: Dine-in icin masalar ekranina donmek korunabilir; takeaway icin paket paneline veya siparis detayina odakli davranis tasarlanmalidir.</li>
+</ul>
+<h3>4.4 Hizli odeme mantigi</h3>
+<p>P2 - Hizli odeme tam bakiye odeme icin iyi; fakat odenmis masayi kapatamaz.</p>
+<ul>
+<li>Etki: &quot;Hizli Ode&quot; acildiginda borc yoksa kullanici masayi kapatmak icin geri donmek zorunda kalir.</li>
+<li>Kok neden: Modal butonlari <code>totalDue &lt;= 0.02</code> iken disabled.</li>
+<li>Oneri: Borc yoksa modal &quot;Bu hesap odenmis, masayi kapat&quot; aksiyonuna donusmelidir veya hizli odeme butonu yerine direkt kapatma gosterilmelidir.</li>
+</ul>
+<p>P2 - Hizli odeme sadece nakit/kart destekliyor.</p>
+<ul>
+<li>Etki: Yemek karti, havale, online odeme gibi operasyonlar kayit altina alinamaz.</li>
+<li>Kok neden: Payment schema ve UI payment type enum&#39;u dar.</li>
+<li>Oneri: V1&#39;de kabul edilebilir; V2 icin odeme tipi konfigurasyonu gereklidir.</li>
+</ul>
+<h3>4.5 Masa kapatma mantigi</h3>
+<p>P1 - Masayi kapatma icin backend <code>PATCH /orders/:id/status closed</code> branchinde odeme kontrolu net gorunmuyor.</p>
+<ul>
+<li>Etki: Frontend sadece odenmis masada kapatma gosteriyor olsa da API dogrudan kullanilirsa odemesiz kapatma riski olabilir.</li>
+<li>Kok neden: Kapatma kurali frontend tarafinda daha guclu, backend status endpointinde kapatma guard&#39;i payment endpoint kadar belirgin degil.</li>
+<li>Oneri: Backend status close icin de total paid &gt;= grand total kontrolu zorunlu olmalidir. Paket teslim gibi ozel durumlar ayrica modellenmelidir.</li>
+</ul>
+<p>P2 - Odenmis ama kapanmamis masa ara durumu iyi, fakat status olarak ayri modellenmiyor.</p>
+<ul>
+<li>Etki: Raporlama ve UI kararlarinda hesaplanmis durumlara bagimlilik artar.</li>
+<li>Kok neden: Paid state order.status degil, payments toplamindan turetiliyor.</li>
+<li>Oneri: V1&#39;de hesaplanmis durum korunabilir; UI&#39;da &quot;Hesap odendi, masa acik&quot; dili netlestirilmeli.</li>
+</ul>
+<h3>4.6 Masa tasima sonrasi beklenen yonlendirme</h3>
+<p>P2 - Tasima sonrasi hedef masaya/siparise yonlendirme yok.</p>
+<ul>
+<li>Etki: Garson tasimanin sonucunu gormek icin hedef masayi tekrar bulur.</li>
+<li>Kok neden: Hem table transfer hem order screen move akisi reload/navigate tables ile bitiyor.</li>
+<li>Oneri: Basarili tasima sonrasi hedef masa karti highlight edilmeli veya hedef siparis acilmalidir.</li>
+</ul>
+<p>P1 - Hedef masa rezerve ise backend reddetmiyor.</p>
+<ul>
+<li>Etki: Rezervasyon uzerine aktif siparis tasinabilir.</li>
+<li>Kok neden: Transfer endpoint sadece <code>target.status === &#39;occupied&#39;</code> kontrol ediyor.</li>
+<li>Oneri: Hedef sadece <code>empty</code> olmalidir; <code>reserved</code> icin yetkili onayli ayri akis tasarlanmalidir.</li>
+</ul>
+<h2>5. Amator gorunen davranislar</h2>
+<p>P1 - Islem isimleri teknik davranisi sakliyor.</p>
+<ul>
+<li>&quot;Kaydet&quot; kelimesi mutfak fisi basabilecek bir aksiyonu ifade ediyor.</li>
+<li>&quot;Yazdir&quot; receipt mi, ara hesap mi, final fis mi belirsiz.</li>
+<li>&quot;Teslim Edildi&quot; odeme/kapama semantigini gizliyor.</li>
+</ul>
+<p>P1 - Kritik kurallar frontendde guclu, backendde her endpointte ayni sertlikte degil.</p>
+<ul>
+<li>Odeme ile kapatma payment endpointinde daha guvenli.</li>
+<li>Status close endpointi ayni payment guard&#39;i acik sekilde gostermiyor.</li>
+<li>Paket teslim kapatma akisi odeme kuralindan bagimsiz gorunuyor.</li>
+</ul>
+<p>P2 - Rezerve masa ve dolu masa operasyonlari ayni transfer/acma davranisina cok yakin.</p>
+<ul>
+<li>Rezervasyon profesyonel POS&#39;ta ayri operasyonel durumdur.</li>
+<li>Onaysiz siparis acma veya tasima rezervasyon disiplinini bozar.</li>
+</ul>
+<p>P2 - Caller ID &quot;siparisi acildi&quot; durumu sadece siparis kaydedilince servera yaziliyor.</p>
+<ul>
+<li>Kullanici popup&#39;tan siparis ekranina gecer ama siparisi kaydetmeden cikarsa arama durumu belirsiz kalir.</li>
+<li>Bu, canli operasyonda tekrar eden popup veya eksik takip yaratir.</li>
+</ul>
+<p>P2 - Paket siparis yan paneli masalar ekranina gomulu.</p>
+<ul>
+<li>Isletme icin paket siparis ayri bir operasyon kuyrugudur.</li>
+<li>Masa gridinin yanina eklenmis panel V1 icin pratik, fakat urun olgunlugu dusuk gorunuyor.</li>
+</ul>
+<p>P2 - Siparis statuleri urun diliyle tam ortusmuyor.</p>
+<ul>
+<li><code>saved</code>, <code>in_kitchen</code>, <code>closed</code>, <code>cancelled</code> gibi teknik statusler var.</li>
+<li>&quot;Odenmis ama masa acik&quot;, &quot;teslimata cikti&quot;, &quot;hazirlaniyor&quot;, &quot;servis edildi&quot; gibi urun durumlari farkli kaynaklardan turetiliyor.</li>
+</ul>
+<h2>6. Profesyonel urun icin onerilen kural seti</h2>
+<h3>6.1 V1 icin korunmasi gereken kurallar</h3>
+<ol>
+<li>Kaydedilmemis urun varken odeme/hizli odeme aksiyonlarini gizle.</li>
+</ol>
+<ul>
+<li>Bu, kullanicinin ekranda gordugu toplam ile backenddeki tahsil edilebilir toplam arasinda hata yapmasini engeller.</li>
+</ul>
+<ol>
+<li>Hizli odeme kalan tutarin tamamini kapatsin.</li>
+</ol>
+<ul>
+<li>Hizli odeme profesyonel POS&#39;ta &quot;tek hamlede tahsilat&quot; akisidir; kismi odeme ayrintili odeme ekraninda kalmalidir.</li>
+</ul>
+<ol>
+<li>Masa kapatma sadece hesap tam odenince gorunsun.</li>
+</ol>
+<ul>
+<li>Odenmis ama fiziksel olarak acik masa ara durumu korunmalidir.</li>
+</ul>
+<ol>
+<li>Paket sipariste musteri secimi zorunlu kalsin.</li>
+</ol>
+<ul>
+<li>Caller ID, adres, gecmis siparis ve teslimat icin temel veri kalitesi gerekir.</li>
+</ul>
+<ol>
+<li>Kayitli siparise yeni urunler once lokal sepete gelsin.</li>
+</ol>
+<ul>
+<li>Yanlis dokunmalarin mutfaga aninda gitmesini engeller.</li>
+</ul>
+<ol>
+<li>Gonderilmis siparis kalemlerinde miktar/portion degisikligi kisitlansin.</li>
+</ol>
+<ul>
+<li>Mutfak operasyonu icin gonderilmis kalemde rastgele degisiklik profesyonel degildir.</li>
+</ul>
+<ol>
+<li>Mutfak adjustment job mantigi korunsun.</li>
+</ol>
+<ul>
+<li>Iptal/azaltma mutfaga ayrica bildirilmelidir.</li>
+</ul>
+<h3>6.2 V1 icin duzeltilmesi gereken kurallar</h3>
+<ol>
+<li>&quot;Kaydet&quot; butonunun is kuralı netlestirilmeli.</li>
+</ol>
+<ul>
+<li>En dusuk riskli V1 cozum: buton/metin &quot;Kaydet ve Mutfaga Gonder&quot; olarak degismeli veya uyari metni belirginlesmeli.</li>
+</ul>
+<ol>
+<li>Backend masa kapatma guard&#39;i payment guard&#39;i ile ayni seviyeye getirilmeli.</li>
+</ol>
+<ul>
+<li>Order status close, odeme tam degilse reddetmelidir.</li>
+</ul>
+<ol>
+<li>Paket &quot;Teslim Edildi&quot; aksiyonu odeme durumunu kontrol etmelidir.</li>
+</ol>
+<ul>
+<li>Odenmemis paket icin &quot;once odeme al&quot; yonlendirmesi gerekir.</li>
+</ul>
+<ol>
+<li>Masa transfer hedefi sadece bos masa olmali.</li>
+</ol>
+<ul>
+<li>Rezerve masaya tasima icin ayrica yetkili onay gerekir.</li>
+</ul>
+<ol>
+<li>Caller ID open-order status server tarafina hemen yazilmalidir.</li>
+</ol>
+<ul>
+<li>&quot;Siparisi Ac&quot; tiklaninca call log <code>opened_order</code> veya yeni bir <code>in_progress</code> status almalidir.</li>
+</ul>
+<ol>
+<li>Yazdirma aksiyonlari urun dilinde ayrilmalidir.</li>
+</ol>
+<ul>
+<li>Ara hesap, tahsilat fisi ve final fis ayrimi yapilmalidir.</li>
+</ul>
+<ol>
+<li>Paket siparis kayit sonrasi yonlendirme ayrilmalidir.</li>
+</ol>
+<ul>
+<li>Dine-in masalar ekranina donebilir; takeaway aktif paket siparis kuyruguna veya detayina odaklanmalidir.</li>
+</ul>
+<h3>6.3 Onerilen durum modeli</h3>
+<p>Salon siparisi icin:</p>
+<ul>
+<li><code>draft</code>: frontend lokal, backend kaydi yok.</li>
+<li><code>open_unsent</code>: backendde kayitli ama mutfaga gonderilmemis. V2 icin.</li>
+<li><code>in_kitchen</code>: mutfaga gonderildi.</li>
+<li><code>partially_paid</code>: en az bir odeme var, hala borc var.</li>
+<li><code>paid_open</code>: hesap odendi, masa fiziksel olarak acik.</li>
+<li><code>closed</code>: masa kapandi.</li>
+<li><code>cancelled</code>: iptal edildi.</li>
+</ul>
+<p>Paket siparis icin:</p>
+<ul>
+<li><code>draft</code>: musteri/urun hazirlaniyor.</li>
+<li><code>in_kitchen</code>: mutfaga gitti.</li>
+<li><code>ready</code>: hazir. V2 mutfak durumuyla.</li>
+<li><code>out_for_delivery</code>: teslimata cikti.</li>
+<li><code>delivered_unpaid</code>: kapida odeme senaryosu varsa.</li>
+<li><code>delivered_paid_closed</code>: teslim edildi ve kapandi.</li>
+<li><code>cancelled</code>: iptal edildi.</li>
+</ul>
+<p>V1&#39;de bu modelin tamamini uygulamak sart degil; fakat UI kararlarinda bu ayrimlarin isimlendirilmesi gerekir.</p>
+<h2>7. Hemen duzeltilmesi gerekenler</h2>
+<p>P1 - Backend status close icin odeme kontrolu eklenmeli.</p>
+<ul>
+<li>Risk: API veya farkli UI yolu ile odemesiz masa kapatma.</li>
+<li>Is etkisi: Gun sonu kasa ve satis raporu hatasi.</li>
+<li>Kapsam: <code>server/routes/orders.js</code> closed branch.</li>
+</ul>
+<p>P1 - Paket <code>delivered</code> aksiyonunda odeme kuralı netlestirilmeli.</p>
+<ul>
+<li>Risk: Tahsilat alinmadan paket siparis kapanabilir.</li>
+<li>Is etkisi: Kasa acigi, operasyonel takip kaybi.</li>
+<li>Kapsam: <code>server/routes/orders.js</code> takeaway delivery status endpoint, frontend delivery button akisi.</li>
+</ul>
+<p>P1 - &quot;Kaydet&quot; aksiyonunun urun dili duzeltilmeli.</p>
+<ul>
+<li>Risk: Mutfaga istenmeden fis gitmesi.</li>
+<li>Is etkisi: Yanlis hazirlanan urun, fire, mutfak karmasasi.</li>
+<li>Kapsam: <code>client/src/components/orders/OrderScreen.jsx</code> buton metni/yardim metni; daha buyuk karar icin backend akisi.</li>
+</ul>
+<p>P1 - Transfer hedefi rezerve masa icin engellenmeli veya onayli hale getirilmeli.</p>
+<ul>
+<li>Risk: Rezervasyonun ezilmesi.</li>
+<li>Is etkisi: Musteri memnuniyetsizligi ve masa yonetimi hatasi.</li>
+<li>Kapsam: <code>server/routes/tables.js</code>, <code>client/src/components/tables/TablesScreen.jsx</code>.</li>
+</ul>
+<p>P2 - Caller ID open-order durum boslugu kapatilmali.</p>
+<ul>
+<li>Risk: Arama popup&#39;inin yanlis tekrar etmesi veya takipte belirsizlik.</li>
+<li>Is etkisi: Telefon siparislerinde kayip/tekrar is.</li>
+<li>Kapsam: <code>client/src/context/IncomingCallContext.jsx</code>, <code>server/services/callerIdService.js</code>, <code>server/routes/callerid.js</code>.</li>
+</ul>
+<h2>8. Sonraki asamada koda dokulebilecek dusuk riskli iyilestirmeler</h2>
+<ol>
+<li>UI metinlerini netlestir:</li>
+</ol>
+<ul>
+<li>&quot;Kaydet&quot; yerine &quot;Kaydet ve Mutfaga Gonder&quot;.</li>
+<li>&quot;Yazdir&quot; yerine &quot;Hesap Yazdir&quot; veya &quot;Fis Yazdir&quot;.</li>
+<li>&quot;Ode ve Yazdir&quot; yerine &quot;Ode ve Hesap Yazdir&quot;; kapatma iceren aksiyonda &quot;Masayi Kapat&quot; kelimesi mutlaka gorunsun.</li>
+</ul>
+<ol>
+<li>Kaydedilmemis urun alanini daha belirgin yap:</li>
+</ol>
+<ul>
+<li>&quot;Kaydedilmemis urunler&quot; ve &quot;Mutfaga gonderilmis urunler&quot; ayrimi.</li>
+<li>Odeme gizliyken sebep metni daha net: &quot;Yeni urunler once mutfaga gonderilmeli.&quot;</li>
+</ul>
+<ol>
+<li>Hizli odemede borc yoksa modal davranisini degistir:</li>
+</ol>
+<ul>
+<li>&quot;Bu hesap zaten odenmis&quot; bilgisi.</li>
+<li>Yetki uygunsa &quot;Masayi Kapat&quot; aksiyonu.</li>
+</ul>
+<ol>
+<li>Transfer sonrasi hedef masayi vurgula:</li>
+</ol>
+<ul>
+<li>Basarili transferden sonra masalar ekraninda hedef masa highlight.</li>
+<li>Alternatif: hedef masanin siparisine otomatik gec.</li>
+</ul>
+<ol>
+<li>Rezerve masa acilisinda onay ekle:</li>
+</ol>
+<ul>
+<li>&quot;Bu masa rezerve. Rezervasyonu kullanarak siparis acilsin mi?&quot;</li>
+<li>Yetki/rol gereksinimi sonradan eklenebilir.</li>
+</ul>
+<ol>
+<li>Paket siparis yan panelinde odeme durumunu goster:</li>
+</ol>
+<ul>
+<li><code>odenmedi</code>, <code>kismi odendi</code>, <code>odendi</code> etiketi.</li>
+<li>Teslim edildi butonunun neden disabled oldugu acik olsun.</li>
+</ul>
+<ol>
+<li>Caller ID popup&#39;tan siparis acildiginda server status guncelle:</li>
+</ol>
+<ul>
+<li>V1 icin <code>opened_order</code> status hemen yazilabilir.</li>
+<li>Daha dogru model icin <code>in_progress</code> status eklenebilir.</li>
+</ul>
+<ol>
+<li>Aksiyon görünürlükleri icin tek bir frontend policy fonksiyonu olustur:</li>
+</ol>
+<ul>
+<li>Masa aksiyonlari ve siparis aksiyonlari ayni kurallari kullanmali.</li>
+<li>Bu dusuk/orta riskli bir kalite iyilestirmesidir; davranis degisikligi icermeden test edilebilir.</li>
+</ul>
+<h2>Ek: Onceliklendirilmis urun backlog&#39;u</h2>
+<h3>Hemen</h3>
+<ul>
+<li>P1: Odeme tamamlanmadan <code>closed</code> status engeli.</li>
+<li>P1: Paket teslim edildi aksiyonunda odeme kuralı.</li>
+<li>P1: Kaydet/mutfaga gonder urun dili.</li>
+<li>P1: Rezerve masaya transfer/acma kuralı.</li>
+</ul>
+<h3>Bu hafta</h3>
+<ul>
+<li>P2: Hizli odemede odenmis masa kapatma davranisi.</li>
+<li>P2: Caller ID &quot;siparisi acildi ama kaydedilmedi&quot; durumu.</li>
+<li>P2: Transfer sonrasi hedef masa yonlendirme/highlight.</li>
+<li>P2: Paket siparis yan panelinde odeme durum etiketi.</li>
+</ul>
+<h3>Sonra</h3>
+<ul>
+<li>V2: Kaydet ve mutfaga gonder aksiyonlarini ayirma.</li>
+<li>V2: Siparis status modelini urun durumlariyla yeniden tasarlama.</li>
+<li>V2: Paket siparis icin ayri operasyon ekrani.</li>
+<li>V2: Odeme tipi konfigurasyonu ve ara/final fis ayrimi.</li>
+</ul>
+  </main>
+</body>
+</html>

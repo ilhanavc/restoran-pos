@@ -19,6 +19,7 @@ const createPaymentSchema = {
     amount: z.number().positive('Tutar sıfırdan büyük olmalıdır'),
     cash_received: z.number().min(0).optional().nullable(),
     note: z.string().max(500).optional().nullable(),
+    idempotency_key: z.string().trim().min(1).max(128).optional().nullable(),
     close_order: z.boolean().optional().default(false),
     print_receipt: z.boolean().optional().default(false),
   }),
@@ -34,6 +35,7 @@ const createSplitPaymentSchema = {
     payer_no: z.number().int().positive().max(999).optional().nullable(),
     payer_label: z.string().max(80).optional().nullable(),
     note: z.string().max(500).optional().nullable(),
+    idempotency_key: z.string().trim().min(1).max(128).optional().nullable(),
     allocations: z.array(z.object({
       order_item_id: z.string().min(1),
       quantity: z.number().int().positive().max(999),
@@ -42,6 +44,38 @@ const createSplitPaymentSchema = {
 };
 
 const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
+
+function addDays(date, days) {
+  const d = new Date(`${date}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function rangeBounds(from, to) {
+  return [`${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`];
+}
+
+function normalizeIdempotencyKey(req) {
+  const bodyKey = req.body?.idempotency_key;
+  const headerKey = req.get('Idempotency-Key');
+  const key = bodyKey || headerKey;
+  if (key == null) return null;
+  const normalized = String(key).trim();
+  return normalized ? normalized.slice(0, 128) : null;
+}
+
+function findExistingPaymentByKey(businessId, orderId, idempotencyKey) {
+  if (!idempotencyKey) return null;
+  return db.prepare(
+    `SELECT * FROM payments WHERE business_id = ? AND order_id = ? AND idempotency_key = ?`,
+  ).get(businessId, orderId, idempotencyKey);
+}
+
+function buildPaymentOrderResponse(orderId) {
+  const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+  updatedOrder.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
+  return { updatedOrder };
+}
 
 function activePayableItems(orderId) {
   return db.prepare(`
@@ -199,9 +233,15 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
   try {
     const { order_id, payment_type, amount, cash_received, note, close_order, print_receipt } = req.body;
     const amt = amount; // Zod already validated and coerced
+    const idempotencyKey = normalizeIdempotencyKey(req);
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    const existingPayment = findExistingPaymentByKey(req.businessId, order_id, idempotencyKey);
+    if (existingPayment) {
+      const { updatedOrder } = buildPaymentOrderResponse(order_id);
+      return res.status(200).json({ payment: existingPayment, order: updatedOrder, idempotent_replay: true });
+    }
     if (order.status === 'closed' || order.status === 'cancelled') {
       return res.status(400).json({ error: 'Bu siparişe ödeme eklenemez' });
     }
@@ -212,9 +252,30 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
 
     let closed = false;
     const txn = db.transaction(() => {
-      db.prepare(`INSERT INTO payments (id, business_id, order_id, payment_type, amount, cash_received, change_amount, note, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-        paymentId, req.businessId, order_id, payment_type, amt, cashIn, changeAmount, note || null, req.user.id
+      const totalsBefore = paymentTotals(order_id);
+      const remainingTotal = round2(Math.max(0, Number(order.grand_total || 0) - totalsBefore.paid));
+      if (remainingTotal <= 0.02) {
+        const err = new Error('Sipariş için kalan ödeme bulunmuyor');
+        err.status = 400;
+        throw err;
+      }
+      if (amt > remainingTotal + 0.02) {
+        const err = new Error('Ödeme tutarı kalan bakiyeyi aşıyor');
+        err.status = 400;
+        throw err;
+      }
+      if (payment_type === 'cash' && cashIn + 0.02 < amt) {
+        const err = new Error('Alınan nakit tutarı ödeme tutarından düşük olamaz');
+        err.status = 400;
+        throw err;
+      }
+
+      db.prepare(`INSERT INTO payments (
+        id, business_id, order_id, payment_type, amount, cash_received, change_amount, note,
+        idempotency_key, source, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)`).run(
+        paymentId, req.businessId, order_id, payment_type, amt, cashIn, changeAmount, note || null,
+        idempotencyKey, req.user.id
       );
 
       if (close_order) {
@@ -231,8 +292,7 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
     auditLog(req.businessId, req.user.id, 'payment_received', 'payment', paymentId, { payment_type, amount });
 
     const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
-    const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(order_id);
-    updatedOrder.items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order_id);
+    const { updatedOrder } = buildPaymentOrderResponse(order_id);
     emitToRoom(req.businessId, 'order:updated', { order: updatedOrder });
     if (print_receipt || closed) {
       enqueueReceiptJobForClosedOrder(req.businessId, order_id, req.user.id);
@@ -251,8 +311,19 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
 router.post('/split', authorize('admin', 'cashier'), validate(createSplitPaymentSchema), (req, res) => {
   try {
     const { order_id, payment_type, cash_received, payer_no, payer_label, note, allocations } = req.body;
+    const idempotencyKey = normalizeIdempotencyKey(req);
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    const existingPayment = findExistingPaymentByKey(req.businessId, order_id, idempotencyKey);
+    if (existingPayment) {
+      const { updatedOrder } = buildPaymentOrderResponse(order_id);
+      return res.status(200).json({
+        payment: existingPayment,
+        order: updatedOrder,
+        split: buildSplitState(order.id, req.businessId),
+        idempotent_replay: true,
+      });
+    }
     if (order.status === 'closed' || order.status === 'cancelled') {
       return res.status(400).json({ error: 'Bu siparişe ödeme eklenemez' });
     }
@@ -342,8 +413,8 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
 
       db.prepare(`INSERT INTO payments (
         id, business_id, order_id, payment_type, payment_scope, payer_no, payer_label,
-        amount, cash_received, change_amount, note, created_by
-      ) VALUES (?, ?, ?, ?, 'split_item', ?, ?, ?, ?, ?, ?, ?)`).run(
+        amount, cash_received, change_amount, note, idempotency_key, source, created_by
+      ) VALUES (?, ?, ?, ?, 'split_item', ?, ?, ?, ?, ?, ?, ?, 'manual_split', ?)`).run(
         paymentId,
         req.businessId,
         order.id,
@@ -354,6 +425,7 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
         cashIn,
         changeAmount,
         note || null,
+        idempotencyKey,
         req.user.id,
       );
 
@@ -408,22 +480,23 @@ router.get('/summary', authorize('admin', 'cashier'), (req, res) => {
     const { date_from, date_to } = req.query;
     const from = date_from || new Date().toISOString().slice(0, 10);
     const to = date_to || from;
+    const [startAt, endAt] = rangeBounds(from, to);
 
     const summary = db.prepare(`
       SELECT payment_type, COUNT(*) as count, COALESCE(SUM(amount), 0) as total
-      FROM payments WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?
+      FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY payment_type
-    `).all(req.businessId, from, to);
+    `).all(req.businessId, startAt, endAt);
 
     const totalRevenue = db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total FROM payments 
-      WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?
-    `).get(req.businessId, from, to);
+      WHERE business_id = ? AND created_at >= ? AND created_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     const orderCount = db.prepare(`
       SELECT COUNT(*) as count FROM orders 
-      WHERE business_id = ? AND status = 'closed' AND date(closed_at) BETWEEN ? AND ?
-    `).get(req.businessId, from, to);
+      WHERE business_id = ? AND status = 'closed' AND closed_at >= ? AND closed_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     res.json({
       summary,

@@ -123,16 +123,18 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
   for (const oiId of orderItemIds) {
     const oi = db.prepare(`SELECT * FROM order_items WHERE id = ? AND order_id = ?`).get(oiId, orderId);
     if (!oi) continue;
-    const meta = db
+    const liveMeta = db
       .prepare(
-        `SELECT p.category_id, c.name AS category_name
-         FROM products p JOIN categories c ON p.category_id = c.id
+        `SELECT p.category_id, c.name AS category_name, COALESCE(p.printer_target, c.printer_target, 'kitchen') AS printer_target
+         FROM products p LEFT JOIN categories c ON p.category_id = c.id
          WHERE p.id = ? AND p.business_id = ?`,
       )
       .get(oi.product_id, businessId);
-    if (!meta) continue;
+    const categoryId = oi.category_id_snapshot || liveMeta?.category_id || null;
+    if (!categoryId) continue;
+    const categoryName = oi.category_name_snapshot || liveMeta?.category_name || 'Kategori';
 
-    const resolved = resolvePrinterForKitchenLine(businessId, meta.category_id, oi.product_id);
+    const resolved = resolvePrinterForKitchenLine(businessId, categoryId, oi.product_id);
     lines.push({
       orderItemId: oi.id,
       productId: oi.product_id,
@@ -140,8 +142,8 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
       quantity: oi.quantity,
       note: oi.note,
       portionLabel: oi.portion_label || null,
-      categoryId: meta.category_id,
-      categoryName: meta.category_name,
+      categoryId,
+      categoryName,
       resolved,
     });
   }
@@ -277,16 +279,18 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
     .get(orderId, businessId);
   if (!order || ['closed', 'cancelled'].includes(order.status)) return { created: 0, skipped: 0 };
 
-  const meta = db
+  const liveMeta = db
     .prepare(
       `SELECT p.category_id, c.name AS category_name
-       FROM products p JOIN categories c ON p.category_id = c.id
+       FROM products p LEFT JOIN categories c ON p.category_id = c.id
        WHERE p.id = ? AND p.business_id = ?`,
     )
     .get(beforeItem.product_id, businessId);
-  if (!meta) return { created: 0, skipped: 0 };
+  const categoryId = beforeItem.category_id_snapshot || liveMeta?.category_id || null;
+  if (!categoryId) return { created: 0, skipped: 0 };
+  const categoryName = beforeItem.category_name_snapshot || liveMeta?.category_name || 'Kategori';
 
-  const resolved = resolvePrinterForKitchenLine(businessId, meta.category_id, beforeItem.product_id);
+  const resolved = resolvePrinterForKitchenLine(businessId, categoryId, beforeItem.product_id);
   const { customer_name, customer_phone } = customerInfoForOrder(order);
   const bizAdj = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
   const payment_summary = paymentSummaryForOrder(orderId);
@@ -301,7 +305,7 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
       quantity: beforeItem.quantity,
       note: beforeItem.note,
       portion_label: beforeItem.portion_label || null,
-      category_name: meta.category_name,
+      category_name: categoryName,
       station,
     };
   } else if (adjustment.type === 'reduce') {
@@ -314,7 +318,7 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
       quantity: delta,
       note: beforeItem.note,
       portion_label: beforeItem.portion_label || null,
-      category_name: meta.category_name,
+      category_name: categoryName,
       station,
       previous_quantity: previousQty,
       new_quantity: newQty,
@@ -590,6 +594,9 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
  * claimed_at dolu işler köprü tarafından alınmış sayılır; mock bunları işlemez.
  */
 export function processPendingJobsSync(businessId, userId) {
+  if (config.nodeEnv === 'production' && process.env.ALLOW_PRINT_JOB_MOCK !== '1') {
+    return { processed: 0, skipped: true, reason: 'mock_disabled_in_production' };
+  }
   if (config.disablePrintJobMock) {
     return { processed: 0, skipped: true };
   }

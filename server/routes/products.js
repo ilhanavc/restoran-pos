@@ -71,6 +71,27 @@ function defaultPortionPrice(list) {
   return d ? d.price : list[0].price;
 }
 
+function assertValidBasePrice(price) {
+  const value = Number(price);
+  if (!Number.isFinite(value) || value <= 0) {
+    const err = new Error('Geçerli ürün fiyatı gerekli');
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
+function assertCategoryExists(categoryId, businessId) {
+  const category = db.prepare(
+    'SELECT id FROM categories WHERE id = ? AND business_id = ? AND is_active = 1',
+  ).get(categoryId, businessId);
+  if (!category) {
+    const err = new Error('Geçerli kategori gerekli');
+    err.status = 400;
+    throw err;
+  }
+}
+
 function replaceProductPortions(businessId, productId, list) {
   db.prepare('DELETE FROM product_portions WHERE product_id = ? AND business_id = ?').run(productId, businessId);
   const ins = db.prepare(
@@ -123,9 +144,11 @@ router.post('/', staffMenu, (req, res) => {
     if (!name || !category_id || price === undefined) {
       return res.status(400).json({ error: 'Ürün adı, kategori ve fiyat gerekli' });
     }
+    const basePrice = assertValidBasePrice(price);
+    assertCategoryExists(category_id, req.businessId);
     let normalized;
     try {
-      normalized = normalizePortionsInput(portions, price);
+      normalized = normalizePortionsInput(portions, basePrice);
     } catch (e) {
       return res.status(400).json({ error: e.message || 'Porsiyon hatası' });
     }
@@ -156,6 +179,7 @@ router.post('/', staffMenu, (req, res) => {
       .all(id, req.businessId);
     res.status(201).json({ ...product, portions: portionRows });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error('Product post:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
@@ -224,6 +248,12 @@ router.patch('/:id', staffMenu, (req, res) => {
 
     let normalized = null;
     let priceCoalesce = price !== undefined && price !== null ? Number(price) : null;
+    if (price !== undefined && price !== null) {
+      priceCoalesce = assertValidBasePrice(price);
+    }
+    if (category_id !== undefined && category_id !== null) {
+      assertCategoryExists(category_id, req.businessId);
+    }
     if (portions !== undefined) {
       try {
         normalized = normalizePortionsInput(portions, product.price);
@@ -278,6 +308,7 @@ router.patch('/:id', staffMenu, (req, res) => {
       .all(req.params.id, req.businessId);
     res.json({ ...updated, portions: portionRows });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error('Product patch:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }

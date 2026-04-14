@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { CalendarDays, Plus, X, Users, Clock, Phone, Edit2, Trash2, Check } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 
 const STATUS_LABELS = {
   confirmed: { label: 'Onaylı', color: 'var(--info)', bg: 'var(--info-muted)' },
@@ -109,6 +111,7 @@ export default function ReservationsScreen() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingReservation, setEditingReservation] = useState(null);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -135,12 +138,19 @@ export default function ReservationsScreen() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Bu rezervasyonu silmek istiyor musunuz?')) return;
-    try {
-      await api.deleteReservation(id);
-      toast.success('Silindi');
-      load();
-    } catch (err) { toast.error(err.message); }
+    requestConfirm({
+      title: 'Rezervasyon silinsin mi?',
+      body: 'Bu işlem rezervasyonu takvimden kaldırır.',
+      confirmLabel: 'Sil',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.deleteReservation(id);
+          toast.success('Silindi');
+          load();
+        } catch (err) { toast.error(err.message); }
+      },
+    });
   };
 
   const handleStatusQuick = async (id, status) => {
@@ -244,6 +254,15 @@ export default function ReservationsScreen() {
           onSave={handleSave}
         />
       )}
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

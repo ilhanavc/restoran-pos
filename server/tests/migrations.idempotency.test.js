@@ -62,6 +62,18 @@ describe('Migrations — fresh DB', () => {
     db.close();
   });
 
+  it('print_jobs lease ve teşhis kolonlarını içeriyor', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    const cols = db.prepare(`PRAGMA table_info(print_jobs)`).all().map(c => c.name);
+    expect(cols).toContain('claimed_until');
+    expect(cols).toContain('attempt_count');
+    expect(cols).toContain('last_attempt_at');
+    expect(cols).toContain('last_error_code');
+    db.close();
+  });
+
   it('orders tablosu order_type kolonu içeriyor', () => {
     const db = new Database(':memory:');
     applyMigrations(db);

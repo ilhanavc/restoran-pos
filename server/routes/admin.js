@@ -301,7 +301,7 @@ function mapPrinterRow(row) {
   };
 }
 
-/** Kalıcı silme öncesi: varsayılan, yönlendirme, bekleyen iş; toplam iş sayısı bilgi amaçlı. */
+/** Kalıcı silme öncesi: yalnız bekleyen iş varsa engelle; varsayılan/routing bilgi amaçlı gösterilir. */
 function getPrinterDeleteEligibility(businessId, printerId) {
   const row = db.prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`).get(printerId, businessId);
   if (!row) return null;
@@ -329,19 +329,11 @@ function getPrinterDeleteEligibility(businessId, printerId) {
       .get(businessId, printerId).c || 0;
 
   const blockers = [];
-  if (isDefault) {
-    blockers.push('Bu yazıcı varsayılan yazıcı. Önce başka bir yazıcıyı varsayılan yapın veya varsayılanı kaldırın.');
-  }
-  if (routingCount > 0) {
-    blockers.push(
-      'Bu yazıcı bir veya daha fazla kategori yönlendirmesinde kullanılıyor. Kategori → Yazıcı ekranından eşleşmeleri kaldırın veya yazıcıyı pasifleştirin (pasifleştirmede yönlendirmeler temizlenir).',
-    );
-  }
   if (pendingJobs > 0) {
     blockers.push('Bu yazıcıya ait bekleyen yazdırma işi var. İşlem bitene veya iptal edilene kadar kalıcı silinemez.');
   }
 
-  const canHardDelete = !isDefault && routingCount === 0 && pendingJobs === 0;
+  const canHardDelete = pendingJobs === 0;
   const canDeactivate = row.is_active === 1 || row.is_active === true;
 
   return {
@@ -355,6 +347,30 @@ function getPrinterDeleteEligibility(businessId, printerId) {
       totalJobs,
     },
   };
+}
+
+function getPrintJobSummary(businessId) {
+  const rows = db
+    .prepare(`SELECT status, COUNT(*) AS count FROM print_jobs WHERE business_id = ? GROUP BY status`)
+    .all(businessId);
+  const byStatus = { pending: 0, printed: 0, failed: 0, cancelled: 0 };
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(byStatus, row.status)) {
+      byStatus[row.status] = Number(row.count) || 0;
+    }
+  }
+  const staleClaimed =
+    db
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM print_jobs
+         WHERE business_id = ?
+           AND status = 'pending'
+           AND claimed_until IS NOT NULL
+           AND datetime(claimed_until) <= datetime('now')`,
+      )
+      .get(businessId).c || 0;
+  return { ...byStatus, stale_claimed: Number(staleClaimed) || 0 };
 }
 
 function countActiveAdmins(businessId) {
@@ -826,11 +842,50 @@ router.get('/print-jobs', (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '30', 10) || 30, 1), 100);
     const jobs = db
       .prepare(
-        `SELECT id, order_id, printer_id, job_type, status, error_message, idempotency_key, created_at, printed_at, payload
+        `SELECT id, order_id, printer_id, job_type, status, error_message, idempotency_key, created_at, printed_at,
+                claimed_at, claimed_by, claimed_until, attempt_count, last_attempt_at, last_error_code, payload
          FROM print_jobs WHERE business_id = ? ORDER BY datetime(created_at) DESC LIMIT ?`,
       )
       .all(req.businessId, limit);
-    res.json({ jobs });
+    res.json({ jobs, summary: getPrintJobSummary(req.businessId) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/print-jobs/:id/retry', (req, res) => {
+  try {
+    const job = db
+      .prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
+    if (!job) return res.status(404).json({ error: 'Yazdırma işi bulunamadı' });
+    if (job.status !== 'failed') {
+      return res.status(409).json({
+        error: 'Yalnızca başarısız yazdırma işleri yeniden kuyruğa alınabilir',
+        status: job.status,
+      });
+    }
+
+    db.prepare(
+      `UPDATE print_jobs
+       SET status = 'pending',
+           error_message = NULL,
+           last_error_code = NULL,
+           claimed_at = NULL,
+           claimed_by = NULL,
+           claimed_until = NULL,
+           printed_at = NULL
+       WHERE id = ? AND business_id = ?`,
+    ).run(req.params.id, req.businessId);
+
+    auditLog(req.businessId, req.user.id, 'print_job_retry', 'print_job', req.params.id, {
+      previous_error_code: job.last_error_code || null,
+      attempt_count: Number(job.attempt_count) || 0,
+    });
+
+    const updated = db.prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`).get(req.params.id, req.businessId);
+    res.json({ job: updated, message: 'Yazdırma işi yeniden kuyruğa alındı' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Sunucu hatası' });

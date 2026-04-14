@@ -4,6 +4,11 @@ import { v4 as uuid } from 'uuid';
 import { runMigrations } from '../migrations/run.js';
 
 try {
+  const force = process.argv.includes('--force');
+  if (process.env.NODE_ENV === 'production' && !force) {
+    throw new Error('Production ortamında destructive seed çalıştırılamaz. Bilinçliyseniz --force parametresi kullanın.');
+  }
+
   runMigrations();
   
   console.log('Seeding database...');

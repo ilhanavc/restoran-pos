@@ -4,6 +4,7 @@ import api from '../../services/api.js';
 import { formatCurrency } from '../../constants/index.js';
 import { X, CreditCard, Banknote, ArrowLeftRight, Check, Printer, Save } from 'lucide-react';
 import SplitPaymentModal from './SplitPaymentModal.jsx';
+import { getOrderTotal, getPaidTotal, getTotalDue, isOrderFullyPaid, roundMoney } from '../../utils/orderPaymentState.js';
 
 const paymentTypes = [
   { key: 'cash', label: 'Nakit', icon: Banknote },
@@ -16,10 +17,6 @@ const paymentActions = [
   { key: 'pay-print', label: 'Öde ve Yazdır', closeOrder: false, printReceipt: true, icon: Printer, tone: 'secondary' },
   { key: 'pay-print-close', label: 'Öde, Yazdır ve Kapat', closeOrder: true, printReceipt: true, icon: Printer, tone: 'secondary' },
 ];
-
-function round2(value) {
-  return Math.round((Number(value) || 0) * 100) / 100;
-}
 
 function inputValueForAmount(amount) {
   return amount % 1 === 0 ? String(amount) : amount.toFixed(2);
@@ -58,13 +55,13 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
 
   if (!orderState) return null;
 
-  const paidTotal = (orderState.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const orderTotal = round2(Number(orderState.grand_total) || 0);
-  const totalDue = round2(Math.max(0, orderTotal - paidTotal));
-  const isFullyPaid = totalDue <= 0.02;
+  const paidTotal = getPaidTotal(orderState);
+  const orderTotal = getOrderTotal(orderState);
+  const totalDue = getTotalDue(orderState);
+  const isFullyPaid = isOrderFullyPaid(orderState);
   const selectedAction = paymentActions.find((action) => action.key === paymentAction) || paymentActions[0];
   const requestedAmount = amountInput ? Number(amountInput) : totalDue;
-  const payAmount = round2(Math.min(Math.max(0, requestedAmount), totalDue));
+  const payAmount = roundMoney(Math.min(Math.max(0, requestedAmount), totalDue));
   const activeItems = (orderState.items || []).filter((item) => item.status !== 'cancelled');
   const contextParts = [
     orderState.waiter_name || orderState.user_name ? `Garson: ${orderState.waiter_name || orderState.user_name}` : null,
@@ -98,8 +95,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
 
   const closePaidOrder = async ({ printReceipt = false } = {}) => {
     const current = await refreshOrder();
-    const currentPaid = (current.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-    const currentDue = round2(Math.max(0, (Number(current.grand_total) || 0) - currentPaid));
+    const currentDue = getTotalDue(current);
     if (currentDue > 0.02) {
       toast.error('Sipariş tamamen ödenmeden masa kapatılamaz');
       return;
@@ -309,7 +305,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
 
             <div style={{ padding: 14, borderTop: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın. Normal tahsilat için sağdaki ödeme alanını kullanın.
+                Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın. Normal ödeme için sağdaki ödeme alanını kullanın.
               </div>
             </div>
           </section>
@@ -372,7 +368,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                   <div>
                     <div style={{ fontSize: 17, fontWeight: 850 }}>Ödeme Tamamlandı</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
-                      Yeni tahsilat alınmasına gerek yok.
+                      Yeni ödeme alınmasına gerek yok.
                     </div>
                   </div>
                 </div>

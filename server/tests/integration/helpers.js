@@ -73,6 +73,10 @@ export function createTestDb() {
   addColumnIfMissing('printers', 'line_width', 'INTEGER');
   addColumnIfMissing('print_jobs', 'claimed_at', 'TEXT');
   addColumnIfMissing('print_jobs', 'claimed_by', 'TEXT');
+  addColumnIfMissing('print_jobs', 'claimed_until', 'TEXT');
+  addColumnIfMissing('print_jobs', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing('print_jobs', 'last_attempt_at', 'TEXT');
+  addColumnIfMissing('print_jobs', 'last_error_code', 'TEXT');
   addColumnIfMissing('call_logs', 'order_id', 'TEXT');
 
   return db;

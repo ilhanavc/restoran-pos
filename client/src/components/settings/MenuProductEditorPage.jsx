@@ -131,13 +131,15 @@ export default function MenuProductEditorPage() {
   };
 
   const addPortion = () => {
-    setPortions((prev) => {
-      const n = prev.length + 1;
-      const row = { key: `p${Date.now()}`, label: `Porsiyon ${n}`, price: '', is_default: false };
-      const next = [...prev, row];
-      setActivePortionIdx(next.length - 1);
-      return next;
-    });
+    const nextIndex = portions.length;
+    const row = {
+      key: `p${Date.now()}`,
+      label: `Porsiyon ${nextIndex + 1}`,
+      price: '',
+      is_default: false,
+    };
+    setPortions((prev) => [...prev, row]);
+    setActivePortionIdx(nextIndex);
   };
 
   const removePortion = (idx) => {
@@ -145,16 +147,15 @@ export default function MenuProductEditorPage() {
       error('En az bir porsiyon olmalı');
       return;
     }
-    setPortions((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      const hasDef = next.some((p) => p.is_default);
-      const fixed = !hasDef ? next.map((p, i) => ({ ...p, is_default: i === 0 })) : next;
-      setActivePortionIdx((cur) => {
-        if (cur === idx) return Math.min(idx, fixed.length - 1);
-        if (cur > idx) return cur - 1;
-        return cur;
-      });
-      return fixed;
+    const next = portions.filter((_, i) => i !== idx);
+    const fixed = next.some((p) => p.is_default)
+      ? next
+      : next.map((p, i) => ({ ...p, is_default: i === 0 }));
+    setPortions(fixed);
+    setActivePortionIdx((cur) => {
+      if (cur === idx) return Math.min(idx, fixed.length - 1);
+      if (cur > idx) return cur - 1;
+      return cur;
     });
   };
 

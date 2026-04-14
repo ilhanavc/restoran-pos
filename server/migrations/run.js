@@ -107,7 +107,7 @@ export const migrations = [
     category_id TEXT NOT NULL REFERENCES categories(id),
     name TEXT NOT NULL,
     description TEXT,
-    price REAL NOT NULL,
+    price REAL NOT NULL CHECK(price > 0),
     barcode TEXT,
     image_url TEXT,
     vat_rate REAL DEFAULT 10.0,
@@ -196,17 +196,20 @@ export const migrations = [
     customer_id TEXT REFERENCES customers(id),
     user_id TEXT REFERENCES users(id),
     status TEXT DEFAULT 'new' CHECK(status IN ('new','saved','in_kitchen','preparing','ready','served','cancelled','closed')),
-    subtotal REAL DEFAULT 0,
-    discount_amount REAL DEFAULT 0,
-    discount_percent REAL DEFAULT 0,
-    service_charge REAL DEFAULT 0,
-    vat_total REAL DEFAULT 0,
-    grand_total REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0 CHECK(subtotal >= 0),
+    discount_amount REAL DEFAULT 0 CHECK(discount_amount >= 0),
+    discount_percent REAL DEFAULT 0 CHECK(discount_percent >= 0),
+    service_charge REAL DEFAULT 0 CHECK(service_charge >= 0),
+    vat_total REAL DEFAULT 0 CHECK(vat_total >= 0),
+    grand_total REAL DEFAULT 0 CHECK(grand_total >= 0),
     note TEXT,
     delivery_address TEXT,
     delivery_note TEXT,
     courier_note TEXT,
     guest_count INTEGER DEFAULT 0,
+    table_name_snapshot TEXT,
+    customer_name_snapshot TEXT,
+    user_name_snapshot TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now')),
     closed_at TEXT,
@@ -219,8 +222,8 @@ export const migrations = [
     order_id TEXT NOT NULL REFERENCES orders(id),
     product_id TEXT NOT NULL REFERENCES products(id),
     product_name TEXT NOT NULL,
-    quantity INTEGER DEFAULT 1,
-    unit_price REAL NOT NULL,
+    quantity INTEGER DEFAULT 1 CHECK(quantity > 0),
+    unit_price REAL NOT NULL CHECK(unit_price >= 0),
     modifiers TEXT DEFAULT '[]',
     note TEXT,
     status TEXT DEFAULT 'new' CHECK(status IN ('new','sent','preparing','ready','served','cancelled','comped')),
@@ -228,6 +231,9 @@ export const migrations = [
     is_comped INTEGER DEFAULT 0,
     comp_reason TEXT,
     vat_rate REAL DEFAULT 10.0,
+    category_id_snapshot TEXT,
+    category_name_snapshot TEXT,
+    printer_target_snapshot TEXT,
     sent_to_kitchen_at TEXT,
     prepared_at TEXT,
     created_at TEXT DEFAULT (datetime('now')),
@@ -243,10 +249,12 @@ export const migrations = [
     payment_scope TEXT NOT NULL DEFAULT 'full_order' CHECK(payment_scope IN ('full_order','split_item')),
     payer_no INTEGER,
     payer_label TEXT,
-    amount REAL NOT NULL,
-    cash_received REAL DEFAULT 0,
-    change_amount REAL DEFAULT 0,
+    amount REAL NOT NULL CHECK(amount > 0),
+    cash_received REAL DEFAULT 0 CHECK(cash_received >= 0),
+    change_amount REAL DEFAULT 0 CHECK(change_amount >= 0),
     note TEXT,
+    idempotency_key TEXT,
+    source TEXT DEFAULT 'manual',
     created_at TEXT DEFAULT (datetime('now')),
     created_by TEXT REFERENCES users(id)
   )`,
@@ -298,7 +306,13 @@ export const migrations = [
     error_message TEXT,
     idempotency_key TEXT UNIQUE,
     created_at TEXT DEFAULT (datetime('now')),
-    printed_at TEXT
+    printed_at TEXT,
+    claimed_at TEXT,
+    claimed_by TEXT,
+    claimed_until TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TEXT,
+    last_error_code TEXT
   )`,
 
   // ── Caller ID / Incoming Calls ──
@@ -342,19 +356,27 @@ export const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS idx_tables_business ON tables(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_tables_area ON tables(dining_area_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_tables_current_order ON tables(current_order_id)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_business ON orders(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_table ON orders(table_id)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)`,
   `CREATE INDEX IF NOT EXISTS idx_orders_type ON orders(order_type)`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_business_created ON orders(business_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_business_status_created ON orders(business_id, status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_orders_business_closed ON orders(business_id, closed_at)`,
   `CREATE INDEX IF NOT EXISTS idx_order_items_order ON order_items(order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_order_items_product ON order_items(product_id)`,
   `CREATE INDEX IF NOT EXISTS idx_products_business ON products(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_products_category ON products(category_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_products_business_active ON products(business_id, is_active, is_deleted)`,
   `CREATE INDEX IF NOT EXISTS idx_product_portions_product ON product_portions(product_id)`,
   `CREATE INDEX IF NOT EXISTS idx_categories_business ON categories(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_business ON customers(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_phones_customer ON customer_phones(customer_id)`,
   `CREATE INDEX IF NOT EXISTS idx_customer_phones_phone ON customer_phones(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_business_created ON payments(business_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_payments_business_type_created ON payments(business_id, payment_type, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`,
@@ -494,6 +516,16 @@ function ensureColumnMigrations() {
   if (!orderCols.some((c) => c.name === 'takeaway_delivered_at')) {
     db.prepare('ALTER TABLE orders ADD COLUMN takeaway_delivered_at TEXT').run();
   }
+  const orderColsAfterTakeaway = db.prepare('PRAGMA table_info(orders)').all();
+  if (!orderColsAfterTakeaway.some((c) => c.name === 'table_name_snapshot')) {
+    db.prepare('ALTER TABLE orders ADD COLUMN table_name_snapshot TEXT').run();
+  }
+  if (!orderColsAfterTakeaway.some((c) => c.name === 'customer_name_snapshot')) {
+    db.prepare('ALTER TABLE orders ADD COLUMN customer_name_snapshot TEXT').run();
+  }
+  if (!orderColsAfterTakeaway.some((c) => c.name === 'user_name_snapshot')) {
+    db.prepare('ALTER TABLE orders ADD COLUMN user_name_snapshot TEXT').run();
+  }
 
   const cpCols = db.prepare('PRAGMA table_info(customer_phones)').all();
   if (cpCols.length && !cpCols.some((c) => c.name === 'normalized_phone')) {
@@ -567,6 +599,24 @@ function ensureColumnMigrations() {
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_by')) {
     db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_by TEXT').run();
   }
+  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_until')) {
+    db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_until TEXT').run();
+  }
+  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  if (pjCols.length && !pjCols.some((c) => c.name === 'attempt_count')) {
+    db.prepare('ALTER TABLE print_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0').run();
+  }
+  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  if (pjCols.length && !pjCols.some((c) => c.name === 'last_attempt_at')) {
+    db.prepare('ALTER TABLE print_jobs ADD COLUMN last_attempt_at TEXT').run();
+  }
+  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  if (pjCols.length && !pjCols.some((c) => c.name === 'last_error_code')) {
+    db.prepare('ALTER TABLE print_jobs ADD COLUMN last_error_code TEXT').run();
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_claimed ON print_jobs(business_id, status, claimed_at, created_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_lease ON print_jobs(business_id, status, claimed_until, created_at)`);
 
   const paymentCols = db.prepare('PRAGMA table_info(payments)').all();
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'payment_scope')) {
@@ -580,6 +630,13 @@ function ensureColumnMigrations() {
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'payer_label')) {
     db.prepare('ALTER TABLE payments ADD COLUMN payer_label TEXT').run();
   }
+  if (paymentCols.length && !paymentCols.some((c) => c.name === 'idempotency_key')) {
+    db.prepare('ALTER TABLE payments ADD COLUMN idempotency_key TEXT').run();
+  }
+  if (paymentCols.length && !paymentCols.some((c) => c.name === 'source')) {
+    db.prepare("ALTER TABLE payments ADD COLUMN source TEXT DEFAULT 'manual'").run();
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(business_id, order_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS payment_allocations (
@@ -618,7 +675,11 @@ function ensureColumnMigrations() {
       created_at TEXT DEFAULT (datetime('now')),
       printed_at TEXT,
       claimed_at TEXT,
-      claimed_by TEXT
+      claimed_by TEXT,
+      claimed_until TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      last_attempt_at TEXT,
+      last_error_code TEXT
     )`);
     db.exec(`INSERT INTO print_jobs_new (${colNames}) SELECT ${colNames} FROM print_jobs`);
     db.exec(`DROP TABLE print_jobs`);
@@ -659,7 +720,20 @@ function ensureColumnMigrations() {
   }
   if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'portion_label')) {
     db.prepare('ALTER TABLE order_items ADD COLUMN portion_label TEXT').run();
+    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
   }
+  if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'category_id_snapshot')) {
+    db.prepare('ALTER TABLE order_items ADD COLUMN category_id_snapshot TEXT').run();
+    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+  }
+  if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'category_name_snapshot')) {
+    db.prepare('ALTER TABLE order_items ADD COLUMN category_name_snapshot TEXT').run();
+    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+  }
+  if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'printer_target_snapshot')) {
+    db.prepare('ALTER TABLE order_items ADD COLUMN printer_target_snapshot TEXT').run();
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_order_items_category_snapshot ON order_items(category_id_snapshot)`);
 }
 
 /** Mevcut ürünler için varsayılan Tam porsiyonu (ürün başına bir kez). */
@@ -698,6 +772,66 @@ function backfillCustomerPhoneNormalized() {
   }
 }
 
+function backfillOrderItemSnapshots() {
+  try {
+    const cols = db.prepare('PRAGMA table_info(order_items)').all();
+    if (!cols.some((c) => c.name === 'category_name_snapshot')) return;
+
+    const info = db.prepare(`
+      UPDATE order_items
+      SET
+        category_id_snapshot = COALESCE(category_id_snapshot, (
+          SELECT p.category_id FROM products p WHERE p.id = order_items.product_id
+        )),
+        category_name_snapshot = COALESCE(category_name_snapshot, (
+          SELECT c.name
+          FROM products p
+          JOIN categories c ON c.id = p.category_id
+          WHERE p.id = order_items.product_id
+        )),
+        printer_target_snapshot = COALESCE(printer_target_snapshot, (
+          SELECT COALESCE(p.printer_target, c.printer_target, 'kitchen')
+          FROM products p
+          LEFT JOIN categories c ON c.id = p.category_id
+          WHERE p.id = order_items.product_id
+        ))
+      WHERE category_id_snapshot IS NULL
+         OR category_name_snapshot IS NULL
+         OR printer_target_snapshot IS NULL
+    `).run();
+    if (info.changes) console.log(`✅ order_items snapshot backfill: ${info.changes} satır`);
+  } catch (e) {
+    console.error('backfillOrderItemSnapshots:', e);
+  }
+}
+
+function backfillOrderHeaderSnapshots() {
+  try {
+    const cols = db.prepare('PRAGMA table_info(orders)').all();
+    if (!cols.some((c) => c.name === 'table_name_snapshot')) return;
+
+    const info = db.prepare(`
+      UPDATE orders
+      SET
+        table_name_snapshot = COALESCE(table_name_snapshot, (
+          SELECT t.name FROM tables t WHERE t.id = orders.table_id
+        )),
+        customer_name_snapshot = COALESCE(customer_name_snapshot, (
+          SELECT c.full_name FROM customers c WHERE c.id = orders.customer_id
+        )),
+        user_name_snapshot = COALESCE(user_name_snapshot, (
+          SELECT u.full_name FROM users u WHERE u.id = orders.user_id
+        ))
+      WHERE table_name_snapshot IS NULL
+         OR customer_name_snapshot IS NULL
+         OR user_name_snapshot IS NULL
+    `).run();
+    if (info.changes) console.log(`✅ orders header snapshot backfill: ${info.changes} satır`);
+  } catch (e) {
+    console.error('backfillOrderHeaderSnapshots:', e);
+  }
+}
+
 export function runMigrations() {
   console.log('🔄 Running migrations...');
   const migrate = db.transaction(() => {
@@ -710,6 +844,8 @@ export function runMigrations() {
   migrateVatInclusivePricingOnce();
   ensureProductPortionsSeed();
   backfillCustomerPhoneNormalized();
+  backfillOrderItemSnapshots();
+  backfillOrderHeaderSnapshots();
   console.log('✅ Migrations complete.');
 }
 

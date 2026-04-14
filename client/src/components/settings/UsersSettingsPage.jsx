@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pencil, UserMinus } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import UserFormModal from './UserFormModal.jsx';
 
@@ -13,6 +15,7 @@ export default function UsersSettingsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [selected, setSelected] = useState(null);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,14 +76,21 @@ export default function UsersSettingsPage() {
   };
 
   const deactivate = async (u) => {
-    if (!window.confirm(`${u.full_name} pasifleştirilsin mi?`)) return;
-    try {
-      await api.deleteAdminUser(u.id);
-      success('Kullanıcı pasifleştirildi');
-      await load();
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    }
+    requestConfirm({
+      title: 'Kullanıcı pasifleştirilsin mi?',
+      body: `${u.full_name} artık sisteme giriş yapamayacak. Daha sonra tekrar aktifleştirilebilir.`,
+      confirmLabel: 'Pasifleştir',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.deleteAdminUser(u.id);
+          success('Kullanıcı pasifleştirildi');
+          await load();
+        } catch (e) {
+          error(e.message || 'İşlem başarısız');
+        }
+      },
+    });
   };
 
   const reactivate = async (u) => {
@@ -184,6 +194,15 @@ export default function UsersSettingsPage() {
         roles={roles}
         initial={selected}
         mode={modalMode}
+      />
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
       />
     </div>
   );

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import { primaryTypeLabel } from './printerDefaults.js';
 
@@ -18,6 +20,7 @@ export default function PrinterRoutingPage() {
   const [loadedSig, setLoadedSig] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,7 +54,16 @@ export default function PrinterRoutingPage() {
   const dirty = useMemo(() => JSON.stringify(selection) !== loadedSig, [selection, loadedSig]);
 
   const handleBack = () => {
-    if (dirty && !window.confirm('Kaydedilmemiş değişiklikler var. Çıkmak istiyor musunuz?')) return;
+    if (dirty) {
+      requestConfirm({
+        title: 'Kaydedilmemiş değişiklikler var',
+        body: 'Yazıcı yönlendirme değişiklikleri kaybolacak. Çıkmak istiyor musunuz?',
+        confirmLabel: 'Çık',
+        tone: 'danger',
+        onConfirm: () => navigate('/settings/printers'),
+      });
+      return;
+    }
     navigate('/settings/printers');
   };
 
@@ -163,6 +175,15 @@ export default function PrinterRoutingPage() {
           .
         </p>
       )}
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

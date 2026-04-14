@@ -13,6 +13,8 @@
     "businessId": 1,
     "dryRun": false,
     "pollIntervalMs": 2000,
+    "apiTimeoutMs": 8000,
+    "healthRetryMs": 3000,
     "socketTimeoutMs": 8000,
     "claimId": "store-bridge",
     "printEncodingMode": "win1254",
@@ -30,6 +32,9 @@
     "enableParse": true,
     "phoneRegex": "(?:0|\\+90)?\\s*(5\\d{2}[\\s\\-]?\\d{3}[\\s\\-]?\\d{2}[\\s\\-]?\\d{2})",
     "debounceMs": 3500,
+    "postRetryAttempts": 3,
+    "postRetryMs": 1500,
+    "postQueueMax": 25,
 
     "hid": {
       "_aciklama": "USB HID filtre — scan-hid-devices.js ile bulunur",

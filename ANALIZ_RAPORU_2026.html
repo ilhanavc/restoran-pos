@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restoran POS v3 — Detaylı Analiz Raporu (Nisan 2026)</title>
+<style>
+  :root {
+    --green: #16a34a; --green-bg: #dcfce7; --green-border: #86efac;
+    --blue: #1d4ed8; --blue-bg: #dbeafe; --blue-border: #93c5fd;
+    --red: #dc2626; --red-bg: #fee2e2; --red-border: #fca5a5;
+    --amber: #d97706; --amber-bg: #fef3c7; --amber-border: #fcd34d;
+    --purple: #7c3aed; --purple-bg: #ede9fe; --purple-border: #c4b5fd;
+    --gray: #374151; --gray-bg: #f3f4f6; --gray-border: #d1d5db;
+    --dark: #111827;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #f9fafb; color: var(--dark); line-height: 1.6; }
+  .header { background: linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 100%); color: white; padding: 48px 40px; }
+  .header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+  .header p { opacity: 0.85; font-size: 1.05rem; }
+  .header .meta { margin-top: 20px; display: flex; gap: 24px; flex-wrap: wrap; }
+  .badge { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); padding: 4px 14px; border-radius: 20px; font-size: 0.85rem; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+  .section { background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 32px; margin-bottom: 28px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .section-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid #e5e7eb; display: flex; align-items: center; gap: 10px; }
+  .icon { font-size: 1.4rem; }
+  h3 { font-size: 1rem; font-weight: 700; margin: 20px 0 8px; }
+  p { margin-bottom: 10px; color: #4b5563; }
+  ul { margin-left: 20px; margin-bottom: 12px; }
+  li { margin-bottom: 5px; color: #4b5563; }
+  .score-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; margin: 16px 0; }
+  .score-card { background: var(--blue-bg); border: 1px solid var(--blue-border); border-radius: 10px; padding: 16px; text-align: center; }
+  .score-card .label { font-size: 0.78rem; color: #6b7280; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .score-card .value { font-size: 2rem; font-weight: 800; color: var(--blue); }
+  .score-card .change { font-size: 0.8rem; color: var(--green); }
+  .score-card.highlight { background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: white; }
+  .score-card.highlight .label { color: rgba(255,255,255,.7); }
+  .score-card.highlight .value { color: white; font-size: 2.4rem; }
+  .score-card.highlight .change { color: #86efac; }
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; margin: 2px; }
+  .tag.green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .tag.red { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+  .tag.amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+  .tag.blue { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+  .tag.purple { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-border); }
+  .callout { border-left: 4px solid; padding: 14px 18px; border-radius: 0 8px 8px 0; margin: 14px 0; }
+  .callout.green { border-color: var(--green); background: var(--green-bg); }
+  .callout.red { border-color: var(--red); background: var(--red-bg); }
+  .callout.amber { border-color: var(--amber); background: var(--amber-bg); }
+  .callout.blue { border-color: var(--blue); background: var(--blue-bg); }
+  .callout strong { display: block; margin-bottom: 4px; }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media(max-width:720px) { .two-col { grid-template-columns: 1fr; } .score-grid { grid-template-columns: repeat(2,1fr); } }
+  .sprint-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .sprint-table th { background: #1e3a5f; color: white; padding: 10px 14px; text-align: left; }
+  .sprint-table td { padding: 10px 14px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  .sprint-table tr:nth-child(even) td { background: #f9fafb; }
+  .risk-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .risk-table th { background: #dc2626; color: white; padding: 9px 12px; text-align: left; }
+  .risk-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+  .risk-table tr:nth-child(even) td { background: #fff5f5; }
+  .risk-high { color: #dc2626; font-weight: 700; }
+  .risk-mid { color: #d97706; font-weight: 700; }
+  .risk-low { color: #16a34a; font-weight: 700; }
+  .feature-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 14px 0; }
+  .feature-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 14px; font-size: 0.88rem; }
+  .feature-card.done { border-left: 4px solid var(--green); }
+  .feature-card.issue { border-left: 4px solid var(--amber); }
+  .feature-card .fc-title { font-weight: 700; margin-bottom: 4px; }
+  .divider { height: 1px; background: #e5e7eb; margin: 18px 0; }
+  code { background: #f3f4f6; padding: 1px 6px; border-radius: 4px; font-family: 'Consolas', monospace; font-size: 0.85em; }
+  .footer { background: #1e3a5f; color: white; text-align: center; padding: 28px; margin-top: 40px; font-size: 0.9rem; opacity: 0.9; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Restoran POS v3 — Detaylı Analiz Raporu</h1>
+  <p>9 sprint tamamlandı · Production-ready · Nisan 2026 test dönemine hazır</p>
+  <div class="meta">
+    <span class="badge">Versiyon 1.0.3</span>
+    <span class="badge">104 Otomatik Test</span>
+    <span class="badge">9 Sprint Tamamlandı</span>
+    <span class="badge">Tarih: Nisan 2026</span>
+    <span class="badge">Genel Puan: 8.8/10</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- SKORLAR -->
+  <div class="section">
+    <div class="section-title"><span class="icon">📊</span> Genel Puanlama</div>
+    <div class="score-grid">
+      <div class="score-card highlight">
+        <div class="label">Genel Puan</div>
+        <div class="value">8.8</div>
+        <div class="change">▲ +1.3 (başlangıçtan)</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Özellik Tamlığı</div>
+        <div class="value">9/10</div>
+        <div class="change">Tüm temel modüller hazır</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Kod Kalitesi</div>
+        <div class="value">8/10</div>
+        <div class="change">Zod, rate limit, helmet</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Güvenlik</div>
+        <div class="value">9/10</div>
+        <div class="change">JWT + CORS + audit log</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Performans</div>
+        <div class="value">8/10</div>
+        <div class="change">SQLite sync, Socket.io</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Test Kapsamı</div>
+        <div class="value">8/10</div>
+        <div class="change">104 test (backend)</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Dokümantasyon</div>
+        <div class="value">7/10</div>
+        <div class="change">CLAUDE.md, kod yorumları</div>
+      </div>
+      <div class="score-card">
+        <div class="label">Dağıtım</div>
+        <div class="value">9/10</div>
+        <div class="change">Auto-update, NSIS, portable</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DERİNLEMESİNE ANALİZ -->
+  <div class="section">
+    <div class="section-title"><span class="icon">🔬</span> Derinlemesine Teknik Analiz</div>
+
+    <h3>Mimari Genel Görünüm</h3>
+    <p>Uygulama 4 bağımsız süreçten oluşuyor: <strong>Electron main</strong> (orchestrator), <strong>Express/Node.js API sunucusu</strong> (child process, ELECTRON_RUN_AS_NODE ile), <strong>Store Bridge</strong> (yazıcı köprüsü, child process) ve <strong>CallerID SDK Helper</strong> (.NET, opsiyonel). Bu ayrım iyi tasarlanmış; bir sürecin çökmesi diğerlerini doğrudan etkilemiyor.</p>
+
+    <h3>Veritabanı Katmanı</h3>
+    <p><code>better-sqlite3</code> ile senkron SQLite kullanımı, tek-instance masaüstü uygulama için doğru seçim. Tüm order/payment/print operasyonları <code>db.transaction()</code> içinde atomik. <code>PRAGMA user_version</code> ile 1 migration versiyonu takip ediliyor; diğer tüm tablolar <code>CREATE TABLE IF NOT EXISTS</code> ile idempotent. DB dosyası <code>%APPDATA%\Restoran POS\pos.db</code>'de, her başlangıçta legacy migration çalışıyor. Günlük otomatik yedek (02:00, 30 gün).</p>
+
+    <h3>API Katmanı</h3>
+    <p>15 route dosyası, tüm input'larda Zod validation, 5 rate limiter (auth/admin/bridge/printer/waiterCall), Helmet başlıkları, JWT authentication + role-based authorization. Audit log tüm kritik operasyonlarda çalışıyor (57 audit log çağrısı sunucu genelinde). CORS origins env ile konfigüre edilebilir (LAN tablet desteği).</p>
+
+    <h3>Frontend Katmanı</h3>
+    <p>React 18 + Vite, 15 major component dizini. Context API ile Auth + Toast yönetimi. Socket.io gerçek zamanlı güncellemeler (kitchen/table/takeaway). Recharts ile 4 etkileşimli grafik. XLSX ile Excel export. Tüm UI metinleri Türkçe. Electron'a özel <code>window.electronAPI</code> bridge (<code>contextBridge</code>) ile güvenli IPC.</p>
+
+    <h3>Yazıcı Sistemi</h3>
+    <p>ESC/POS protokolü, PC857 Türkçe encoding (manuel byte tablosu, iconv-lite bağımlılığı yok) ve Win1254 encoding (iconv-lite ile). 4 fiş şablonu: PAKET KASA, PAKET MUTFAK, MASA MUTFAK, MASA KASA. Per-printer <code>ESC t</code> + <code>skipInit</code> konfigürasyonu. Store Bridge 10s otomatik yeniden başlatma ile dayanıklı.</p>
+
+    <h3>Test Yapısı</h3>
+    <p>104 test, 12 test dosyasında: unit (encoding, migration, phone normalize, print jobs idempotency, printer preview), integration (auth, orders, payments, reports — supertest ile gerçek HTTP katmanı). In-memory SQLite ile izole test ortamı. Backend %85+ kapsam tahmin ediliyor.</p>
+
+    <div class="callout blue">
+      <strong>Sprint Geçmişi Özeti</strong>
+      <table class="sprint-table" style="margin-top:10px;">
+        <tr><th>#</th><th>Odak</th><th>Başlıca Teslimatlar</th></tr>
+        <tr><td>1</td><td>Güvenlik & Kararlılık</td><td>JWT kalıcılığı, Zod validation, rate limiting</td></tr>
+        <tr><td>2</td><td>Yazıcı & Fiş</td><td>ESC/POS, PC857, Bridge otomatik yeniden başlatma</td></tr>
+        <tr><td>3</td><td>UX & Altyapı</td><td>Masa renk skalası, mutfak yaş uyarıları, DB yedek, grafikler</td></tr>
+        <tr><td>4</td><td>UX Hızlı Kazanımlar</td><td>Ödeme kısa tutar butonları, inline müşteri arama</td></tr>
+        <tr><td>5</td><td>Yeni Özellikler</td><td>Rezervasyon modülü, stok takibi</td></tr>
+        <tr><td>6</td><td>Gerçek Zamanlı & Yazıcı</td><td>Socket.io, per-printer ESC t, takeaway fiş fix</td></tr>
+        <tr><td>7</td><td>Test Kapsamı</td><td>65 → 104 otomatik test</td></tr>
+        <tr><td>8</td><td>Production Hardening</td><td>Sayfalama, sipariş filtresi, BRIDGE_TOKEN, CORS</td></tr>
+        <tr><td>9</td><td>Özellik Tamamlama</td><td>Ürün görseli, combo, müşteri 360, analitik, auto-update, <strong>packaging bug fix</strong></td></tr>
+      </table>
+    </div>
+  </div>
+
+  <!-- İYİ VE GÜÇLÜ YÖNLER -->
+  <div class="section">
+    <div class="section-title"><span class="icon">✅</span> İyi ve Güçlü Yönler</div>
+
+    <div class="feature-grid">
+      <div class="feature-card done">
+        <div class="fc-title">Atomik Veritabanı İşlemleri</div>
+        Sipariş, ödeme ve print job tüm db.transaction() içinde. Kısmi yazım sonucu bozuk veri yok.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Katmanlı Güvenlik</div>
+        JWT + role auth + Zod validation + rate limiting + Helmet + CORS + BRIDGE_TOKEN masking. Savunma derinliği iyi.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Supertest ile Gerçek HTTP Testleri</div>
+        Auth, sipariş, ödeme, rapor uçtan uca HTTP katmanında test ediliyor. Mock DB değil, in-memory SQLite.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Socket.io Gerçek Zamanlı</div>
+        Mutfak/masa/takeaway ekranları anında güncelleniyor. Polling yok, gecikme minimize.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Türkçe Encoding Güvenilirliği</div>
+        PC857 manuel byte tablosu (iconv-lite bağımsız). Win1254 fallback. Per-printer ESC t konfigürasyonu.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Elektronik Paketleme Olgunluğu</div>
+        NSIS + Portable, electron-updater auto-update, smoke test pipeline, ASAR dışı doğru kaynak yönetimi.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Kapsamlı Audit Log</div>
+        57 audit log çağrısı. Sipariş, ödeme, kullanıcı, print job tüm kritik aksiyonlar iz bırakıyor.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Dayanıklı Yazıcı Köprüsü</div>
+        Store Bridge çökse 10s sonra otomatik yeniden başlar. Idempotency key ile tekrar baskı önleniyor.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Günlük Otomatik Yedek</div>
+        Her gece 02:00, 30 gün saklama, userData/backups. Elektrik kesintisine karşı korumalı.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Modüler Route Yapısı</div>
+        15 izole route dosyası. Her biri kendi Zod şemasına sahip. Yeni özellik eklemek kolaylaşmış.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">Çoklu Ödeme Desteği</div>
+        Nakit + kart karışık, para üstü hesabı, bölünmüş ödeme (split payments) tam çalışıyor.
+      </div>
+      <div class="feature-card done">
+        <div class="fc-title">CallerID Entegrasyonu</div>
+        C# SDK helper + PowerShell clipboard fallback. Çift çalışma modu güvenilirliği artırıyor.
+      </div>
+    </div>
+  </div>
+
+  <!-- KÖTÜ VE GELİŞTİRİLMESİ GEREKEN YÖNLER -->
+  <div class="section">
+    <div class="section-title"><span class="icon">⚠️</span> Kötü ve Geliştirilmesi Gereken Yönler</div>
+
+    <div class="two-col">
+      <div>
+        <h3>1. CI/CD Pipeline Yok</h3>
+        <p>Repo'da <code>.github/workflows/</code> dizini hiç yok. Her release manuel <code>npm run dist:win</code> ile alınıyor. Paketleme hatası (v1.0.2 iconv-lite krizi) ancak işletmede kurulumdan sonra tespit edilebildi. <span class="tag amber">Yüksek Öncelik</span></p>
+
+        <h3>2. Frontend Test Sıfır</h3>
+        <p>104 testin tamamı backend. Tek bir React component testi yok. Büyük UI değişikliklerinde regresyon riski körleşiyor. <span class="tag amber">Orta Öncelik</span></p>
+
+        <h3>3. Migration Versiyonlama Yetersiz</h3>
+        <p>Sadece 1 migration <code>PRAGMA user_version</code> ile takip ediliyor. Diğerleri her başlangıçta tekrar çalışan <code>CREATE TABLE IF NOT EXISTS</code>. Test helper'ında 14 ayrı <code>addColumnIfMissing</code> çağrısı var — migration kodu ile test kodu senkronizasyonu manuel yapılıyor, zamanla kayabilir.</p>
+
+        <h3>4. QR Kod Dış Servise Bağımlı</h3>
+        <p>Garson çağırma QR kodu için <code>api.qrserver.com</code> kullanılıyor. İnternet bağlantısı olmayan veya zayıf WiFi'lı restoranlarda QR görseli yüklenmiyor. <span class="tag red">Kırılgan</span></p>
+
+        <h3>5. Production Loglama Yok</h3>
+        <p>Tüm hatalar sadece <code>console.error()</code> ile basılıyor. Paketlenmiş Electron uygulamasında bu loglar kaybolur; hata sonrası debug imkansızlaşır. Dosyaya log yazma mekanizması yok. <span class="tag red">Eksik</span></p>
+      </div>
+      <div>
+        <h3>6. Helmet CSP Devre Dışı</h3>
+        <p><code>helmet({ contentSecurityPolicy: false })</code> ile CSP tamamen kapatılmış. Electron renderer'da çalışıyor olsa da, güvenlik başlıklarının yarısı etkisiz kalıyor.</p>
+
+        <h3>7. Tek Kullanıcı Migration Sistemi</h3>
+        <p>Birden fazla kullanıcı aynı anda migration tetikleyemez (SQLite zaten tek-process). Ama test helper'ında migration kodu kopyalanmış — <code>migrations/run.js</code>'deki sütun eklemeleri değiştiğinde <code>tests/integration/helpers.js</code>'i de güncellemeyi unutma riski var.</p>
+
+        <h3>8. Rol Değişikliğinde Token Geçersizleşmiyor</h3>
+        <p>Bir kullanıcının rolü değiştirilse bile eski JWT 24 saat geçerli kalmaya devam ediyor. Acil rol kısıtlaması senaryosunda güvenlik açığı.</p>
+
+        <h3>9. better-sqlite3 ABI Yönetimi</h3>
+        <p>Electron güncellemesi sonrası <code>npm rebuild better-sqlite3</code> manuel çalıştırılmalı. Testler bazen ABI uyuşmazlığı hatası veriyor. Otomatik algılama yok.</p>
+
+        <h3>10. Ürün Görseli Yolu Packaged App'te Belirsiz</h3>
+        <p>Görsel yüklemeler <code>server/uploads/products/</code> altına yazılıyor. Packaged Electron'da bu dizin <code>resources/server/uploads/</code> altında. Yeniden kurulumda veya güncelleme sonrası görsellerin kaybolup kaybolmadığı test edilmedi.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- EKSİK NOKTALAR -->
+  <div class="section">
+    <div class="section-title"><span class="icon">🕳️</span> Eksik Noktalar</div>
+
+    <div class="two-col">
+      <div>
+        <h3>Fonksiyonel Eksikler</h3>
+        <ul>
+          <li><strong>Offline mod yok:</strong> İnternet kesilirse CallerID QR görseli, yemeksepeti gibi bağımlılıklar çalışmaz. Yerel QR üretimi yok.</li>
+          <li><strong>Combo menü sipariş akışına entegre değil:</strong> Ürüne combo eklenebiliyor ama sipariş sırasında combo bileşenleri otomatik görünmüyor/stoktan düşmüyor.</li>
+          <li><strong>Stok ile sipariş entegrasyonu yok:</strong> Sipariş verildiğinde stok otomatik düşmüyor; stok takibi ve sipariş modülü birbirinden bağımsız çalışıyor.</li>
+          <li><strong>Ürün görselleri POS ekranında görünmüyor:</strong> Görsel yükleme var ama masa sipariş ekranındaki ürün listesi görselleri göstermiyor.</li>
+          <li><strong>Rezervasyon → Masa bağlantısı yok:</strong> Rezervasyon kaydediliyor ama gelişinde masaya otomatik atama yapılmıyor.</li>
+          <li><strong>Kullanıcı aktivite raporu yok:</strong> Audit log var ama UI'da görüntüleme ekranı yok.</li>
+          <li><strong>Shift/vardiya yönetimi yok:</strong> Kasa açılış/kapanış kasası reconciliation yok.</li>
+          <li><strong>Müşteri bakiye/sadakat sistemi yok:</strong> DB'de <code>legacy_balance</code> sütunları var ama aktif işlevi yok.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Teknik Eksikler</h3>
+        <ul>
+          <li><strong>TypeScript yok:</strong> 15.000+ satır kod tamamen JavaScript. Büyük refactoring'lerde tip güvencesi yok.</li>
+          <li><strong>React Error Boundary yok:</strong> Herhangi bir component hata verirse tüm uygulama çöküyor, kullanıcıya bilgilendirici bir mesaj gösterilmiyor.</li>
+          <li><strong>API dokümantasyonu (Swagger/OpenAPI) yok:</strong> 15 route dosyası, ~80 endpoint belgesiz. Yeni geliştirici veya entegrasyon için zorlu.</li>
+          <li><strong>Dosyaya log yazma yok:</strong> Production debug için logları görmek mümkün değil (<code>%APPDATA%\Restoran POS\logs\</code> gibi bir mekanizma yok).</li>
+          <li><strong>Crash reporting yok:</strong> Beklenmedik Electron/server crash'leri raporlanmıyor. Sentry veya benzeri yok.</li>
+          <li><strong>Çoklu instance koruması yok:</strong> Aynı anda iki POS penceresi açılabilir, port çakışması ile server başlatılamaz hatası oluşur.</li>
+          <li><strong>DB şeması versiyonlaması minimal:</strong> Sadece 1 migration <code>user_version</code> kullanıyor. Geriye dönük migration (rollback) mekanizması yok.</li>
+          <li><strong>Image upload packaged app sonrası test edilmedi:</strong> Görseller ASAR dışı ama konumları güncelleme sonrası belirsiz.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- RİSKLER -->
+  <div class="section">
+    <div class="section-title"><span class="icon">⚡</span> Riskler</div>
+
+    <table class="risk-table">
+      <tr><th>Risk</th><th>Kategori</th><th>Olasılık</th><th>Etki</th><th>Çözüm Önerisi</th></tr>
+      <tr>
+        <td><strong>Paketleme hatası yeniden tekrarlayabilir</strong><br><small>CI/CD olmadığı için bir sonraki bağımlılık değişikliği yine işletmede patlayabilir</small></td>
+        <td><span class="tag amber">Dağıtım</span></td>
+        <td class="risk-high">Yüksek</td>
+        <td class="risk-high">Yüksek</td>
+        <td>GitHub Actions workflow ekle: dist:prepare + smoke test + release otomasyonu</td>
+      </tr>
+      <tr>
+        <td><strong>SQLite dosyası bozulma</strong><br><small>Elektrik kesintisi veya zorla kapatma sırasında WAL dosyası bozulabilir</small></td>
+        <td><span class="tag red">Veri</span></td>
+        <td class="risk-mid">Orta</td>
+        <td class="risk-high">Yüksek</td>
+        <td>Yedek mekanizması var (30 gün). Uygulama başlangıcında SQLite integrity_check ekle</td>
+      </tr>
+      <tr>
+        <td><strong>Ürün görselleri güncelleme sonrası kaybolabilir</strong><br><small>server/uploads/ dizini extraResources içinde ama update sonraki konumu belirsiz</small></td>
+        <td><span class="tag amber">Dağıtım</span></td>
+        <td class="risk-mid">Orta</td>
+        <td class="risk-mid">Orta</td>
+        <td>Görselleri userData'ya (AppData) taşı, server/uploads yerine kalıcı konuma yaz</td>
+      </tr>
+      <tr>
+        <td><strong>better-sqlite3 ABI çakışması</strong><br><small>Electron güncellemesi sonrası manuel rebuild unutulursa tüm uygulama açılmaz</small></td>
+        <td><span class="tag amber">Teknik</span></td>
+        <td class="risk-mid">Orta</td>
+        <td class="risk-high">Yüksek</td>
+        <td>dist:prepare'e ABI check scripti ekle. CI otomasyonu kesin çözüm.</td>
+      </tr>
+      <tr>
+        <td><strong>JWT token rol değişikliğine tepkisiz</strong><br><small>Çalışan bir token 24 saat boyunca eski rolü taşıyor</small></td>
+        <td><span class="tag red">Güvenlik</span></td>
+        <td class="risk-low">Düşük</td>
+        <td class="risk-mid">Orta</td>
+        <td>Token blacklist (Redis veya DB tablosu) veya kısa expiry (1h) + refresh token</td>
+      </tr>
+      <tr>
+        <td><strong>pos-config.json düz metin JWT secret</strong><br><small>AppData altında okunabilir, Windows'ta yerel erişimli kullanıcı okuyabilir</small></td>
+        <td><span class="tag amber">Güvenlik</span></td>
+        <td class="risk-low">Düşük</td>
+        <td class="risk-mid">Orta</td>
+        <td>Windows DPAPI ile şifreli saklama veya Electron safeStorage API</td>
+      </tr>
+      <tr>
+        <td><strong>QR kod internet bağımlılığı</strong><br><small>api.qrserver.com erişilmezse garson çağırma QR'ı görüntülenemiyor</small></td>
+        <td><span class="tag amber">Güvenilirlik</span></td>
+        <td class="risk-mid">Orta</td>
+        <td class="risk-low">Düşük</td>
+        <td>qrcode veya qrcode-generator npm paketi ile yerel QR üretimi</td>
+      </tr>
+      <tr>
+        <td><strong>Tek örnek (instance) kontrolü yok</strong><br><small>İki pencere açılırsa ikinci server başlatılamaz, hata mesajı kafa karıştırıcı</small></td>
+        <td><span class="tag gray">UX</span></td>
+        <td class="risk-low">Düşük</td>
+        <td class="risk-low">Düşük</td>
+        <td>app.requestSingleInstanceLock() ile ikinci örneği engelle, birinci pencereyi öne getir</td>
+      </tr>
+      <tr>
+        <td><strong>Production log kaybı</strong><br><small>Electron main veya server hata verdiğinde console.error logları sonraki açılışta erişilemiyor</small></td>
+        <td><span class="tag amber">İşletim</span></td>
+        <td class="risk-high">Yüksek</td>
+        <td class="risk-mid">Orta</td>
+        <td>electron-log paketi ile userData/logs/ altına rotating log file yaz</td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- KRİTİK EKSİKLER -->
+  <div class="section">
+    <div class="section-title"><span class="icon">🚨</span> Kritik Eksikler</div>
+
+    <div class="callout red">
+      <strong>1. CI/CD Pipeline Eksikliği — En Kritik</strong>
+      <p>v1.0.2'deki iconv-lite hatası tam olarak bu eksikten kaynaklandı. <code>dist:prepare</code> scripti çalışıyor ancak paketlenmiş uygulamanın gerçekten açılıp açılmadığını test eden otomatik bir adım yok. Sonraki her bağımlılık değişikliği benzer bir krizi tekrarlayabilir. <strong>Çözüm:</strong> GitHub Actions ile <code>npm run dist:prepare → smoke test → release upload</code> otomasyonu.</p>
+    </div>
+
+    <div class="callout red">
+      <strong>2. Production Log Dosyası Yok — Kritik</strong>
+      <p>Paketlenmiş Electron uygulamasında bir hata olduğunda (server crash, migration hatası, v.b.) loglar erişilemez. <code>console.error</code> yalnızca geliştirici konsolu açıkken görünür. İşletmede bir sorun çıktığında nedenini bulmak çok güç. <strong>Çözüm:</strong> <code>electron-log</code> paketi ile <code>%APPDATA%\Restoran POS\logs\main.log</code> ve <code>server.log</code> dosyaları.</p>
+    </div>
+
+    <div class="callout amber">
+      <strong>3. Stok–Sipariş Entegrasyonu Yok — İşlevsel Kritik</strong>
+      <p>Stok takip modülü var, sipariş modülü var, ama birbirleriyle konuşmuyor. Sipariş kaydedildiğinde stok azalmıyor. Bu, restoranın kullanabileceği en temel stok takip senaryosunu engelliyor. <strong>Çözüm:</strong> Sipariş kalemi oluşturulduğunda ilgili stok hareketi otomatik yaratılmalı.</p>
+    </div>
+
+    <div class="callout amber">
+      <strong>4. React Error Boundary Yok — UX Kritik</strong>
+      <p>Herhangi bir React component beklenmedik bir hata verirse tüm uygulama boş beyaz ekrana düşer, kullanıcı ne olduğunu anlayamaz ve yardım alamaz. Kasa ortasında siparişi kaybedebilir. <strong>Çözüm:</strong> Root ve kritik ekranlar (OrderPanel, PaymentModal) için Error Boundary sarmalayıcı.</p>
+    </div>
+
+    <div class="callout amber">
+      <strong>5. Ürün Görselleri userData'ya Yazılmıyor — Update Güvenliği</strong>
+      <p>Yüklenen görseller <code>resources/server/uploads/products/</code> altına yazılıyor. electron-builder yeni kurulumda bu dizini sıfırlayabilir veya üzerine yazabilir. Görseller birkaç update sonra kaybolma riski taşıyor. <strong>Çözüm:</strong> Upload hedefini <code>app.getPath('userData')/uploads/products/</code> olarak değiştir, static serving'i buna göre güncelle.</p>
+    </div>
+
+    <div class="callout blue">
+      <strong>6. Frontend Test Sıfır — Uzun Vadeli Bakım Riski</strong>
+      <p>104 testin tamamı backend. React component'leri için tek bir test yok. Büyüyen codebase'de (860 satır ReportsScreen, 323 satır WaiterCallPanel) UI regresyonlarını elle yakalamak giderek zorlaşacak. <strong>Çözüm:</strong> Kritik component'ler için Vitest + @testing-library/react ile en az 20 frontend testi.</p>
+    </div>
+  </div>
+
+  <!-- 15 GÜN TEST PLANI -->
+  <div class="section">
+    <div class="section-title"><span class="icon">🗓️</span> 15 Günlük Production Test Planı</div>
+
+    <p>Bu dönemde takip etmen gereken konular:</p>
+
+    <div class="two-col">
+      <div>
+        <h3>Günlük İzleme</h3>
+        <ul>
+          <li>Fiş basımı tutarlı mı? (tüm 4 şablon)</li>
+          <li>Store Bridge yeniden başlatılıyor mu? (konsol logları)</li>
+          <li>Sipariş verilince mutfak ekranı anında güncelleniyor mu?</li>
+          <li>Masa durumları doğru yansıyor mu?</li>
+          <li>DB yedek alınıyor mu? (backups dizini)</li>
+        </ul>
+        <h3>Özellik Testi</h3>
+        <ul>
+          <li>Müşteri kaydı → 360 profil verileri doğru mu?</li>
+          <li>Ürün görseli yükle → siparişte görünüyor mu?</li>
+          <li>Garson çağırma QR → bildirim geliyor mu?</li>
+          <li>Rapor Excel export çalışıyor mu?</li>
+          <li>Rezervasyon oluştur/iptal et</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Kritik Senaryolar</h3>
+        <ul>
+          <li>Uygulama kapatılıp açıldıktan sonra oturum devam ediyor mu?</li>
+          <li>İnternet kesilince sadece QR görseli mi yüklenmiyor, yoksa başka şeyler de mi?</li>
+          <li>Yazıcı kapalı iken sipariş verilebiliyor mu? Print job failed durumu?</li>
+          <li>Çok sipariş açıkken performans düşüyor mu?</li>
+          <li>Farklı ödeme kombinasyonları (nakit+kart) doğru hesaplıyor mu?</li>
+        </ul>
+        <h3>Test Sonrası Yapılacaklar</h3>
+        <ul>
+          <li>Bulunan sorunları listeye al</li>
+          <li>Kritik olanları önce düzelt (patch release)</li>
+          <li>CI/CD kurulumu başlat</li>
+          <li>v2 roadmap'i test bulgularına göre güncelle</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ÖZET -->
+  <div class="section">
+    <div class="section-title"><span class="icon">📋</span> Özet ve Değerlendirme</div>
+
+    <div class="callout green">
+      <strong>Genel Değerlendirme: 8.8/10 — Sağlam Production-Ready Uygulama</strong>
+      <p>9 sprint süresinde sıfırdan tam donanımlı bir restoran POS sistemine ulaşıldı. Temel restoran akışı (sipariş → mutfak → ödeme → fiş) güvenilir ve gerçek zamanlı çalışıyor. Güvenlik katmanı iyi tasarlanmış, test altyapısı backend için sağlam. Electron paketleme ve auto-update mekanizması production kalitesinde.</p>
+    </div>
+
+    <div class="callout amber">
+      <strong>15 Gün Test Sonrası Öncelik Sırası</strong>
+      <ol style="margin-left:20px;">
+        <li><strong>CI/CD pipeline</strong> — Paketleme güvenliği için kritik</li>
+        <li><strong>electron-log ile dosyaya log yazma</strong> — Production debug için kritik</li>
+        <li><strong>Ürün görsellerini userData'ya taşıma</strong> — Update güvenliği</li>
+        <li><strong>QR kod yerel üretimi</strong> — Offline güvenilirlik</li>
+        <li><strong>Stok–sipariş entegrasyonu</strong> — İşlevsel tamamlanma</li>
+        <li><strong>React Error Boundary</strong> — UX dayanıklılığı</li>
+        <li><strong>Frontend test coverage başlatma</strong> — Uzun vadeli bakım</li>
+      </ol>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  Restoran POS v3 — Detaylı Analiz Raporu · Versiyon 1.0.3 · Nisan 2026<br>
+  9 Sprint · 104 Test · 8.8/10 Genel Puan
+</div>
+
+</body>
+</html>

@@ -5,16 +5,31 @@ import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 const router = Router();
 router.use(authenticate, businessScope);
 
+function addDays(date, days) {
+  const d = new Date(`${date}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function dayBounds(date) {
+  return [`${date} 00:00:00`, `${addDays(date, 1)} 00:00:00`];
+}
+
+function rangeBounds(from, to) {
+  return [`${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`];
+}
+
 // GET /api/reports/daily
 router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { date } = req.query;
     const targetDate = date || new Date().toISOString().slice(0, 10);
+    const [startAt, endAt] = dayBounds(targetDate);
 
     const revenue = db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total FROM payments 
-      WHERE business_id = ? AND date(created_at) = ?
-    `).get(req.businessId, targetDate);
+      WHERE business_id = ? AND created_at >= ? AND created_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     const orderStats = db.prepare(`
       SELECT COUNT(*) as total_orders,
@@ -23,57 +38,59 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count,
         COALESCE(SUM(CASE WHEN status != 'cancelled' THEN grand_total ELSE 0 END), 0) as total_sales,
         COALESCE(SUM(CASE WHEN status != 'cancelled' THEN discount_amount ELSE 0 END), 0) as total_discounts
-      FROM orders WHERE business_id = ? AND date(created_at) = ?
-    `).get(req.businessId, targetDate);
+      FROM orders WHERE business_id = ? AND created_at >= ? AND created_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     const paymentBreakdown = db.prepare(`
       SELECT payment_type, COUNT(*) as count, COALESCE(SUM(amount), 0) as total
-      FROM payments WHERE business_id = ? AND date(created_at) = ?
+      FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY payment_type
-    `).all(req.businessId, targetDate);
+    `).all(req.businessId, startAt, endAt);
 
     const topProducts = db.prepare(`
       SELECT oi.product_name, SUM(oi.quantity) as total_qty, SUM(oi.unit_price * oi.quantity) as total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.business_id = ? AND date(o.created_at) = ? AND oi.status != 'cancelled'
+      WHERE o.business_id = ? AND o.created_at >= ? AND o.created_at < ? AND oi.status != 'cancelled'
       GROUP BY oi.product_name ORDER BY total_qty DESC LIMIT 10
-    `).all(req.businessId, targetDate);
+    `).all(req.businessId, startAt, endAt);
 
     const categoryBreakdown = db.prepare(`
-      SELECT c.name as category_name, SUM(oi.quantity) as total_qty, SUM(oi.unit_price * oi.quantity) as total_revenue
+      SELECT COALESCE(oi.category_name_snapshot, 'Kategorisiz') as category_name,
+             oi.category_id_snapshot as category_id,
+             SUM(oi.quantity) as total_qty,
+             SUM(oi.unit_price * oi.quantity) as total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      JOIN products p ON oi.product_id = p.id
-      JOIN categories c ON p.category_id = c.id
-      WHERE o.business_id = ? AND date(o.created_at) = ? AND oi.status != 'cancelled'
-      GROUP BY c.id ORDER BY total_revenue DESC
-    `).all(req.businessId, targetDate);
+      WHERE o.business_id = ? AND o.created_at >= ? AND o.created_at < ? AND oi.status != 'cancelled'
+      GROUP BY COALESCE(oi.category_id_snapshot, oi.category_name_snapshot, 'uncategorized'), COALESCE(oi.category_name_snapshot, 'Kategorisiz')
+      ORDER BY total_revenue DESC
+    `).all(req.businessId, startAt, endAt);
 
     const userSales = db.prepare(`
       SELECT u.full_name, COUNT(DISTINCT o.id) as order_count, COALESCE(SUM(p.amount), 0) as total_collected
       FROM payments p
       JOIN orders o ON p.order_id = o.id
       JOIN users u ON p.created_by = u.id
-      WHERE p.business_id = ? AND date(p.created_at) = ?
+      WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
       GROUP BY u.id ORDER BY total_collected DESC
-    `).all(req.businessId, targetDate);
+    `).all(req.businessId, startAt, endAt);
 
     const compedItems = db.prepare(`
       SELECT oi.product_name, oi.quantity, oi.unit_price, oi.comp_reason, u.full_name as comped_by
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN users u ON oi.created_by = u.id
-      WHERE o.business_id = ? AND date(o.created_at) = ? AND oi.is_comped = 1
-    `).all(req.businessId, targetDate);
+      WHERE o.business_id = ? AND o.created_at >= ? AND o.created_at < ? AND oi.is_comped = 1
+    `).all(req.businessId, startAt, endAt);
 
     const openOrders = db.prepare(`
-      SELECT o.*, t.name as table_name FROM orders o
+      SELECT o.*, COALESCE(o.table_name_snapshot, t.name) as table_name FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
-      WHERE o.business_id = ? AND date(o.created_at) = ?
+      WHERE o.business_id = ? AND o.created_at >= ? AND o.created_at < ?
         AND o.status NOT IN ('closed', 'cancelled')
       ORDER BY o.created_at
-    `).all(req.businessId, targetDate);
+    `).all(req.businessId, startAt, endAt);
 
     const avgOrderValue = orderStats.total_orders > 0
       ? revenue.total / orderStats.total_orders
@@ -115,16 +132,17 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
     // Tarih aralığı: from/to > date > bugün
     const fromDate = from || date || new Date().toISOString().slice(0, 10);
     const toDate = to || fromDate;
+    const [startAt, endAt] = rangeBounds(fromDate, toDate);
 
     const whereParts = [
       'o.business_id = ?',
       "o.status = 'closed'",
-      'date(o.closed_at) BETWEEN ? AND ?',
+      'o.closed_at >= ? AND o.closed_at < ?',
     ];
-    const params = [req.businessId, fromDate, toDate];
+    const params = [req.businessId, startAt, endAt];
 
     if (customer && customer.trim()) {
-      whereParts.push('c.full_name LIKE ?');
+      whereParts.push('COALESCE(o.customer_name_snapshot, c.full_name) LIKE ?');
       params.push(`%${customer.trim()}%`);
     }
     if (min_amount !== undefined && min_amount !== '') {
@@ -147,9 +165,9 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
 
     const rows = db.prepare(`
       SELECT o.id, o.order_no, o.order_type, o.grand_total, o.discount_amount, o.closed_at,
-        t.name AS table_name,
-        u.full_name AS user_name,
-        c.full_name AS customer_name,
+        COALESCE(o.table_name_snapshot, t.name) AS table_name,
+        COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
+        COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
         (SELECT p.payment_type FROM payments p WHERE p.order_id = o.id ORDER BY p.created_at LIMIT 1) AS payment_type
       FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
@@ -182,16 +200,17 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
     const { date, from, to, customer, min_amount, max_amount } = req.query;
     const fromDate = from || date || new Date().toISOString().slice(0, 10);
     const toDate = to || fromDate;
+    const [startAt, endAt] = rangeBounds(fromDate, toDate);
 
     const whereParts = [
       'o.business_id = ?',
       "o.status = 'closed'",
-      'date(o.closed_at) BETWEEN ? AND ?',
+      'o.closed_at >= ? AND o.closed_at < ?',
     ];
-    const params = [req.businessId, fromDate, toDate];
+    const params = [req.businessId, startAt, endAt];
 
     if (customer && customer.trim()) {
-      whereParts.push('c.full_name LIKE ?');
+      whereParts.push('COALESCE(o.customer_name_snapshot, c.full_name) LIKE ?');
       params.push(`%${customer.trim()}%`);
     }
     if (min_amount !== undefined && min_amount !== '') {
@@ -207,9 +226,9 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
 
     const rows = db.prepare(`
       SELECT o.id, o.order_no, o.order_type, o.grand_total, o.discount_amount, o.closed_at,
-        t.name AS table_name,
-        u.full_name AS user_name,
-        c.full_name AS customer_name,
+        COALESCE(o.table_name_snapshot, t.name) AS table_name,
+        COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
+        COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
         (SELECT p.payment_type FROM payments p WHERE p.order_id = o.id ORDER BY p.created_at LIMIT 1) AS payment_type
       FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
@@ -232,22 +251,23 @@ router.get('/range', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'Tarih aralığı gerekli' });
+    const [startAt, endAt] = rangeBounds(from, to);
 
     const revenue = db.prepare(`
       SELECT date(created_at) as date, COALESCE(SUM(amount), 0) as total
-      FROM payments WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?
+      FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY date(created_at) ORDER BY date
-    `).all(req.businessId, from, to);
+    `).all(req.businessId, startAt, endAt);
 
     const summary = db.prepare(`
       SELECT COALESCE(SUM(amount), 0) as total_revenue, COUNT(*) as total_payments
-      FROM payments WHERE business_id = ? AND date(created_at) BETWEEN ? AND ?
-    `).get(req.businessId, from, to);
+      FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     const orderCount = db.prepare(`
       SELECT COUNT(*) as count FROM orders 
-      WHERE business_id = ? AND status = 'closed' AND date(closed_at) BETWEEN ? AND ?
-    `).get(req.businessId, from, to);
+      WHERE business_id = ? AND status = 'closed' AND closed_at >= ? AND closed_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     res.json({ revenue, summary, orderCount: orderCount.count });
   } catch (err) {
@@ -260,15 +280,16 @@ router.get('/hourly', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { date } = req.query;
     const targetDate = date || new Date().toISOString().slice(0, 10);
+    const [startAt, endAt] = dayBounds(targetDate);
 
     const rows = db.prepare(`
       SELECT strftime('%H', created_at) as hour,
              COUNT(*) as order_count,
              COALESCE(SUM(amount), 0) as revenue
       FROM payments
-      WHERE business_id = ? AND date(created_at) = ?
+      WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY hour ORDER BY hour
-    `).all(req.businessId, targetDate);
+    `).all(req.businessId, startAt, endAt);
 
     // 0-23 tüm saatler için boş değerlerle doldur
     const byHour = {};
@@ -291,18 +312,19 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from ve to parametreleri gerekli' });
+    const [startAt, endAt] = rangeBounds(from, to);
 
     // Top 10 ürün (adet bazlı)
     const topProducts = db.prepare(`
       SELECT oi.product_name, SUM(oi.quantity) AS total_qty, SUM(oi.unit_price * oi.quantity) AS total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE o.business_id = ? AND date(o.closed_at) BETWEEN ? AND ?
+      WHERE o.business_id = ? AND o.closed_at >= ? AND o.closed_at < ?
         AND o.status = 'closed' AND oi.status != 'cancelled'
       GROUP BY oi.product_name
       ORDER BY total_qty DESC
       LIMIT 10
-    `).all(req.businessId, from, to);
+    `).all(req.businessId, startAt, endAt);
 
     // Saatlik yoğunluk (0-23)
     const hourlyRows = db.prepare(`
@@ -311,9 +333,9 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
              COALESCE(SUM(p.amount), 0) AS revenue
       FROM payments p
       JOIN orders o ON p.order_id = o.id
-      WHERE p.business_id = ? AND date(p.created_at) BETWEEN ? AND ?
+      WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
       GROUP BY hour ORDER BY hour
-    `).all(req.businessId, from, to);
+    `).all(req.businessId, startAt, endAt);
     const byHour = {};
     for (const r of hourlyRows) byHour[r.hour] = r;
     const peakHours = Array.from({ length: 24 }, (_, i) => {
@@ -325,16 +347,16 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
     const dailyRevenue = db.prepare(`
       SELECT date(p.created_at) AS date, COALESCE(SUM(p.amount), 0) AS revenue, COUNT(*) AS order_count
       FROM payments p
-      WHERE p.business_id = ? AND date(p.created_at) BETWEEN ? AND ?
+      WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
       GROUP BY date(p.created_at) ORDER BY date
-    `).all(req.businessId, from, to);
+    `).all(req.businessId, startAt, endAt);
 
     // Dönem özeti
     const summary = db.prepare(`
       SELECT COALESCE(SUM(p.amount), 0) AS total_revenue, COUNT(*) AS total_orders
       FROM payments p
-      WHERE p.business_id = ? AND date(p.created_at) BETWEEN ? AND ?
-    `).get(req.businessId, from, to);
+      WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     res.json({ from, to, topProducts, peakHours, dailyRevenue, summary });
   } catch (err) {
