@@ -169,8 +169,9 @@ class ApiService extends ApiHttpClient {
     try {
       const data = await this.get('/admin/printers/discovered');
       const s = data.scanState || '';
+      const lastErrorCode = String(data.lastErrorCode || '').trim();
+      if (s === 'bridge_unconfigured' || lastErrorCode === 'bridge_not_configured') return 'unconfigured';
       if (s === 'bridge_unreachable' || s === 'auth_error') return 'down';
-      if (s === 'bridge_unconfigured') return 'unconfigured';
       return 'ok';
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) return null;

@@ -12,6 +12,7 @@ import {
   primaryTypeLabel,
   FONT_FAMILY_OPTIONS,
 } from './printerDefaults.js';
+import { getDiscoveryUiMeta, toneColor } from './printerDiscoveryStatus.js';
 
 function ToggleRow({ label, checked, onChange, disabled }) {
   return (
@@ -177,7 +178,7 @@ export default function PrinterDetailPage() {
   const [port, setPort] = useState('9100');
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discoveryState, setDiscoveryState] = useState('never_scanned');
-  const [discoveryMessage, setDiscoveryMessage] = useState('');
+  const [discoveryLastErrorCode, setDiscoveryLastErrorCode] = useState(null);
   const [discoveryUpdatedAt, setDiscoveryUpdatedAt] = useState('');
   const [discoveredPrinters, setDiscoveredPrinters] = useState([]);
   const [isActive, setIsActive] = useState(true);
@@ -258,7 +259,7 @@ export default function PrinterDetailPage() {
     setDiscoveredPrinters(list);
     setDiscoveryUpdatedAt(data.updatedAt || '');
     setDiscoveryState(data.scanState || 'never_scanned');
-    setDiscoveryMessage(data.message || '');
+    setDiscoveryLastErrorCode(data.lastErrorCode || null);
     return data;
   }, []);
 
@@ -270,11 +271,11 @@ export default function PrinterDetailPage() {
         if (triggerRefresh) {
           const refreshRes = await api.refreshDiscoveredPrinters();
           setDiscoveryState(refreshRes.scanState || 'scanning');
-          setDiscoveryMessage('Windows yazıcıları taranıyor');
+          setDiscoveryLastErrorCode(null);
         }
         let data = await fetchDiscoveredPrinters();
         if (triggerRefresh) {
-          const terminalStates = new Set(['success', 'empty', 'bridge_unreachable', 'auth_error']);
+          const terminalStates = new Set(['success', 'empty', 'bridge_unreachable', 'auth_error', 'bridge_unconfigured']);
           let attempts = 0;
           while (!terminalStates.has(data.scanState)) {
             if (attempts >= 12) break;
@@ -284,13 +285,16 @@ export default function PrinterDetailPage() {
           }
         }
       } catch (e) {
-        setDiscoveryState((prev) => prev || 'bridge_unreachable');
-        setDiscoveryMessage(e.message || 'StoreBridge servisine ulaşılamadı');
+        const isUnconfigured = String(e?.message || '').toLowerCase().includes('yapılandırması eksik');
+        const fallbackState = isUnconfigured ? 'bridge_unconfigured' : 'bridge_unreachable';
+        const fallbackCode = isUnconfigured ? 'bridge_not_configured' : 'bridge_unreachable';
+        setDiscoveryState(fallbackState);
+        setDiscoveryLastErrorCode(fallbackCode);
       } finally {
         setDiscoveryLoading(false);
       }
     },
-    [fetchDiscoveredPrinters],
+    [discoveredPrinters, fetchDiscoveredPrinters, printOptions?.device?.physicalName],
   );
 
   const load = useCallback(async () => {
@@ -534,6 +538,16 @@ export default function PrinterDetailPage() {
         ? 'Legacy Bar modu: mevcut kayıtlar için uyumluluk modunda düzenleme.'
         : 'Adisyon modu aktif: fiş görünümü ve ödeme çıktısı ayarları öne çıkar.';
   const roleLabel = type === 'kitchen' ? 'Mutfak yazıcısı' : type === 'receipt' ? 'Müşteri fişi yazıcısı' : 'Legacy yazıcı';
+  const discoveryMeta = useMemo(
+    () =>
+      getDiscoveryUiMeta({
+        scanState: discoveryState,
+        lastErrorCode: discoveryLastErrorCode,
+        printers: discoveredPrinters,
+        hasSelectedPhysical: !!String(physicalName || '').trim(),
+      }),
+    [discoveredPrinters, discoveryLastErrorCode, discoveryState, physicalName],
+  );
 
   return (
     <div className="page-container">
@@ -660,19 +674,19 @@ export default function PrinterDetailPage() {
                   <span style={{ fontSize: 11, color: physicalName.trim() ? 'var(--success, #16a34a)' : 'var(--text-muted)' }}>
                     {physicalName.trim() ? 'Durum: Cihaz seçimi tamamlandı' : 'Durum: Cihaz seçilmedi'}
                   </span>
-                  {discoveryMessage ? (
+                  {discoveryMeta?.text ? (
                     <span
                       style={{
                         fontSize: 11,
-                        color:
-                          discoveryState === 'bridge_unreachable' || discoveryState === 'auth_error'
-                            ? 'var(--danger, #dc2626)'
-                            : discoveryState === 'success'
-                              ? 'var(--success, #16a34a)'
-                              : 'var(--text-muted)',
+                        color: toneColor(discoveryMeta.tone),
                       }}
                     >
-                      {discoveryMessage}
+                      {discoveryMeta.text}
+                    </span>
+                  ) : null}
+                  {discoveryMeta?.detail ? (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {discoveryMeta.detail}
                     </span>
                   ) : null}
                 </label>

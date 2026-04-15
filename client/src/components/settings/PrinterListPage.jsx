@@ -8,6 +8,7 @@ import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 import PrinterDeleteModal from './PrinterDeleteModal.jsx';
 import { connectionSummary } from './printerDefaults.js';
+import { getDiscoveryUiMeta, toneColor } from './printerDiscoveryStatus.js';
 
 function roleMeta(type) {
   const t = String(type || '').toLowerCase();
@@ -17,7 +18,7 @@ function roleMeta(type) {
   return { key: 'legacy', label: 'Diğer yazıcı (legacy)', tone: 'info' };
 }
 
-function statusMeta(printer, discoveredSet, bridgeStatus) {
+function statusMeta(printer, discoveredSet, discoveryMeta) {
   if (!printer.is_active) {
     return {
       text: 'Pasif',
@@ -43,11 +44,19 @@ function statusMeta(printer, discoveredSet, bridgeStatus) {
     };
   }
 
-  if (bridgeStatus === 'down') {
+  if (discoveryMeta.state === 'bridge_unconfigured') {
+    return {
+      text: 'Bridge yapılandırması eksik',
+      tone: 'warning',
+      detail: 'StoreBridge aktif değil ya da yapılandırılmamış.',
+    };
+  }
+
+  if (discoveryMeta.state === 'bridge_unreachable' || discoveryMeta.state === 'auth_error') {
     return {
       text: 'Bağlı değil / sorunlu',
       tone: 'danger',
-      detail: 'Bridge bağlantısı kurulamadı, cihaz durumu doğrulanamadı.',
+      detail: 'Bu bilgisayarda yazıcı tarama servisine ulaşılamadı.',
     };
   }
 
@@ -84,24 +93,25 @@ export default function PrinterListPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [savingAdjRule, setSavingAdjRule] = useState(false);
   const [routeCounts, setRouteCounts] = useState({});
-  const [bridgeStatus, setBridgeStatus] = useState(null);
   const [discoveredPrinters, setDiscoveredPrinters] = useState([]);
+  const [discoveryState, setDiscoveryState] = useState('never_scanned');
+  const [discoveryLastErrorCode, setDiscoveryLastErrorCode] = useState(null);
   const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [settingsData, routingData, discoveredData, bridgeState] = await Promise.all([
+      const [settingsData, routingData, discoveredData] = await Promise.all([
         api.getPrinterSettings(),
         api.getAdminPrinterRouting().catch(() => ({ assignments: [] })),
-        api.getDiscoveredPrinters().catch(() => ({ printers: [] })),
-        api.getBridgeStatus().catch(() => null),
+        api.getDiscoveredPrinters().catch(() => ({ printers: [], scanState: 'bridge_unreachable', lastErrorCode: 'bridge_unreachable' })),
       ]);
 
       setPrinters(settingsData.printers || []);
       setPrinterConfig(settingsData.config || {});
-      setBridgeStatus(bridgeState);
       setDiscoveredPrinters(Array.isArray(discoveredData.printers) ? discoveredData.printers : []);
+      setDiscoveryState(discoveredData.scanState || 'never_scanned');
+      setDiscoveryLastErrorCode(discoveredData.lastErrorCode || null);
 
       const counts = {};
       for (const assignment of routingData.assignments || []) {
@@ -129,7 +139,14 @@ export default function PrinterListPage() {
       await load();
       success('Yazıcı taraması yenilendi');
     } catch (e) {
-      error(e.message || 'Yazıcı taraması yenilenemedi');
+      const m = getDiscoveryUiMeta({
+        scanState: 'bridge_unreachable',
+        lastErrorCode: String(e?.message || '').toLowerCase().includes('yapılandırması eksik')
+          ? 'bridge_not_configured'
+          : 'bridge_unreachable',
+        printers: discoveredPrinters,
+      });
+      error(m.text);
     } finally {
       setRefreshing(false);
     }
@@ -200,6 +217,16 @@ export default function PrinterListPage() {
     [discoveredPrinters],
   );
 
+  const discoveryMeta = useMemo(
+    () =>
+      getDiscoveryUiMeta({
+        scanState: discoveryState,
+        lastErrorCode: discoveryLastErrorCode,
+        printers: discoveredPrinters,
+      }),
+    [discoveryLastErrorCode, discoveryState, discoveredPrinters],
+  );
+
   const summary = useMemo(() => {
     let active = 0;
     let kitchen = 0;
@@ -211,7 +238,7 @@ export default function PrinterListPage() {
       const role = roleMeta(printer.type);
       if (role.key === 'kitchen') kitchen += 1;
       if (role.key === 'receipt') receipt += 1;
-      const st = statusMeta(printer, discoveredNameSet, bridgeStatus);
+      const st = statusMeta(printer, discoveredNameSet, discoveryMeta);
       if (st.text !== 'Hazır') problem += 1;
     }
 
@@ -222,7 +249,7 @@ export default function PrinterListPage() {
       receipt,
       problem,
     };
-  }, [printers, discoveredNameSet, bridgeStatus]);
+  }, [printers, discoveredNameSet, discoveryMeta]);
 
   return (
     <div className="page-container">
@@ -267,6 +294,10 @@ export default function PrinterListPage() {
           {refreshing ? 'Taranıyor…' : 'Yazıcıları Tara / Yenile'}
         </button>
       </div>
+      <div style={{ marginBottom: 12, fontSize: 12, color: toneColor(discoveryMeta.tone), lineHeight: 1.45 }}>
+        {discoveryMeta.text}
+        {discoveryMeta.detail ? <span style={{ display: 'block' }}>{discoveryMeta.detail}</span> : null}
+      </div>
 
       <div className="card" style={{ overflow: 'hidden' }}>
         {loading ? (
@@ -277,7 +308,7 @@ export default function PrinterListPage() {
           printers.map((p, idx) => {
             const role = roleMeta(p.type);
             const physicalName = String(p?.print_options?.device?.physicalName || '').trim() || 'Seçilmemiş';
-            const st = statusMeta(p, discoveredNameSet, bridgeStatus);
+            const st = statusMeta(p, discoveredNameSet, discoveryMeta);
             const routeCount = routeCounts[p.id] || 0;
 
             return (
