@@ -11,21 +11,25 @@ import WaiterCallPanel from '../waiter-call/WaiterCallPanel.jsx';
 
 const BRIDGE_POLL_MS = 30000;
 
-function useBridgeStatus() {
+function useBridgeStatus(enabled = false) {
   const [status, setStatus] = useState(null); // null=bilinmiyor, 'ok', 'down', 'unconfigured'
   const { user } = useAuth();
 
   const check = useCallback(async () => {
-    if (!user) return;
+    if (!enabled || !user) return;
     const s = await api.getBridgeStatus();
     setStatus(s);
-  }, [user]);
+  }, [enabled, user]);
 
   useEffect(() => {
+    if (!enabled || !user) {
+      setStatus(null);
+      return;
+    }
     check();
     const t = setInterval(check, BRIDGE_POLL_MS);
     return () => clearInterval(t);
-  }, [check]);
+  }, [check, enabled, user]);
 
   return status;
 }
@@ -62,10 +66,11 @@ export default function Sidebar({
   onTakeawayQuickClick,
 }) {
   const { user, logout, hasRole } = useAuth();
-  const bridgeStatus = useBridgeStatus();
+  const isAdmin = hasRole('admin');
+  const bridgeStatus = useBridgeStatus(isAdmin);
   const location = useLocation();
   const navigate = useNavigate();
-  const definitionsVisible = hasRole('admin');
+  const definitionsVisible = isAdmin;
   const hasActiveDefinitionRoute = useMemo(
     () => DEFINITIONS_ITEMS.some((item) => location.pathname.startsWith(item.path)),
     [location.pathname],
@@ -191,7 +196,7 @@ export default function Sidebar({
               <div style={{ fontSize: 8, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 2 }}>
                 {user?.roleName}
               </div>
-              {bridgeStatus && BRIDGE_DOT[bridgeStatus] && (
+              {isAdmin && bridgeStatus && BRIDGE_DOT[bridgeStatus] && (
                 <div title={BRIDGE_DOT[bridgeStatus].title} style={{
                   position: 'absolute', top: 6, right: 6,
                   width: 7, height: 7, borderRadius: '50%',

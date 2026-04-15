@@ -47,6 +47,8 @@ router.post('/login', validate(loginSchema), (req, res) => {
     `).all(email.toLowerCase().trim());
 
     if (!rows.length) {
+      // Başarısız giriş — hangi e-posta denendi, logluyoruz (şifre asla loglanmaz)
+      console.warn('[auth] Başarısız giriş denemesi — kullanıcı bulunamadı:', email.toLowerCase().trim());
       return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
     }
 
@@ -68,6 +70,11 @@ router.post('/login', validate(loginSchema), (req, res) => {
     }
 
     if (!bcryptjs.compareSync(password, user.password_hash)) {
+      // Başarısız giriş — yanlış şifre, kullanıcı kaydı mevcuttu
+      console.warn('[auth] Başarısız giriş denemesi — yanlış şifre, kullanıcı:', user.id, 'işletme:', user.business_id);
+      try {
+        auditLog(user.business_id, null, 'login_failed', 'user', user.id);
+      } catch (_e) { /* audit tablosu yazılamazsa girişi engelleme */ }
       return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
     }
 

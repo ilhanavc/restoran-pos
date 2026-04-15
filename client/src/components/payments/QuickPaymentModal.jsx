@@ -4,6 +4,7 @@ import api from '../../services/api.js';
 import { formatCurrency } from '../../constants/index.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { getTotalDue, isOrderFullyPaid } from '../../utils/orderPaymentState.js';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 
 const operationTypes = [
   { key: 'pay', label: 'Öde', helper: 'Masa açık kalır', closeOrder: false, printReceipt: false },
@@ -23,6 +24,8 @@ export default function QuickPaymentModal({ order, onClose, onComplete }) {
   const [operationType, setOperationType] = useState('pay');
   const [processingType, setProcessingType] = useState(null);
   const [completed, setCompleted] = useState(false);
+  const [manualPrintDialogOpen, setManualPrintDialogOpen] = useState(false);
+  const [pendingPaymentType, setPendingPaymentType] = useState('cash');
 
   useEffect(() => {
     setOrderState(order);
@@ -49,7 +52,7 @@ export default function QuickPaymentModal({ order, onClose, onComplete }) {
     }
   };
 
-  const handlePayment = async (paymentType) => {
+  const executePayment = async (paymentType, printerId = null) => {
     if (processingType) return;
     setProcessingType(paymentType);
     try {
@@ -65,6 +68,7 @@ export default function QuickPaymentModal({ order, onClose, onComplete }) {
         cash_received: totalDue,
         close_order: selectedOperation.closeOrder,
         print_receipt: selectedOperation.printReceipt,
+        print_printer_id: selectedOperation.printReceipt ? printerId : null,
       });
 
       setCompleted(true);
@@ -75,6 +79,15 @@ export default function QuickPaymentModal({ order, onClose, onComplete }) {
     } finally {
       setProcessingType(null);
     }
+  };
+
+  const handlePayment = async (paymentType) => {
+    if (selectedOperation.printReceipt) {
+      setPendingPaymentType(paymentType);
+      setManualPrintDialogOpen(true);
+      return;
+    }
+    await executePayment(paymentType, null);
   };
 
   if (completed) {
@@ -234,6 +247,16 @@ export default function QuickPaymentModal({ order, onClose, onComplete }) {
           )}
         </div>
       </div>
+      <ManualPrintSelectorModal
+        open={manualPrintDialogOpen}
+        onClose={() => setManualPrintDialogOpen(false)}
+        printRole="receipt"
+        title="Fiş yazdır"
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          await executePayment(pendingPaymentType, printerId);
+        }}
+      />
     </div>
   );
 }

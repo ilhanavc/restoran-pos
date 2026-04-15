@@ -57,6 +57,7 @@ export class ApiHttpClient {
     const data = await res.json();
     if (!res.ok) {
       const err = new Error(data.error || 'Bir hata oluştu');
+      err.status = res.status;
       if (data.requireBusinessId) err.requireBusinessId = data.requireBusinessId;
       if (data.businesses) err.businesses = data.businesses;
       if (Array.isArray(data.blockers)) err.blockers = data.blockers;

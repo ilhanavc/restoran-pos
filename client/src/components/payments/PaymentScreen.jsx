@@ -5,6 +5,7 @@ import { formatCurrency } from '../../constants/index.js';
 import { X, CreditCard, Banknote, ArrowLeftRight, Check, Printer, Save } from 'lucide-react';
 import SplitPaymentModal from './SplitPaymentModal.jsx';
 import { getOrderTotal, getPaidTotal, getTotalDue, isOrderFullyPaid, roundMoney } from '../../utils/orderPaymentState.js';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 
 const paymentTypes = [
   { key: 'cash', label: 'Nakit', icon: Banknote },
@@ -47,6 +48,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const [completed, setCompleted] = useState(false);
   const [lastChange, setLastChange] = useState(0);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [manualPrintDialog, setManualPrintDialog] = useState({ open: false, kind: 'print-only' });
   const toast = useToast();
 
   useEffect(() => {
@@ -93,7 +95,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
     }
   };
 
-  const closePaidOrder = async ({ printReceipt = false } = {}) => {
+  const closePaidOrder = async ({ printReceipt = false, printerId = null } = {}) => {
     const current = await refreshOrder();
     const currentDue = getTotalDue(current);
     if (currentDue > 0.02) {
@@ -101,16 +103,16 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
       return;
     }
     if (printReceipt) {
-      await api.printReceipt(current.id);
+      await api.printOrderReceipt(current.id, printerId ? { printer_id: printerId } : {});
     }
     const updated = await api.updateOrderStatus(current.id, 'closed');
     finishSuccess({ order: updated }, printReceipt ? 'Masa kapatıldı ve yazdırıldı' : 'Masa kapatıldı');
   };
 
-  const printPaidOrder = async () => {
+  const printPaidOrder = async (printerId = null) => {
     setProcessing(true);
     try {
-      await api.printReceipt(orderState.id);
+      await api.printOrderReceipt(orderState.id, printerId ? { printer_id: printerId } : {});
       toast.success('Yazdırma isteği gönderildi');
     } catch (err) {
       toast.error(err.message || 'Yazdırma isteği gönderilemedi');
@@ -120,12 +122,23 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   };
 
   const handlePayment = async () => {
+    if (selectedAction.printReceipt && !manualPrintDialog.open) {
+      setManualPrintDialog({ open: true, kind: 'payment' });
+      return;
+    }
+    await executePayment(null);
+  };
+
+  const executePayment = async (printerId = null) => {
     if (processing) return;
     setProcessing(true);
     try {
       if (isFullyPaid) {
         if (selectedAction.closeOrder || selectedAction.printReceipt) {
-          await closePaidOrder({ printReceipt: selectedAction.printReceipt && !selectedAction.closeOrder });
+          await closePaidOrder({
+            printReceipt: selectedAction.printReceipt && !selectedAction.closeOrder,
+            printerId,
+          });
         } else {
           toast.info('Bu siparişin ödenecek bakiyesi yok');
         }
@@ -148,6 +161,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
         cash_received: payAmount,
         close_order: selectedAction.closeOrder,
         print_receipt: selectedAction.printReceipt,
+        print_printer_id: selectedAction.printReceipt ? printerId : null,
       });
 
       finishSuccess(result, selectedAction.label === 'Kaydet' ? 'Ödeme kaydedildi' : 'Ödeme alındı');
@@ -373,7 +387,12 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <button type="button" className="btn btn-ghost" onClick={printPaidOrder} disabled={processing}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setManualPrintDialog({ open: true, kind: 'print-only' })}
+                    disabled={processing}
+                  >
                     <Printer size={16} /> Yazdır
                   </button>
                   <button type="button" className="btn btn-success" onClick={() => closePaidOrder()} disabled={processing}>
@@ -518,6 +537,20 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
           onPaymentComplete={handleSplitPaymentComplete}
         />
       )}
+      <ManualPrintSelectorModal
+        open={!!manualPrintDialog.open}
+        onClose={() => setManualPrintDialog({ open: false, kind: 'print-only' })}
+        printRole="receipt"
+        title="Fiş yazdır"
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          if (manualPrintDialog.kind === 'print-only') {
+            await printPaidOrder(printerId);
+          } else {
+            await executePayment(printerId);
+          }
+        }}
+      />
     </div>
   );
 }

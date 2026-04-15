@@ -131,3 +131,71 @@ describe('bridge print job lease behavior', () => {
     expect(list.body.jobs.find((job) => job.id === jobId)).toBeUndefined();
   });
 });
+
+// ── P2: Print queue filtre ve özet endpoint testleri ─────────────────────────
+
+describe('GET /api/bridge/print-jobs — filtre ve özet (P2)', () => {
+  beforeEach(() => {
+    dbRef.current = helpers.createTestDb();
+    seeds = helpers.seedBusiness(dbRef.current);
+    testConfig.bridge.businessId = seeds.businessId;
+  });
+
+  it('status=pending ile yalnızca pending işler döner', async () => {
+    insertPrintJob({ id: 'p2-pend-1', status: 'pending' });
+    insertPrintJob({ id: 'p2-fail-1', status: 'failed' });
+    insertPrintJob({ id: 'p2-done-1', status: 'printed' });
+
+    const res = await withBridgeAuth(request(app).get('/api/bridge/print-jobs?status=pending'));
+    expect(res.status).toBe(200);
+    const ids = res.body.jobs.map((j) => j.id);
+    expect(ids).toContain('p2-pend-1');
+    expect(ids).not.toContain('p2-fail-1');
+    expect(ids).not.toContain('p2-done-1');
+  });
+
+  it('status=failed ile yalnızca failed işler döner', async () => {
+    insertPrintJob({ id: 'p2-pend-2', status: 'pending' });
+    insertPrintJob({ id: 'p2-fail-2', status: 'failed' });
+
+    const res = await withBridgeAuth(request(app).get('/api/bridge/print-jobs?status=failed'));
+    expect(res.status).toBe(200);
+    const ids = res.body.jobs.map((j) => j.id);
+    expect(ids).toContain('p2-fail-2');
+    expect(ids).not.toContain('p2-pend-2');
+  });
+
+  it('unclaimed_only=1 ile aktif kiralanmış işler hariç tutulur', async () => {
+    const future = new Date(Date.now() + 60_000).toISOString().replace('T', ' ').slice(0, 19);
+    insertPrintJob({ id: 'p2-claimed', status: 'pending', claimedBy: 'bridge-x', claimedUntil: future });
+    insertPrintJob({ id: 'p2-free', status: 'pending' });
+
+    const res = await withBridgeAuth(
+      request(app).get('/api/bridge/print-jobs?status=pending&unclaimed_only=1'),
+    );
+    expect(res.status).toBe(200);
+    const ids = res.body.jobs.map((j) => j.id);
+    expect(ids).toContain('p2-free');
+    expect(ids).not.toContain('p2-claimed');
+  });
+
+  it('limit parametresi sonuç sayısını kısıtlar', async () => {
+    for (let i = 1; i <= 5; i++) {
+      insertPrintJob({ id: `p2-lim-${i}`, status: 'pending' });
+    }
+    const res = await withBridgeAuth(request(app).get('/api/bridge/print-jobs?status=pending&limit=2'));
+    expect(res.status).toBe(200);
+    expect(res.body.jobs.length).toBeLessThanOrEqual(2);
+  });
+
+  it('geçersiz status değeri 400 döner', async () => {
+    const res = await withBridgeAuth(request(app).get('/api/bridge/print-jobs?status=gecersiz'));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/geçersiz/i);
+  });
+
+  it('Bridge-Token olmadan 401 döner', async () => {
+    const res = await request(app).get('/api/bridge/print-jobs');
+    expect(res.status).toBe(401);
+  });
+});

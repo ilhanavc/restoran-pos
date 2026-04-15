@@ -52,10 +52,10 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 // Rate limiting
-// Auth endpoint'leri: 15 dakikada 20 deneme (brute-force koruması)
+// Auth endpoint'leri: 15 dakikada 50 deneme (brute-force koruması)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: 50,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Çok fazla istek. Lütfen 15 dakika sonra tekrar deneyin.' },

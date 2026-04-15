@@ -44,3 +44,74 @@ describe('callerIdService duplicate protection', () => {
     expect(count).toBe(1);
   });
 });
+
+// ── P2: CallerID durum geçişleri (service katmanı) ───────────────────────────
+
+describe('callerIdService — updateCallLogStatus durum geçişleri (P2)', () => {
+  function createRingingLog(phone = '0533 777 88 99') {
+    const result = service.processIncomingCall({
+      businessId: seeds.businessId,
+      userId: null,
+      rawPhone: phone,
+      sourceType: 'simulate',
+    });
+    return result.callLogId;
+  }
+
+  it('ringing → opened_order geçişi log kaydını günceller', () => {
+    const logId = createRingingLog('0533 111 00 01');
+
+    const updated = service.updateCallLogStatus(seeds.businessId, logId, 'opened_order');
+
+    expect(updated).not.toBeNull();
+    expect(updated.status).toBe('opened_order');
+    expect(updated.id).toBe(logId);
+  });
+
+  it('opened_order → completed geçişi başarılı olur', () => {
+    const logId = createRingingLog('0533 111 00 02');
+    service.updateCallLogStatus(seeds.businessId, logId, 'opened_order');
+
+    const updated = service.updateCallLogStatus(seeds.businessId, logId, 'completed');
+
+    expect(updated.status).toBe('completed');
+  });
+
+  it('ringing → dismissed geçişi başarılı olur', () => {
+    const logId = createRingingLog('0533 111 00 03');
+
+    const updated = service.updateCallLogStatus(seeds.businessId, logId, 'dismissed');
+
+    expect(updated.status).toBe('dismissed');
+  });
+
+  it('geçersiz status değeri hata fırlatır (isBadRequest=true)', () => {
+    const logId = createRingingLog('0533 111 00 04');
+
+    expect(() => {
+      service.updateCallLogStatus(seeds.businessId, logId, 'gecersiz_durum');
+    }).toThrow();
+
+    try {
+      service.updateCallLogStatus(seeds.businessId, logId, 'gecersiz_durum');
+    } catch (err) {
+      expect(err.isBadRequest).toBe(true);
+    }
+  });
+
+  it('var olmayan log id için null döner', () => {
+    const result = service.updateCallLogStatus(seeds.businessId, 'olmayan-id', 'completed');
+    expect(result).toBeNull();
+  });
+
+  it('farklı business_id ile log güncellenemez (izolasyon)', () => {
+    const logId = createRingingLog('0533 111 00 05');
+
+    const result = service.updateCallLogStatus('baska-isletme-id', logId, 'completed');
+    expect(result).toBeNull();
+
+    // Orijinal kayıt etkilenmemeli
+    const row = dbRef.current.prepare('SELECT status FROM call_logs WHERE id = ?').get(logId);
+    expect(row.status).toBe('ringing');
+  });
+});

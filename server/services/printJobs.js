@@ -3,6 +3,7 @@ import db from '../config/database.js';
 import config from '../config/index.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { resolvePrinterForKitchenLine, resolveReceiptPrinter, stationFromPrinter } from './printRouting.js';
+import { isAutoPrintEnabledForPrinter } from './printerAutoPrintPolicy.js';
 
 /** Mutfağa görünür satırlar: iptal/azaltma fişi yalnız bunlar için basılır (varsayılan). */
 const KITCHEN_VISIBLE_STATUSES = new Set(['sent', 'preparing', 'ready', 'served']);
@@ -100,7 +101,8 @@ function customerInfoForOrder(order) {
 /**
  * Mutfağa gönderilen kalemler için yazıcı başına (veya çözülemeyenler için) job.
  */
-export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds, userId) {
+export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds, userId, options = {}) {
+  const eventType = options?.eventType || null;
   if (!orderItemIds?.length) return { created: 0, skipped: 0 };
 
   const order = db
@@ -135,6 +137,9 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
     const categoryName = oi.category_name_snapshot || liveMeta?.category_name || 'Kategori';
 
     const resolved = resolvePrinterForKitchenLine(businessId, categoryId, oi.product_id);
+    if (eventType && resolved?.printer && !isAutoPrintEnabledForPrinter(resolved.printer, eventType)) {
+      continue;
+    }
     lines.push({
       orderItemId: oi.id,
       productId: oi.product_id,
@@ -262,7 +267,8 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
  * @param {object} beforeItem - Güncellemeden önceki order_items satırı
  * @param {{ type: 'cancel' } | { type: 'reduce', previousQty: number, newQty: number }} adjustment
  */
-export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, adjustment, userId) {
+export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, adjustment, userId, options = {}) {
+  const eventType = options?.eventType || null;
   if (!beforeItem || !shouldPrintKitchenAdjustment(businessId, beforeItem.status)) {
     return { created: 0, skipped: 0 };
   }
@@ -291,6 +297,9 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
   const categoryName = beforeItem.category_name_snapshot || liveMeta?.category_name || 'Kategori';
 
   const resolved = resolvePrinterForKitchenLine(businessId, categoryId, beforeItem.product_id);
+  if (eventType && resolved?.printer && !isAutoPrintEnabledForPrinter(resolved.printer, eventType)) {
+    return { created: 0, skipped: 0, policySkipped: true };
+  }
   const { customer_name, customer_phone } = customerInfoForOrder(order);
   const bizAdj = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
   const payment_summary = paymentSummaryForOrder(orderId);
@@ -386,8 +395,12 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
   return { created: r.inserted ? 1 : 0, skipped: r.duplicate ? 1 : 0 };
 }
 
-export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
-  const idempotencyKey = `receipt|${businessId}|${orderId}`;
+export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId, options = {}) {
+  const suffix = options?.idempotencySuffix ? `|${String(options.idempotencySuffix).slice(0, 80)}` : '';
+  const forcedPrinterId = options?.forcedPrinterId ? String(options.forcedPrinterId) : null;
+  const eventType = options?.eventType || null;
+  const applyAutoPrintPolicy = options?.applyAutoPrintPolicy === true;
+  const idempotencyKey = `receipt|${businessId}|${orderId}${suffix}`;
   const existing = db.prepare(`SELECT id FROM print_jobs WHERE idempotency_key = ?`).get(idempotencyKey);
   if (existing) return { created: 0, skipped: 1, duplicate: true };
 
@@ -422,7 +435,22 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
 
   const biz = db.prepare(`SELECT name, phone, address, receipt_header, receipt_footer FROM businesses WHERE id = ?`).get(businessId);
 
-  const resolved = resolveReceiptPrinter(businessId);
+  let resolved = resolveReceiptPrinter(businessId);
+  if (forcedPrinterId) {
+    const forced = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ? AND is_active = 1`)
+      .get(forcedPrinterId, businessId);
+    if (!forced) {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_not_found_or_inactive' };
+    }
+    if (forced.type !== 'receipt') {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_role_mismatch' };
+    }
+    resolved = { printer: forced, source: 'manual_override' };
+  }
+  if (applyAutoPrintPolicy && resolved.printer && !isAutoPrintEnabledForPrinter(resolved.printer, eventType)) {
+    return { created: 0, skipped: 0, policySkipped: true };
+  }
   const payload = {
     kind: 'receipt',
     order_id: orderId,
@@ -500,6 +528,7 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
  */
 export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {}) {
   const suffix = options?.idempotencySuffix ? `|${String(options.idempotencySuffix).slice(0, 80)}` : '';
+  const forcedPrinterId = options?.forcedPrinterId ? String(options.forcedPrinterId) : null;
   const idempotencyKey = `takeaway_label|${businessId}|${orderId}${suffix}`;
   const existing = db.prepare(`SELECT id FROM print_jobs WHERE idempotency_key = ?`).get(idempotencyKey);
   if (existing) return { created: 0, skipped: 1, duplicate: true };
@@ -530,7 +559,19 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
     .all(orderId);
 
   const biz = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
-  const resolved = resolveReceiptPrinter(businessId);
+  let resolved = resolveReceiptPrinter(businessId);
+  if (forcedPrinterId) {
+    const forced = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ? AND is_active = 1`)
+      .get(forcedPrinterId, businessId);
+    if (!forced) {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_not_found_or_inactive' };
+    }
+    if (forced.type !== 'kitchen') {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_role_mismatch' };
+    }
+    resolved = { printer: forced, source: 'manual_override' };
+  }
 
   const payload = {
     kind: 'takeaway_label',

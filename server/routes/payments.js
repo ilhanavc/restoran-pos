@@ -5,6 +5,7 @@ import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { enqueueReceiptJobForClosedOrder, processPendingJobsSync } from '../services/printJobs.js';
+import { AUTO_PRINT_EVENTS } from '../services/printerAutoPrintPolicy.js';
 import { emitToRoom } from '../socket.js';
 
 const router = Router();
@@ -22,6 +23,7 @@ const createPaymentSchema = {
     idempotency_key: z.string().trim().min(1).max(128).optional().nullable(),
     close_order: z.boolean().optional().default(false),
     print_receipt: z.boolean().optional().default(false),
+    print_printer_id: z.string().trim().min(1).max(128).optional().nullable(),
   }),
 };
 
@@ -231,12 +233,23 @@ router.get('/orders/:orderId/split-state', authorize('admin', 'cashier'), (req, 
 // POST /api/payments
 router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (req, res) => {
   try {
-    const { order_id, payment_type, amount, cash_received, note, close_order, print_receipt } = req.body;
+    const { order_id, payment_type, amount, cash_received, note, close_order, print_receipt, print_printer_id } = req.body;
     const amt = amount; // Zod already validated and coerced
     const idempotencyKey = normalizeIdempotencyKey(req);
 
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    if (print_printer_id && (print_receipt || close_order)) {
+      const forcedPrinter = db
+        .prepare(`SELECT id, type, is_active FROM printers WHERE id = ? AND business_id = ?`)
+        .get(print_printer_id, req.businessId);
+      if (!forcedPrinter || !forcedPrinter.is_active) {
+        return res.status(400).json({ error: 'Seçilen yazıcı aktif değil veya bulunamadı' });
+      }
+      if (forcedPrinter.type !== 'receipt') {
+        return res.status(400).json({ error: 'Fiş için yalnız müşteri fişi yazıcısı seçilebilir' });
+      }
+    }
     const existingPayment = findExistingPaymentByKey(req.businessId, order_id, idempotencyKey);
     if (existingPayment) {
       const { updatedOrder } = buildPaymentOrderResponse(order_id);
@@ -295,8 +308,27 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
     const { updatedOrder } = buildPaymentOrderResponse(order_id);
     emitToRoom(req.businessId, 'order:updated', { order: updatedOrder });
     if (print_receipt || closed) {
-      enqueueReceiptJobForClosedOrder(req.businessId, order_id, req.user.id);
-      processPendingJobsSync(req.businessId, req.user.id);
+      let attempted = false;
+      if (print_receipt) {
+        attempted = true;
+        enqueueReceiptJobForClosedOrder(req.businessId, order_id, req.user.id, {
+          forcedPrinterId: print_printer_id || null,
+          applyAutoPrintPolicy: true,
+          eventType: AUTO_PRINT_EVENTS.RECEIPT_PAYMENT_COMPLETE,
+        });
+      }
+      if (closed) {
+        attempted = true;
+        enqueueReceiptJobForClosedOrder(req.businessId, order_id, req.user.id, {
+          forcedPrinterId: print_printer_id || null,
+          applyAutoPrintPolicy: true,
+          eventType:
+            order.order_type === 'takeaway'
+              ? AUTO_PRINT_EVENTS.RECEIPT_TAKEAWAY_COMPLETE
+              : AUTO_PRINT_EVENTS.RECEIPT_TABLE_CLOSE,
+        });
+      }
+      if (attempted) processPendingJobsSync(req.businessId, req.user.id);
     }
 
     res.status(201).json({ payment, order: updatedOrder });

@@ -78,7 +78,14 @@ class ApiService extends ApiHttpClient {
   updateOrderItem(orderId, itemId, data) { return this.patch(`/orders/${orderId}/items/${itemId}`, data); }
   getTakeawayOpenOrders() { return this.get('/orders/takeaway/open'); }
   patchTakeawayDelivery(orderId, action) { return this.patch(`/orders/${orderId}/takeaway/delivery`, { action }); }
-  printTakeawayLabel(orderId) { return this.post(`/orders/${orderId}/takeaway/print-label`, {}); }
+  printTakeawayLabel(orderId, options = {}) {
+    const body = options?.printer_id ? { printer_id: options.printer_id } : {};
+    return this.post(`/orders/${orderId}/takeaway/print-label`, body);
+  }
+  printOrderReceipt(orderId, options = {}) {
+    const body = options?.printer_id ? { printer_id: options.printer_id } : {};
+    return this.post(`/orders/${orderId}/print-receipt`, body);
+  }
 
   // Payments
   createPayment(data) { return this.post('/payments', data); }
@@ -142,7 +149,9 @@ class ApiService extends ApiHttpClient {
 
   // Print — legacy mock HTTP uçları; aktif POS akışı print_jobs + StoreBridge. Manuel test/debug için.
   /** @deprecated POS ekranları kullanmıyor; /api/print/receipt */
-  printReceipt(orderId) { return this.post('/print/receipt', { order_id: orderId }); }
+  printReceipt(orderId, options = {}) {
+    return this.post('/print/receipt', { order_id: orderId, ...(options?.printer_id ? { printer_id: options.printer_id } : {}) });
+  }
   /** @deprecated POS ekranları kullanmıyor; /api/print/kitchen */
   printKitchen(orderId) { return this.post('/print/kitchen', { order_id: orderId }); }
 
@@ -163,7 +172,8 @@ class ApiService extends ApiHttpClient {
       if (s === 'bridge_unreachable' || s === 'auth_error') return 'down';
       if (s === 'bridge_unconfigured') return 'unconfigured';
       return 'ok';
-    } catch {
+    } catch (err) {
+      if (err?.status === 401 || err?.status === 403) return null;
       return 'down';
     }
   }

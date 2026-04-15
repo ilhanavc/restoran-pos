@@ -189,3 +189,46 @@ describe('admin print job queue behavior', () => {
     expect(retryRes.status).toBe(409);
   });
 });
+
+describe('PATCH /api/admin/users/:id — şifre güncelleme guard (G-1)', () => {
+  it('3 karakterlik şifre ile güncelleme → 400', async () => {
+    const res = await request(app)
+      .patch(`/api/admin/users/${seeds.userId}`)
+      .set('Authorization', authHeader)
+      .send({ password: 'abc' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/4 karakter/);
+  });
+
+  it('1 karakterlik şifre ile güncelleme → 400', async () => {
+    const res = await request(app)
+      .patch(`/api/admin/users/${seeds.userId}`)
+      .set('Authorization', authHeader)
+      .send({ password: 'x' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/4 karakter/);
+  });
+
+  it('4 karakterlik şifre (minimum sınırda) → 200', async () => {
+    const res = await request(app)
+      .patch(`/api/admin/users/${seeds.userId}`)
+      .set('Authorization', authHeader)
+      .send({ password: '1234' });
+    expect(res.status).toBe(200);
+  });
+
+  it('şifre alanı gönderilmezse mevcut şifre korunur → 200', async () => {
+    const before = dbRef.current
+      .prepare('SELECT password_hash FROM users WHERE id = ?')
+      .get(seeds.userId);
+    const res = await request(app)
+      .patch(`/api/admin/users/${seeds.userId}`)
+      .set('Authorization', authHeader)
+      .send({ full_name: 'Güncel Ad' });
+    expect(res.status).toBe(200);
+    const after = dbRef.current
+      .prepare('SELECT password_hash FROM users WHERE id = ?')
+      .get(seeds.userId);
+    expect(after.password_hash).toBe(before.password_hash);
+  });
+});

@@ -268,3 +268,216 @@ describe('PATCH /api/orders/:orderId/items/:itemId', () => {
     expect(res.status).toBe(400);
   });
 });
+
+// ── P2-A: Sipariş notu — order.note ve item.note validasyonu ─────────────────
+
+describe('Sipariş ve kalem notu validasyonu (P2)', () => {
+  it('order.note sipariş oluşturulurken kaydedilir ve GET ile döner', async () => {
+    const createRes = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'dine_in',
+        note: 'Fıstık alerjisi var',
+        items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
+      });
+
+    expect(createRes.status).toBe(201);
+    const newOrderId = createRes.body.id;
+
+    const getRes = await request(app)
+      .get(`/api/orders/${newOrderId}`)
+      .set('Authorization', authHeader);
+
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.note).toBe('Fıstık alerjisi var');
+  });
+
+  it('item.note 500 karakteri aşarsa 400 döner (Zod max validasyonu)', async () => {
+    // Önce sipariş oluştur
+    const createRes = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'dine_in',
+        items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
+      });
+    const oid = createRes.body?.id;
+    const iid = createRes.body?.items?.[0]?.id;
+    if (!oid || !iid) return;
+
+    const longNote = 'x'.repeat(501);
+    const res = await request(app)
+      .patch(`/api/orders/${oid}/items/${iid}`)
+      .set('Authorization', authHeader)
+      .send({ note: longNote });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('item.note 500 karakter sınırında geçerlidir', async () => {
+    const createRes = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'dine_in',
+        items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
+      });
+    const oid = createRes.body?.id;
+    const iid = createRes.body?.items?.[0]?.id;
+    if (!oid || !iid) return;
+
+    const exactNote = 'y'.repeat(500);
+    const res = await request(app)
+      .patch(`/api/orders/${oid}/items/${iid}`)
+      .set('Authorization', authHeader)
+      .send({ note: exactNote });
+
+    expect(res.status).toBe(200);
+    // PATCH order item endpoint tüm order objesini döndürür (items dizisiyle)
+    const updatedItem = res.body.items?.find((i) => i.id === iid);
+    expect(updatedItem?.note).toBe(exactNote);
+  });
+});
+
+// ── P2-B: GET /api/orders/active — mutfak ekranı ────────────────────────────
+
+describe('GET /api/orders/active — mutfak ekranı (P2)', () => {
+  it('token olmadan 401 döner', async () => {
+    const res = await request(app).get('/api/orders/active');
+    expect(res.status).toBe(401);
+  });
+
+  it('in_kitchen durumdaki siparişleri döner, saved olanları döndürmez', async () => {
+    // saved sipariş oluştur
+    const savedRes = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        table_id: seeds.tableId,
+        order_type: 'dine_in',
+        items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
+      });
+    const savedId = savedRes.body?.id;
+
+    // in_kitchen'a çek
+    await request(app)
+      .patch(`/api/orders/${savedId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'in_kitchen' });
+
+    const res = await request(app)
+      .get('/api/orders/active')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+
+    const ids = res.body.map((o) => o.id);
+    expect(ids).toContain(savedId); // in_kitchen oldu → görünmeli
+
+    // saved durumundaki siparişler görünmemeli
+    const statuses = res.body.map((o) => o.status);
+    for (const s of statuses) {
+      expect(['in_kitchen', 'preparing', 'ready']).toContain(s);
+    }
+  });
+
+  it('dönen siparişlerin items dizisi dolu gelir', async () => {
+    const res = await request(app)
+      .get('/api/orders/active')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    // En az bir sipariş olmalı (önceki testten)
+    expect(res.body.length).toBeGreaterThan(0);
+    const firstOrder = res.body[0];
+    expect(Array.isArray(firstOrder.items)).toBe(true);
+    expect(firstOrder.items.length).toBeGreaterThan(0);
+  });
+});
+
+// ── P2-C: CallerID durum geçişleri ──────────────────────────────────────────
+
+describe('PATCH /api/caller-id/logs/:id/status — durum geçişleri (P2)', () => {
+  let callLogId;
+
+  beforeAll(async () => {
+    // Yeni çağrı kaydı oluştur (ringing)
+    const simRes = await request(app)
+      .post('/api/caller-id/simulate')
+      .set('Authorization', authHeader)
+      .send({ phone: '0532 999 00 11' });
+    callLogId = simRes.body?.callLogId;
+  });
+
+  it('ringing → opened_order geçişi 200 döner', async () => {
+    if (!callLogId) return;
+    const res = await request(app)
+      .patch(`/api/caller-id/logs/${callLogId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'opened_order' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('opened_order');
+  });
+
+  it('opened_order → completed geçişi 200 döner', async () => {
+    if (!callLogId) return;
+    const res = await request(app)
+      .patch(`/api/caller-id/logs/${callLogId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'completed' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('completed');
+  });
+
+  it('geçersiz status değeri 400 döner', async () => {
+    if (!callLogId) return;
+    const res = await request(app)
+      .patch(`/api/caller-id/logs/${callLogId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'gecersiz_durum' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/geçersiz/i);
+  });
+
+  it('var olmayan log id 404 döner', async () => {
+    const res = await request(app)
+      .patch('/api/caller-id/logs/olmayan-id/status')
+      .set('Authorization', authHeader)
+      .send({ status: 'completed' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('status alanı olmadan 400 döner', async () => {
+    if (!callLogId) return;
+    const res = await request(app)
+      .patch(`/api/caller-id/logs/${callLogId}/status`)
+      .set('Authorization', authHeader)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/orders — takeaway + table_id çakışma guard (G-2)', () => {
+  it('takeaway siparişinde table_id gönderilirse 400 döner', async () => {
+    const res = await request(app)
+      .post('/api/orders')
+      .set('Authorization', authHeader)
+      .send({
+        order_type: 'takeaway',
+        table_id: seeds.tableId,
+        items: [{ product_id: seeds.productId, quantity: 1 }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/table_id/);
+  });
+});

@@ -245,3 +245,106 @@ describe('full payments', () => {
     expect(allocations.c).toBe(1);
   });
 });
+
+// ── P1-04: close_order=true → sipariş kapanır + masa boşalır ─────────────────
+describe('POST /api/payments — close_order=true ile masa boşaltma (P1-04)', () => {
+  it('close_order=true ile tam ödeme → sipariş closed, masa empty olur', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,
+        cash_received: 100,
+        close_order: true,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.order.status).toBe('closed');
+
+    const table = dbRef.current.prepare('SELECT status, current_order_id FROM tables WHERE id = ?').get(seeds.tableId);
+    expect(table.status).toBe('empty');
+    expect(table.current_order_id).toBeNull();
+  });
+
+  it('close_order=true ama kısmi ödeme → 400, masa hâlâ occupied', async () => {
+    const { orderId } = createOrder({ quantity: 2, total: 160 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,       // sadece yarısı
+        close_order: true,
+      });
+
+    expect(res.status).toBe(400);
+
+    const table = dbRef.current.prepare('SELECT status FROM tables WHERE id = ?').get(seeds.tableId);
+    expect(table.status).toBe('occupied');
+  });
+
+  it('close_order=false ile tam ödeme → sipariş açık kalır, masa dolu', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'card',
+        amount: 80,
+        close_order: false,
+      });
+
+    expect(res.status).toBe(201);
+    // close_order=false → sipariş hâlâ kapalı değil
+    expect(res.body.order.status).not.toBe('closed');
+
+    const table = dbRef.current.prepare('SELECT status FROM tables WHERE id = ?').get(seeds.tableId);
+    // Masa hâlâ occupied (sipariş kapanmadı)
+    expect(table.status).toBe('occupied');
+  });
+
+  it('nakit alım tutarı ödeme tutarından düşükse 400 döner', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,
+        cash_received: 50,  // 80'den az
+        close_order: true,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/nakit/i);
+  });
+
+  it('change_amount nakit para üstü doğru hesaplanır', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,
+        cash_received: 100,
+        close_order: true,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.payment.change_amount).toBe(20); // 100 - 80
+    expect(res.body.payment.cash_received).toBe(100);
+  });
+});

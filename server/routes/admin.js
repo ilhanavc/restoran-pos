@@ -171,6 +171,14 @@ function defaultPrintOptionsForType(type) {
     copies: defaultCopies(),
     printOnSave: false,
     printOnIntegrationApprove: false,
+    autoPrint: {
+      onTableOrderCreate: false,
+      onTakeawayOrderCreate: false,
+      onOrderAdjustment: false,
+      onPaymentComplete: false,
+      onTableClose: false,
+      onTakeawayComplete: false,
+    },
     skipPhoenixCmd: true,
     encodingMode: 'win1254',
     roles: {
@@ -216,6 +224,7 @@ function mergePrintOptions(rawJson, type) {
       typeof parsed.printOnIntegrationApprove === 'boolean'
         ? parsed.printOnIntegrationApprove
         : base.printOnIntegrationApprove,
+    autoPrint: { ...(base.autoPrint || {}), ...(parsed.autoPrint || {}) },
     skipPhoenixCmd:
       typeof parsed.skipPhoenixCmd === 'boolean' ? parsed.skipPhoenixCmd : base.skipPhoenixCmd,
     encodingMode: parsed.encodingMode === 'pc857' ? 'pc857' : base.encodingMode,
@@ -254,6 +263,7 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
       typeof incomingObj.printOnIntegrationApprove === 'boolean'
         ? incomingObj.printOnIntegrationApprove
         : base.printOnIntegrationApprove,
+    autoPrint: { ...(base.autoPrint || {}), ...(incomingObj.autoPrint || {}) },
     skipPhoenixCmd:
       typeof incomingObj.skipPhoenixCmd === 'boolean' ? incomingObj.skipPhoenixCmd : base.skipPhoenixCmd,
     encodingMode: incomingObj.encodingMode === 'pc857' ? 'pc857' : base.encodingMode,
@@ -398,7 +408,7 @@ router.get('/business', (req, res) => {
     if (!b) return res.status(404).json({ error: 'İşletme bulunamadı' });
     res.json({ business: b });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:business:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -431,7 +441,7 @@ router.patch('/business', (req, res) => {
     ).get(req.businessId);
     res.json({ business: b, message: 'İşletme bilgileri kaydedildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:business:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -457,7 +467,7 @@ router.patch('/display-settings', (req, res) => {
     auditLog(req.businessId, req.user.id, 'update_display', 'settings', 'app.display');
     res.json({ display: next, message: 'Ekran ayarları kaydedildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:display-settings:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -483,7 +493,7 @@ router.get('/printer-settings', (req, res) => {
     const config = { ...defaults, ...stored };
     res.json({ printers, config });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printer-settings:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -519,7 +529,7 @@ router.get('/printers/discovered', (req, res) => {
       message: discoveryMessageForState(scanState),
     });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:discovered]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -627,7 +637,7 @@ router.patch('/printer-settings', (req, res) => {
     auditLog(req.businessId, req.user.id, 'update_printer_settings', 'settings', 'printer.config');
     res.json({ config, message: 'Yazıcı ayarları kaydedildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printer-settings:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -672,7 +682,7 @@ router.post('/printers', (req, res) => {
       .get(id, req.businessId);
     res.status(201).json({ printer: mapPrinterRow(row), message: 'Yazıcı oluşturuldu' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:create]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -687,8 +697,8 @@ router.post('/printers/preview', (req, res) => {
     const lines = getPrinterPreviewPlainLines(type, line_width ?? undefined, print_options || {});
     res.json({ lines });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    console.error('[admin] Yazıcı önizleme hatası:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
@@ -698,7 +708,7 @@ router.get('/printers/:id/delete-eligibility', (req, res) => {
     if (!el) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
     res.json(el);
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:eligibility]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -711,7 +721,7 @@ router.get('/printers/:id', (req, res) => {
     if (!row) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
     res.json({ printer: mapPrinterRow(row) });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -798,7 +808,7 @@ router.patch('/printers/:id', (req, res) => {
       .get(req.params.id, req.businessId);
     res.json({ printer: mapPrinterRow(row), message: responseMessage });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -832,8 +842,8 @@ router.delete('/printers/:id', (req, res) => {
     auditLog(req.businessId, req.user.id, 'delete_printer', 'printer', req.params.id);
     res.json({ message: 'Yazıcı kalıcı olarak silindi' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    console.error('[admin:printers:delete]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
@@ -849,7 +859,7 @@ router.get('/print-jobs', (req, res) => {
       .all(req.businessId, limit);
     res.json({ jobs, summary: getPrintJobSummary(req.businessId) });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:print-jobs:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -887,7 +897,7 @@ router.post('/print-jobs/:id/retry', (req, res) => {
     const updated = db.prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`).get(req.params.id, req.businessId);
     res.json({ job: updated, message: 'Yazdırma işi yeniden kuyruğa alındı' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:print-jobs:retry]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -914,7 +924,7 @@ router.get('/printer-routing', (req, res) => {
 
     res.json({ categories, printers, assignments });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printer-routing:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -973,7 +983,7 @@ router.patch('/printer-routing', (req, res) => {
     if (err.status === 400) {
       return res.status(400).json({ error: err.message });
     }
-    console.error(err);
+    console.error('[admin:printer-routing:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1025,7 +1035,7 @@ router.post('/printers/test', (req, res) => {
       message: `Test çıktısı kuyruğa alındı: ${p.name}`,
     });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:test]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1055,7 +1065,7 @@ router.get('/users', (req, res) => {
       .all(req.businessId);
     res.json({ users });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:users:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1096,7 +1106,7 @@ router.post('/users', (req, res) => {
       .get(id);
     res.status(201).json({ user: u, message: 'Kullanıcı oluşturuldu' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:users:create]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1138,7 +1148,14 @@ router.patch('/users/:id', (req, res) => {
     if (userId === req.user.id && !nextActive) {
       return res.status(400).json({ error: 'Kendi hesabınızı pasifleştiremezsiniz' });
     }
-    const hash = password && String(password).length > 0 ? bcryptjs.hashSync(password, 10) : null;
+    // Şifre güncelleme: verilmişse uzunluk kontrolü yap
+    if (password !== undefined && password !== null) {
+      const pwStr = String(password).trim();
+      if (pwStr.length > 0 && pwStr.length < 4) {
+        return res.status(400).json({ error: 'Şifre en az 4 karakter olmalıdır' });
+      }
+    }
+    const hash = password && String(password).trim().length > 0 ? bcryptjs.hashSync(String(password).trim(), 10) : null;
     if (hash) {
       db.prepare(
         `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, password_hash = ?, updated_at = datetime('now')
@@ -1159,7 +1176,7 @@ router.patch('/users/:id', (req, res) => {
       .get(userId);
     res.json({ user: u, message: 'Kullanıcı güncellendi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:users:delete]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1181,7 +1198,7 @@ router.delete('/users/:id', (req, res) => {
     auditLog(req.businessId, req.user.id, 'deactivate_user', 'user', userId);
     res.json({ message: 'Kullanıcı pasifleştirildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1200,7 +1217,7 @@ router.get('/dining-areas', (req, res) => {
       .all(req.businessId);
     res.json({ areas });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1257,7 +1274,7 @@ router.post('/dining-areas', (req, res) => {
     const area = db.prepare(`SELECT * FROM dining_areas WHERE id = ?`).get(id);
     res.status(201).json({ area });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1293,7 +1310,7 @@ router.patch('/dining-areas/:id', (req, res) => {
     const updated = db.prepare(`SELECT * FROM dining_areas WHERE id = ?`).get(area.id);
     res.json({ area: updated });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:delete]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1323,7 +1340,7 @@ router.delete('/dining-areas/:id', (req, res) => {
     auditLog(req.businessId, req.user.id, 'dining_area_delete', 'dining_area', area.id, {});
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:sync-tables]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1458,8 +1475,8 @@ router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
       .get(area.id, req.businessId).c;
     res.json({ success: true, target_table_count: target, active_table_count: activeCount });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    console.error('[admin:dining-areas:sync-tables]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 

@@ -12,6 +12,7 @@ import {
   enqueueReceiptJobForClosedOrder,
   enqueueTakeawayLabelJob,
 } from '../services/printJobs.js';
+import { AUTO_PRINT_EVENTS } from '../services/printerAutoPrintPolicy.js';
 import { linkCallLogToOrder } from '../services/callerIdService.js';
 
 const router = Router();
@@ -167,7 +168,7 @@ function orderHeaderSnapshot({ tableId, customerId, userId, businessId }) {
 const staff = authorize('admin', 'cashier', 'waiter');
 const staffAndKitchen = authorize('admin', 'cashier', 'waiter', 'kitchen');
 
-function queueKitchenForNewItems(businessId, orderId, itemIds, userId) {
+function queueKitchenForNewItems(businessId, orderId, itemIds, userId, options = {}) {
   if (!itemIds?.length) return;
   const placeholders = itemIds.map(() => '?').join(',');
   db.prepare(
@@ -179,7 +180,7 @@ function queueKitchenForNewItems(businessId, orderId, itemIds, userId) {
      AND status NOT IN ('closed', 'cancelled')`,
   ).run(userId, orderId, businessId);
 
-  enqueueKitchenJobsForSentItems(businessId, orderId, itemIds, userId);
+  enqueueKitchenJobsForSentItems(businessId, orderId, itemIds, userId, options);
 }
 
 // GET /api/orders
@@ -303,6 +304,11 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
     })();
 
     auditLog(req.businessId, req.user.id, 'takeaway_delivered', 'order', req.params.id, { auto_payment_id: paymentId });
+    enqueueReceiptJobForClosedOrder(req.businessId, req.params.id, req.user.id, {
+      applyAutoPrintPolicy: true,
+      eventType: AUTO_PRINT_EVENTS.RECEIPT_TAKEAWAY_COMPLETE,
+    });
+    processPendingJobsSync(req.businessId, req.user.id);
     emitToRoom(req.businessId, 'order:takeaway_delivery', { orderId: req.params.id, action });
     return res.json({ ok: true, auto_payment_id: paymentId });
   } catch (err) {
@@ -314,6 +320,7 @@ router.patch('/:id/takeaway/delivery', staff, (req, res) => {
 // POST /api/orders/:id/takeaway/print-label — açık paket sipariş için manuel tekrar yazdırma
 router.post('/:id/takeaway/print-label', staff, (req, res) => {
   try {
+    const printerId = req.body?.printer_id ? String(req.body.printer_id).trim() : null;
     const order = db.prepare(`
       SELECT id, order_type, status, takeaway_delivered_at
       FROM orders WHERE id = ? AND business_id = ?
@@ -328,15 +335,57 @@ router.post('/:id/takeaway/print-label', staff, (req, res) => {
 
     const result = enqueueTakeawayLabelJob(req.businessId, order.id, req.user.id, {
       idempotencySuffix: `manual_${Date.now()}_${req.user.id}`,
+      forcedPrinterId: printerId || null,
     });
     processPendingJobsSync(req.businessId, req.user.id);
 
     if (result.failed) {
+      if (result.reason === 'printer_role_mismatch') {
+        return res.status(400).json({ error: 'Paket etiketi için yalnız mutfak yazıcısı seçilebilir' });
+      }
+      if (result.reason === 'printer_not_found_or_inactive') {
+        return res.status(400).json({ error: 'Seçilen yazıcı aktif değil veya bulunamadı' });
+      }
       return res.status(400).json({ error: 'Paket etiketi için aktif yazıcı bulunamadı' });
     }
     return res.json({ ok: true, printJob: result });
   } catch (err) {
     console.error('Takeaway print label error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/orders/:id/print-receipt — manuel fiş yazdırma (seçili yazıcı destekli)
+router.post('/:id/print-receipt', staff, (req, res) => {
+  try {
+    const printerId = req.body?.printer_id ? String(req.body.printer_id).trim() : null;
+    const order = db.prepare(`
+      SELECT id, status
+      FROM orders WHERE id = ? AND business_id = ?
+    `).get(req.params.id, req.businessId);
+    if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
+    if (order.status === 'cancelled') {
+      return res.status(400).json({ error: 'İptal sipariş yazdırılamaz' });
+    }
+
+    const result = enqueueReceiptJobForClosedOrder(req.businessId, order.id, req.user.id, {
+      idempotencySuffix: `manual_${Date.now()}_${req.user.id}`,
+      forcedPrinterId: printerId || null,
+    });
+    processPendingJobsSync(req.businessId, req.user.id);
+
+    if (result.failed) {
+      if (result.reason === 'printer_role_mismatch') {
+        return res.status(400).json({ error: 'Fiş için yalnız müşteri fişi yazıcısı seçilebilir' });
+      }
+      if (result.reason === 'printer_not_found_or_inactive') {
+        return res.status(400).json({ error: 'Seçilen yazıcı aktif değil veya bulunamadı' });
+      }
+      return res.status(400).json({ error: 'Fiş yazıcısı bulunamadı' });
+    }
+    return res.json({ ok: true, printJob: result });
+  } catch (err) {
+    console.error('Manual receipt print error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -452,6 +501,12 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
       return res.status(400).json({ error: 'Sipariş için en az bir ürün gerekli' });
     }
 
+    // Paket siparişte masa kimliği geçersiz — masa yanlışlıkla occupied kalır
+    const resolvedType = order_type || 'dine_in';
+    if (resolvedType === 'takeaway' && table_id) {
+      return res.status(400).json({ error: 'Paket siparişlerde masa kimliği (table_id) gönderilemez' });
+    }
+
     const orderId = genId();
     let createdItemIds = [];
 
@@ -545,7 +600,12 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
         linkCallLogToOrder(req.businessId, call_log_id, orderId);
       }
 
-      queueKitchenForNewItems(req.businessId, orderId, createdItemIds, req.user.id);
+      queueKitchenForNewItems(req.businessId, orderId, createdItemIds, req.user.id, {
+        eventType:
+          (order_type || 'dine_in') === 'takeaway'
+            ? AUTO_PRINT_EVENTS.KITCHEN_TAKEAWAY_ORDER_CREATE
+            : AUTO_PRINT_EVENTS.KITCHEN_TABLE_ORDER_CREATE,
+      });
     });
 
     txn();
@@ -562,7 +622,7 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
       return res.status(400).json({ error: err.message });
     }
     console.error('Order create error:', err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
@@ -622,7 +682,9 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
         grand_total = grand_total + ?, updated_at = datetime('now'), updated_by = ? WHERE id = ?`)
         .run(addedSubtotal, addedSubtotal, req.user.id, order.id);
 
-      queueKitchenForNewItems(req.businessId, order.id, newItemIds, req.user.id);
+      queueKitchenForNewItems(req.businessId, order.id, newItemIds, req.user.id, {
+        eventType: AUTO_PRINT_EVENTS.KITCHEN_ORDER_ADJUSTMENT,
+      });
     });
     txn();
     processPendingJobsSync(req.businessId, req.user.id);
@@ -722,7 +784,10 @@ router.patch('/:id/status', staffAndKitchen, validate(updateOrderStatusSchema), 
     }
 
     if (status === 'closed' && order.order_type !== 'takeaway') {
-      enqueueReceiptJobForClosedOrder(req.businessId, order.id, req.user.id);
+      enqueueReceiptJobForClosedOrder(req.businessId, order.id, req.user.id, {
+        applyAutoPrintPolicy: true,
+        eventType: AUTO_PRINT_EVENTS.RECEIPT_TABLE_CLOSE,
+      });
       processPendingJobsSync(req.businessId, req.user.id);
     }
 
@@ -807,7 +872,14 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, validate(updateOrderIte
       autoCancelOrderIfNoActiveItems(req.params.orderId, req.businessId, req.user.id);
 
       if (shouldEnqueueCancel) {
-        enqueueKitchenAdjustmentJobs(req.businessId, req.params.orderId, beforeSnap, { type: 'cancel' }, req.user.id);
+        enqueueKitchenAdjustmentJobs(
+          req.businessId,
+          req.params.orderId,
+          beforeSnap,
+          { type: 'cancel' },
+          req.user.id,
+          { eventType: AUTO_PRINT_EVENTS.KITCHEN_ORDER_ADJUSTMENT },
+        );
         shouldProcessPrintJobs = true;
       } else if (shouldEnqueueReduce) {
         enqueueKitchenAdjustmentJobs(
@@ -816,6 +888,7 @@ router.patch('/:orderId/items/:itemId', staffAndKitchen, validate(updateOrderIte
           beforeSnap,
           { type: 'reduce', previousQty: prevQty, newQty: nq },
           req.user.id,
+          { eventType: AUTO_PRINT_EVENTS.KITCHEN_ORDER_ADJUSTMENT },
         );
         shouldProcessPrintJobs = true;
       }

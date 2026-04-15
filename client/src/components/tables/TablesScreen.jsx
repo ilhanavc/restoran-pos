@@ -8,6 +8,7 @@ import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constant
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import { getPaymentStateLabel, isOrderFullyPaid } from '../../utils/orderPaymentState.js';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 import {
   RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2,
 } from 'lucide-react';
@@ -55,6 +56,7 @@ export default function TablesScreen({
   const [takeawayActionLoading, setTakeawayActionLoading] = useState(null);
   const [recentlyMovedTableId, setRecentlyMovedTableId] = useState(null);
   const [tableConfirm, setTableConfirm] = useState(null);
+  const [manualPrintDialog, setManualPrintDialog] = useState({ open: false, orderId: null, role: 'receipt', kind: 'receipt', title: '' });
   const takeawayMenuRef = useRef(null);
   const toast = useToast();
   const { openOrder: openIncomingCallOrder } = useIncomingCall() || {};
@@ -371,13 +373,13 @@ export default function TablesScreen({
         toast.error('Sipariş bulunamadı');
         return;
       }
-      try {
-        await api.printReceipt(orderId);
-        toast.success('Yazdırma isteği gönderildi');
-        setOpenMenuTableId(null);
-      } catch (err) {
-        toast.error(err.message);
-      }
+      setManualPrintDialog({
+        open: true,
+        orderId,
+        role: 'receipt',
+        kind: 'receipt',
+        title: 'Adisyon yazdır',
+      });
     }
   };
 
@@ -418,15 +420,13 @@ export default function TablesScreen({
     e?.stopPropagation();
     if (takeawayActionLoading) return;
     setOpenTakeawayMenuId(null);
-    setTakeawayActionLoading({ orderId, action: 'print' });
-    try {
-      await api.printTakeawayLabel(orderId);
-      toast.success('Yazdırma isteği gönderildi');
-    } catch (err) {
-      toast.error(err.message || 'Yazdırma isteği gönderilemedi');
-    } finally {
-      setTakeawayActionLoading(null);
-    }
+    setManualPrintDialog({
+      open: true,
+      orderId,
+      role: 'kitchen',
+      kind: 'takeaway',
+      title: 'Paket etiketi yazdır',
+    });
   };
 
   const requestTakeawayCancel = (order, e) => {
@@ -1356,6 +1356,37 @@ export default function TablesScreen({
           </div>
         </div>
       )}
+
+      <ManualPrintSelectorModal
+        open={!!manualPrintDialog.open}
+        onClose={() => setManualPrintDialog({ open: false, orderId: null, role: 'receipt', kind: 'receipt', title: '' })}
+        printRole={manualPrintDialog.role || 'receipt'}
+        title={manualPrintDialog.title || 'Yazdır'}
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          const orderId = manualPrintDialog.orderId;
+          if (!orderId) return;
+          if (manualPrintDialog.kind === 'takeaway') {
+            setTakeawayActionLoading({ orderId, action: 'print' });
+            try {
+              await api.printTakeawayLabel(orderId, { printer_id: printerId });
+              toast.success('Yazdırma isteği gönderildi');
+            } catch (err) {
+              toast.error(err.message || 'Yazdırma isteği gönderilemedi');
+            } finally {
+              setTakeawayActionLoading(null);
+            }
+            return;
+          }
+          try {
+            await api.printOrderReceipt(orderId, { printer_id: printerId });
+            toast.success('Yazdırma isteği gönderildi');
+            setOpenMenuTableId(null);
+          } catch (err) {
+            toast.error(err.message || 'Yazdırma isteği gönderilemedi');
+          }
+        }}
+      />
 
       {callModalOpen && (
         <div className="modal-overlay" onClick={() => setCallModalOpen(false)}>

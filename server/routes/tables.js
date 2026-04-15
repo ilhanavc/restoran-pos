@@ -10,6 +10,11 @@ const router = Router();
 router.use(authenticate, businessScope);
 
 const tableStaff = authorize('admin', 'cashier', 'waiter');
+const transferTableSchema = {
+  body: z.object({
+    targetTableId: z.string().min(1, 'Hedef masa kimliği gerekli'),
+  }),
+};
 const updateTableStatusSchema = {
   body: z.object({
     status: z.enum(['empty', 'occupied', 'reserved']).optional(),
@@ -100,12 +105,9 @@ router.patch('/:id/status', tableStaff, validate(updateTableStatusSchema), (req,
 });
 
 // POST /api/tables/:id/transfer
-router.post('/:id/transfer', tableStaff, (req, res) => {
+router.post('/:id/transfer', tableStaff, validate(transferTableSchema), (req, res) => {
   try {
     const { targetTableId } = req.body;
-    if (!targetTableId) {
-      return res.status(400).json({ error: 'Hedef masa (targetTableId) gerekli' });
-    }
     if (targetTableId === req.params.id) {
       return res.status(400).json({ error: 'Kaynak ve hedef masa aynı olamaz' });
     }

@@ -27,6 +27,9 @@ let bridgeRestartTimer = null;
 let bridgeStopped = false;
 /** @type {number} */
 let bridgePort = 0;
+/** Arka arkaya kaç kez yeniden başlatıldı; başarılı başlangıçta sıfırlanır. */
+let bridgeRestartCount = 0;
+const BRIDGE_MAX_RESTARTS = 10;
 /** @type {import('child_process').ChildProcessWithoutNullStreams | null} */
 let callerIdHelperProcess = null;
 /** @type {NodeJS.Timeout | null} */
@@ -642,13 +645,27 @@ function startStoreBridge(port) {
     }
   });
 
+  bridgeRestartCount = 0; // başarılı başlatma — sayacı sıfırla
   console.log(`[electron] Store Bridge başlatıldı pid=${child.pid} api=http://127.0.0.1:${port}/api`);
 }
 
 function scheduleBridgeRestart(port, restartMs) {
   if (bridgeStopped) return;
+
+  bridgeRestartCount += 1;
+  if (bridgeRestartCount > BRIDGE_MAX_RESTARTS) {
+    console.error(
+      `[electron] Store Bridge ${BRIDGE_MAX_RESTARTS} kez art arda yeniden başlatıldı ve başarısız oldu.` +
+      ' Otomatik yeniden başlatma durduruldu. Yazıcı bağlantısı çalışmıyor olabilir.' +
+      ' Uygulamayı kapatıp açarak sorunu giderin.',
+    );
+    return;
+  }
+
   if (bridgeRestartTimer) clearTimeout(bridgeRestartTimer);
-  console.log(`[electron] Store Bridge ${restartMs / 1000} s sonra yeniden başlatılacak...`);
+  console.log(
+    `[electron] Store Bridge ${restartMs / 1000} s sonra yeniden başlatılacak... (deneme ${bridgeRestartCount}/${BRIDGE_MAX_RESTARTS})`,
+  );
   bridgeRestartTimer = setTimeout(() => {
     bridgeRestartTimer = null;
     startStoreBridge(port);
@@ -1030,6 +1047,7 @@ app.on('before-quit', () => {
     forceKillAfterTimeout(serverProcess);
   }
   bridgeStopped = true;
+  bridgeRestartCount = 0;
   if (bridgeRestartTimer) { clearTimeout(bridgeRestartTimer); bridgeRestartTimer = null; }
   if (bridgeProcess && !bridgeProcess.killed) {
     killProcess(bridgeProcess);
