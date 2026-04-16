@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Manuel güncelleme kontrolü tetikle. */
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
 
+  /** Bakım/restore sonrası uygulamayı kontrollü yeniden başlat. */
+  restartApp: () => ipcRenderer.send('restart-app'),
+
   /** Electron ortamında çalışıp çalışmadığını döner (browser'dan ayırt etmek için). */
   isElectron: true,
 });

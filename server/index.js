@@ -28,6 +28,7 @@ import bridgeRoutes from './routes/bridge.js';
 import reservationsRoutes from './routes/reservations.js';
 import stockRoutes from './routes/stock.js';
 import waiterCallRoutes from './routes/waiterCall.js';
+import attributesRoutes from './routes/attributes.js';
 
 const app = express();
 
@@ -125,6 +126,7 @@ app.use('/api/bridge', bridgeLimiter, bridgeRoutes);
 app.use('/api/reservations', reservationsRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/waiter-call', waiterCallLimiter, waiterCallRoutes);
+app.use('/api/attributes', attributesRoutes);
 
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {

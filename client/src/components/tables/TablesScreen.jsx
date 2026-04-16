@@ -58,6 +58,8 @@ export default function TablesScreen({
   const [recentlyMovedTableId, setRecentlyMovedTableId] = useState(null);
   const [tableConfirm, setTableConfirm] = useState(null);
   const [manualPrintDialog, setManualPrintDialog] = useState({ open: false, orderId: null, role: 'receipt', kind: 'receipt', title: '' });
+  const [printHealth, setPrintHealth] = useState(null);
+  const [retryingPrintJobId, setRetryingPrintJobId] = useState(null);
   const takeawayMenuRef = useRef(null);
   const toast = useToast();
   const { openOrder: openIncomingCallOrder } = useIncomingCall() || {};
@@ -95,10 +97,20 @@ export default function TablesScreen({
     }
   }, [showTakeawaySidebar, toast]);
 
+  const loadPrintHealth = useCallback(async () => {
+    try {
+      const data = await api.getPrintHealth();
+      setPrintHealth(data);
+    } catch {
+      setPrintHealth(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadTables();
     if (showTakeawaySidebar) loadTakeaway();
-  }, [location.key, location.state?.refreshTables, loadTables, loadTakeaway, showTakeawaySidebar]);
+    loadPrintHealth();
+  }, [location.key, location.state?.refreshTables, loadTables, loadTakeaway, loadPrintHealth, showTakeawaySidebar]);
 
   useEffect(() => {
     if (!showTakeawaySidebar) {
@@ -117,9 +129,10 @@ export default function TablesScreen({
     const unsubs = events.map(ev => subscribe(ev, () => {
       loadTables();
       loadTakeaway();
+      loadPrintHealth();
     }));
     return () => unsubs.forEach(fn => fn());
-  }, [subscribe, loadTables, loadTakeaway]);
+  }, [subscribe, loadTables, loadTakeaway, loadPrintHealth]);
 
   // Fallback polling: socket kopuksa 30s'de bir
   useEffect(() => {
@@ -127,9 +140,10 @@ export default function TablesScreen({
     const interval = setInterval(() => {
       loadTables();
       loadTakeaway();
+      loadPrintHealth();
     }, 30000);
     return () => clearInterval(interval);
-  }, [isConnected, loadTables, loadTakeaway]);
+  }, [isConnected, loadTables, loadTakeaway, loadPrintHealth]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -168,6 +182,22 @@ export default function TablesScreen({
   const refreshAll = () => {
     loadTables();
     loadTakeaway();
+    loadPrintHealth();
+  };
+
+  const retryFirstFailedPrintJob = async () => {
+    const job = printHealth?.recentFailed?.[0];
+    if (!job?.id || retryingPrintJobId) return;
+    setRetryingPrintJobId(job.id);
+    try {
+      await api.retryPrintJob(job.id);
+      toast.success('Yazdırma işi yeniden kuyruğa alındı');
+      await loadPrintHealth();
+    } catch (err) {
+      toast.error(err.message || 'Yazdırma işi yeniden denenemedi');
+    } finally {
+      setRetryingPrintJobId(null);
+    }
   };
 
   const loadCallHistory = useCallback(async () => {
@@ -470,6 +500,11 @@ export default function TablesScreen({
       return (now - parseDbTimestampMs(t.order_started_at)) / 60000 > 60;
     }).length,
   };
+  const printSummary = printHealth?.summary || {};
+  const failedPrintCount = Number(printSummary.failed) || 0;
+  const stalePrintCount = Number(printSummary.stale_claimed) || 0;
+  const pendingPrintCount = Number(printSummary.pending) || 0;
+  const firstFailedPrintJob = printHealth?.recentFailed?.[0] || null;
 
   const btnBase = {
     padding: '8px 10px',
@@ -501,29 +536,29 @@ export default function TablesScreen({
   };
 
   return (
-    <div className="page-container page-container--flush" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="page-container page-container--flush tables-page" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-top-safe" style={{ flexShrink: 0 }}>
         <div className="page-header tables-page-header">
           <div className="tables-header-main">
             <h1 className="page-title">Masalar</h1>
-            <div className="tables-header-stats">
+          </div>
+          <div className="tables-header-stats">
+            <span className="tables-header-stat">
+              <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.empty}</span> Boş
+            </span>
+            <span className="tables-header-stat">
+              <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{stats.occupied}</span> Dolu
+            </span>
+            {stats.paid > 0 && (
               <span className="tables-header-stat">
-                <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.empty}</span> Boş
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.paid}</span> Hesap Ödendi
               </span>
+            )}
+            {stats.hot > 0 && (
               <span className="tables-header-stat">
-                <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{stats.occupied}</span> Dolu
+                <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{stats.hot}</span> Uzun Süre
               </span>
-              {stats.paid > 0 && (
-                <span className="tables-header-stat">
-                  <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.paid}</span> Hesap Ödendi
-                </span>
-              )}
-              {stats.hot > 0 && (
-                <span className="tables-header-stat">
-                  <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{stats.hot}</span> Uzun Süre
-                </span>
-              )}
-            </div>
+            )}
           </div>
           {onNewTakeawayOrder && (
             <div className="tables-header-primary">
@@ -538,7 +573,7 @@ export default function TablesScreen({
               </button>
             </div>
           )}
-          <div className="tables-header-actions">
+          <div className="tables-header-actions page-header-actions">
             <div className="tables-header-secondary">
               <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
                 <Phone size={16} />
@@ -564,6 +599,38 @@ export default function TablesScreen({
           }}>
             <ArrowRightLeft size={16} />
             Hedef masayı seçin
+          </div>
+        )}
+
+        {(failedPrintCount > 0 || stalePrintCount > 0) && (
+          <div className="print-health-alert">
+            <div className="print-health-alert-main">
+              <Printer size={17} />
+              <div>
+                <strong>Yazdırma sorunu var</strong>
+                <div>
+                  {failedPrintCount > 0 ? `${failedPrintCount} başarısız iş` : ''}
+                  {failedPrintCount > 0 && stalePrintCount > 0 ? ' · ' : ''}
+                  {stalePrintCount > 0 ? `${stalePrintCount} süresi geçmiş iş` : ''}
+                  {pendingPrintCount > 0 ? ` · ${pendingPrintCount} bekleyen` : ''}
+                </div>
+                {firstFailedPrintJob && (
+                  <div className="print-health-alert-detail">
+                    {firstFailedPrintJob.printer_name || 'Yazıcı'} · {firstFailedPrintJob.last_error_code || 'hata'} · {firstFailedPrintJob.error_message || 'Yazdırma tamamlanamadı'}
+                  </div>
+                )}
+              </div>
+            </div>
+            {firstFailedPrintJob && (
+              <button
+                type="button"
+                className="btn btn-warning btn-sm"
+                onClick={retryFirstFailedPrintJob}
+                disabled={!!retryingPrintJobId}
+              >
+                {retryingPrintJobId ? 'Deneniyor...' : 'Tekrar Dene'}
+              </button>
+            )}
           </div>
         )}
 

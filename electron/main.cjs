@@ -790,13 +790,31 @@ let backupTimer = null;
 const BACKUP_KEEP_DAYS = 30;
 const BACKUP_HOUR = 2; // gece 02:00
 
+function requireBetterSqlite3ForBackup() {
+  const serverRoot = app.isPackaged ? getPackagedServerRoot() : path.join(getCodeRoot(), 'server');
+  const modulePath = path.join(serverRoot, 'node_modules', 'better-sqlite3');
+  return require(modulePath);
+}
+
+function verifySqliteBackup(Database, backupPath) {
+  const backupDb = new Database(backupPath, { readonly: true, fileMustExist: true });
+  try {
+    const result = backupDb.pragma('integrity_check', { simple: true });
+    if (result !== 'ok') {
+      throw new Error(`integrity_check=${result}`);
+    }
+  } finally {
+    backupDb.close();
+  }
+}
+
 /**
- * pos.db'yi userData/backups/pos-YYYY-MM-DD.db olarak kopyalar.
- * Günde bir kez alır (aynı gün yedek varsa atlar).
- * 30 günden eski yedekleri temizler.
+ * pos.db'yi userData/backups/pos-YYYY-MM-DD.db olarak SQLite backup API ile alır.
+ * WAL modunda duz dosya kopyası guvenli olmadigi icin backup snapshot'i kullanilir.
  */
-function performBackup(dbPath) {
+async function performBackup(dbPath) {
   const backupsDir = path.join(app.getPath('userData'), 'backups');
+  let tempPath = null;
   try {
     if (!fs.existsSync(dbPath)) {
       console.warn('[backup] Veritabanı bulunamadı, yedek atlandı:', dbPath);
@@ -811,10 +829,28 @@ function performBackup(dbPath) {
       console.log('[backup] Bugünkü yedek zaten mevcut:', backupPath);
       return;
     }
-    fs.copyFileSync(dbPath, backupPath);
-    console.log('[backup] ✅ Veritabanı yedeklendi:', backupPath);
+
+    const Database = requireBetterSqlite3ForBackup();
+    const liveDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+    tempPath = `${backupPath}.tmp-${process.pid}`;
+    try {
+      await liveDb.backup(tempPath);
+    } finally {
+      liveDb.close();
+    }
+    verifySqliteBackup(Database, tempPath);
+    fs.renameSync(tempPath, backupPath);
+    tempPath = null;
+    console.log('[backup] ✅ WAL-güvenli veritabanı yedeklendi:', backupPath);
     cleanOldBackups(backupsDir);
   } catch (e) {
+    if (tempPath && fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* ignore */
+      }
+    }
     console.error('[backup] Yedekleme hatası:', e && e.message ? e.message : String(e));
   }
 }
@@ -853,17 +889,114 @@ function msUntilNextBackupHour() {
  */
 function scheduleBackup(dbPath) {
   // Başlangıçta hemen kontrol — bugün yedek yoksa al
-  performBackup(dbPath);
+  performBackup(dbPath).catch((err) => {
+    console.error('[backup] Başlangıç yedeği alınamadı:', err && err.message ? err.message : String(err));
+  });
 
   const msFirst = msUntilNextBackupHour();
   console.log(`[backup] Sonraki otomatik yedek: ${Math.round(msFirst / 60000)} dakika sonra (gece ${BACKUP_HOUR}:00)`);
 
   backupTimer = setTimeout(() => {
-    performBackup(dbPath);
-    backupTimer = setInterval(() => performBackup(dbPath), 24 * 60 * 60 * 1000);
+    performBackup(dbPath).catch((err) => {
+      console.error('[backup] Zamanlanmış yedek alınamadı:', err && err.message ? err.message : String(err));
+    });
+    backupTimer = setInterval(() => {
+      performBackup(dbPath).catch((err) => {
+        console.error('[backup] Günlük yedek alınamadı:', err && err.message ? err.message : String(err));
+      });
+    }, 24 * 60 * 60 * 1000);
     backupTimer?.unref?.();
   }, msFirst);
   backupTimer?.unref?.();
+}
+
+function safeRestoreBackupName(value) {
+  const fileName = path.basename(String(value || '').trim());
+  if (!/^(pos|pos-manual|restore-safety)-[A-Za-z0-9._-]+\.db$/.test(fileName)) return null;
+  return fileName;
+}
+
+function removeSqliteSidecars(dbPath) {
+  for (const suffix of ['-wal', '-shm']) {
+    const sidecar = `${dbPath}${suffix}`;
+    if (!fs.existsSync(sidecar)) continue;
+    try {
+      fs.unlinkSync(sidecar);
+    } catch (err) {
+      console.warn('[restore] SQLite yan dosyası silinemedi:', sidecar, err?.message || err);
+    }
+  }
+}
+
+async function createRestoreSafetyBackup(Database, dbPath, backupsDir) {
+  if (!fs.existsSync(dbPath)) return null;
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const safetyPath = path.join(backupsDir, `restore-safety-${stamp}.db`);
+  const liveDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+  try {
+    await liveDb.backup(safetyPath);
+  } finally {
+    liveDb.close();
+  }
+  verifySqliteBackup(Database, safetyPath);
+  return safetyPath;
+}
+
+async function applyPendingRestoreIfAny(dbPath) {
+  const userDataPath = app.getPath('userData');
+  const requestPath = path.join(userDataPath, 'restore-request.json');
+  if (!fs.existsSync(requestPath)) return;
+
+  let request;
+  try {
+    request = JSON.parse(fs.readFileSync(requestPath, 'utf8'));
+  } catch (err) {
+    console.error('[restore] Restore isteği okunamadı:', err?.message || err);
+    fs.unlinkSync(requestPath);
+    return;
+  }
+
+  const backupName = safeRestoreBackupName(request?.backupFile);
+  if (!backupName) {
+    console.error('[restore] Geçersiz restore dosyası:', request?.backupFile);
+    fs.unlinkSync(requestPath);
+    return;
+  }
+
+  const backupsDir = path.join(userDataPath, 'backups');
+  const backupPath = path.join(backupsDir, backupName);
+  if (!fs.existsSync(backupPath)) {
+    console.error('[restore] Restore yedeği bulunamadı:', backupPath);
+    fs.unlinkSync(requestPath);
+    return;
+  }
+
+  const Database = requireBetterSqlite3ForBackup();
+  const tempPath = `${dbPath}.restore-${process.pid}.tmp`;
+  let safetyPath = null;
+  try {
+    verifySqliteBackup(Database, backupPath);
+    fs.copyFileSync(backupPath, tempPath);
+    verifySqliteBackup(Database, tempPath);
+    safetyPath = await createRestoreSafetyBackup(Database, dbPath, backupsDir);
+
+    removeSqliteSidecars(dbPath);
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+    fs.renameSync(tempPath, dbPath);
+    removeSqliteSidecars(dbPath);
+    fs.unlinkSync(requestPath);
+    console.log('[restore] ✅ Yedek geri yüklendi:', backupName, safetyPath ? `safety=${safetyPath}` : '');
+  } catch (err) {
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* ignore */
+      }
+    }
+    console.error('[restore] Restore uygulanamadı:', err?.message || err);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -935,7 +1068,9 @@ app.whenReady().then(async () => {
 
   try {
     copyLegacySqliteToUserDataIfNeeded(userDataDbPath, legacyDbMain);
+    await applyPendingRestoreIfAny(userDataDbPath);
     const port = await startServerAndWaitForHealth(userDataDbPath);
+    scheduleBackup(userDataDbPath);
     createWindow(port);
     startStoreBridge(port);
     const cidTimer = setTimeout(() => startCallerIdHelper(port), 3000);
@@ -1025,6 +1160,11 @@ function initAutoUpdater() {
 }
 
 app.whenReady().then(() => initAutoUpdater());
+
+ipcMain.on('restart-app', () => {
+  app.relaunch();
+  app.quit();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import Database from 'better-sqlite3';
 
 const { dbRef, TEST_JWT_SECRET, testConfig } = vi.hoisted(() => {
   const secret = 'integration-test-secret-32chars!!';
@@ -29,6 +33,7 @@ let app;
 let helpers;
 let seeds;
 let authHeader;
+let tempUserData;
 
 beforeAll(async () => {
   helpers = await import('./helpers.js');
@@ -42,6 +47,16 @@ beforeEach(() => {
   dbRef.current = helpers.createTestDb();
   seeds = helpers.seedBusiness(dbRef.current);
   authHeader = `Bearer ${jwt.sign({ userId: seeds.userId }, TEST_JWT_SECRET)}`;
+  tempUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'pos-maintenance-'));
+  process.env.USER_DATA_PATH = tempUserData;
+});
+
+afterEach(() => {
+  if (tempUserData) {
+    fs.rmSync(tempUserData, { recursive: true, force: true });
+    tempUserData = null;
+  }
+  delete process.env.USER_DATA_PATH;
 });
 
 function insertPrinter({ id = 'printer-1', name = 'Ana Yazici' } = {}) {
@@ -189,6 +204,118 @@ describe('admin print job queue behavior', () => {
       .set('Authorization', authHeader);
 
     expect(retryRes.status).toBe(409);
+  });
+});
+
+describe('admin desktop readiness', () => {
+  it('reports blocking setup gaps and refuses completion while required checks fail', async () => {
+    const readinessRes = await request(app)
+      .get('/api/admin/desktop-readiness')
+      .set('Authorization', authHeader);
+
+    expect(readinessRes.status).toBe(200);
+    expect(readinessRes.body.ready).toBe(false);
+    expect(readinessRes.body.blockerCount).toBeGreaterThan(0);
+    expect(readinessRes.body.checks.some((check) => check.key === 'receipt_printer' && check.status === 'blocker')).toBe(true);
+
+    const completeRes = await request(app)
+      .post('/api/admin/desktop-readiness/complete')
+      .set('Authorization', authHeader);
+
+    expect(completeRes.status).toBe(409);
+    expect(completeRes.body.readiness.ready).toBe(false);
+  });
+
+  it('marks setup completed when all blocking checks pass', async () => {
+    dbRef.current
+      .prepare(`UPDATE businesses SET tax_id = '1234567890', address = 'Test Adres' WHERE id = ?`)
+      .run(seeds.businessId);
+
+    const receiptPrinterId = insertPrinter({ id: 'readiness-receipt-printer', name: 'Kasa Yazici' });
+    dbRef.current
+      .prepare(`UPDATE printers SET type = 'receipt', is_active = 1 WHERE id = ?`)
+      .run(receiptPrinterId);
+
+    const kitchenPrinterId = insertPrinter({ id: 'readiness-kitchen-printer', name: 'Mutfak Yazici' });
+    dbRef.current
+      .prepare(`UPDATE printers SET type = 'kitchen', is_active = 1 WHERE id = ?`)
+      .run(kitchenPrinterId);
+
+    dbRef.current
+      .prepare(
+        `INSERT INTO settings (id, business_id, key, value, updated_at)
+         VALUES (?, ?, 'printer.config', ?, datetime('now'))`,
+      )
+      .run(
+        'readiness-printer-config',
+        seeds.businessId,
+        JSON.stringify({
+          defaultPrinterId: receiptPrinterId,
+          usagePaymentId: receiptPrinterId,
+          usageKitchenId: kitchenPrinterId,
+        }),
+      );
+
+    const readinessRes = await request(app)
+      .get('/api/admin/desktop-readiness')
+      .set('Authorization', authHeader);
+
+    expect(readinessRes.status).toBe(200);
+    expect(readinessRes.body.ready).toBe(true);
+    expect(readinessRes.body.blockerCount).toBe(0);
+    expect(readinessRes.body.warningCount).toBeGreaterThanOrEqual(0);
+
+    const completeRes = await request(app)
+      .post('/api/admin/desktop-readiness/complete')
+      .set('Authorization', authHeader);
+
+    expect(completeRes.status).toBe(200);
+    expect(completeRes.body.completed).toBe(true);
+    expect(completeRes.body.completed_at).toBeTruthy();
+
+    const setting = dbRef.current
+      .prepare(`SELECT value FROM settings WHERE business_id = ? AND key = 'app.setup'`)
+      .get(seeds.businessId);
+    expect(JSON.parse(setting.value).completedBy).toBe(seeds.userId);
+  });
+});
+
+describe('admin maintenance backup restore planning', () => {
+  it('lists backups, writes a verified restore request and cancels it', async () => {
+    const backupsDir = path.join(tempUserData, 'backups');
+    fs.mkdirSync(backupsDir, { recursive: true });
+    const backupName = 'pos-2026-04-16.db';
+    const backupPath = path.join(backupsDir, backupName);
+    const backupDb = new Database(backupPath);
+    backupDb.exec('CREATE TABLE sample (id TEXT PRIMARY KEY); INSERT INTO sample (id) VALUES (\'ok\');');
+    backupDb.close();
+
+    const listRes = await request(app)
+      .get('/api/admin/maintenance')
+      .set('Authorization', authHeader);
+
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.backups.some((backup) => backup.id === backupName)).toBe(true);
+    expect(listRes.body.pendingRestore).toBeNull();
+
+    const restoreRes = await request(app)
+      .post('/api/admin/maintenance/restore-request')
+      .set('Authorization', authHeader)
+      .send({ backup_id: backupName });
+
+    expect(restoreRes.status).toBe(200);
+    expect(restoreRes.body.pendingRestore.backupFile).toBe(backupName);
+
+    const requestPath = path.join(tempUserData, 'restore-request.json');
+    expect(fs.existsSync(requestPath)).toBe(true);
+    expect(JSON.parse(fs.readFileSync(requestPath, 'utf8')).requestedBy).toBe(seeds.userId);
+
+    const cancelRes = await request(app)
+      .delete('/api/admin/maintenance/restore-request')
+      .set('Authorization', authHeader);
+
+    expect(cancelRes.status).toBe(200);
+    expect(fs.existsSync(requestPath)).toBe(false);
   });
 });
 

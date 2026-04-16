@@ -22,6 +22,131 @@ function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+/**
+ * Sipariş satırı özellik seçimlerini doğrular ve fiyat deltasıyla birlikte snapshot döner.
+ * @param {string} productId
+ * @param {string} categoryId
+ * @param {string} businessId
+ * @param {Array<{group_id: string, option_ids: string[]}>} selectedAttributes
+ * @returns {{ resolvedAttrs: Array, extraPrice: number }}
+ */
+function normalizeSelectedAttributes(selectedAttributes = []) {
+  const byGroup = new Map();
+  for (const attr of selectedAttributes || []) {
+    if (!attr?.group_id) continue;
+    const optionIds = Array.isArray(attr.option_ids)
+      ? attr.option_ids
+      : attr.option_id
+        ? [attr.option_id]
+        : [];
+    if (optionIds.length === 0) continue;
+    const bucket = byGroup.get(attr.group_id) || new Set();
+    for (const optionId of optionIds) {
+      if (optionId) bucket.add(optionId);
+    }
+    byGroup.set(attr.group_id, bucket);
+  }
+  return Array.from(byGroup.entries()).map(([group_id, optionIds]) => ({
+    group_id,
+    option_ids: Array.from(optionIds),
+  }));
+}
+
+function resolveSelectedAttributes(productId, categoryId, businessId, selectedAttributes) {
+  const normalizedAttributes = normalizeSelectedAttributes(selectedAttributes);
+  if (normalizedAttributes.length === 0) {
+    return { resolvedAttrs: [], extraPrice: 0 };
+  }
+
+  // Efektif özellik gruplarını çek (kategori + ürün)
+  const catGroups = categoryId
+    ? db
+        .prepare(
+          `SELECT ag.* FROM category_attribute_groups cag
+           JOIN attribute_groups ag ON ag.id = cag.group_id
+           WHERE cag.category_id = ? AND cag.business_id = ? AND ag.is_active = 1`,
+        )
+        .all(categoryId, businessId)
+    : [];
+
+  const prodGroups = db
+    .prepare(
+      `SELECT ag.* FROM product_attribute_groups pag
+       JOIN attribute_groups ag ON ag.id = pag.group_id
+       WHERE pag.product_id = ? AND pag.business_id = ? AND ag.is_active = 1`,
+    )
+    .all(productId, businessId);
+
+  const seen = new Set();
+  const effectiveGroups = [];
+  for (const g of [...prodGroups, ...catGroups]) {
+    if (!seen.has(g.id)) {
+      seen.add(g.id);
+      effectiveGroups.push(g);
+    }
+  }
+
+  const resolvedAttrs = [];
+  let extraPrice = 0;
+
+  for (const sel of normalizedAttributes) {
+    const group = effectiveGroups.find((g) => g.id === sel.group_id);
+    if (!group) {
+      const err = new Error(`Geçersiz özellik grubu: ${sel.group_id}`);
+      err.isBadRequest = true;
+      throw err;
+    }
+
+    // Tekli seçim doğrulama
+    if (group.selection_type === 'single' && sel.option_ids.length > 1) {
+      const err = new Error(`"${group.name}" grubunda yalnızca tek seçenek seçilebilir`);
+      err.isBadRequest = true;
+      throw err;
+    }
+
+    // Zorunlu grup kontrolü
+    if (Number(group.is_required) && sel.option_ids.length === 0) {
+      const err = new Error(`"${group.name}" grubu zorunludur`);
+      err.isBadRequest = true;
+      throw err;
+    }
+
+    for (const optId of sel.option_ids) {
+      const opt = db
+        .prepare(
+          'SELECT * FROM attribute_options WHERE id = ? AND group_id = ? AND is_active = 1',
+        )
+        .get(optId, sel.group_id);
+      if (!opt) {
+        const err = new Error(`Geçersiz özellik seçeneği: ${optId}`);
+        err.isBadRequest = true;
+        throw err;
+      }
+      extraPrice += Number(opt.extra_price) || 0;
+      resolvedAttrs.push({
+        group_id: group.id,
+        group_name: group.name,
+        option_id: opt.id,
+        option_name: opt.name,
+        extra_price: Number(opt.extra_price) || 0,
+      });
+    }
+  }
+
+  // Zorunlu ama hiç gönderilmemiş grupları kontrol et
+  for (const g of effectiveGroups) {
+    if (!Number(g.is_required)) continue;
+    const hasSelection = normalizedAttributes.some((s) => s.group_id === g.id && s.option_ids.length > 0);
+    if (!hasSelection) {
+      const err = new Error(`"${g.name}" grubu zorunludur`);
+      err.isBadRequest = true;
+      throw err;
+    }
+  }
+
+  return { resolvedAttrs, extraPrice };
+}
+
 function getOrderPaidTotal(orderId) {
   const row = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = ?').get(orderId);
   return round2(row?.total || 0);
@@ -59,12 +184,21 @@ function recordTakeawayDeliveryPaymentIfNeeded(order, businessId, userId) {
   return paymentId;
 }
 
+const selectedAttributeSchema = z.object({
+  group_id: z.string().min(1),
+  option_ids: z.array(z.string().min(1)).optional(),
+  option_id: z.string().min(1).optional(),
+}).refine((attr) => (attr.option_ids?.length || 0) > 0 || !!attr.option_id, {
+  message: 'En az bir özellik seçeneği gerekli',
+});
+
 const orderItemSchema = z.object({
   product_id: z.string().min(1),
   quantity: z.number().int().positive().max(999).default(1),
   portion_id: z.string().optional().nullable(),
   modifiers: z.array(z.any()).optional(),
   note: z.string().max(500).optional().nullable(),
+  selected_attributes: z.array(selectedAttributeSchema).optional().nullable(),
 });
 
 const createOrderSchema = {
@@ -168,6 +302,57 @@ function orderHeaderSnapshot({ tableId, customerId, userId, businessId }) {
 const staff = authorize('admin', 'cashier', 'waiter');
 const staffAndKitchen = authorize('admin', 'cashier', 'waiter', 'kitchen');
 
+function getPrintJobSummary(businessId) {
+  const rows = db
+    .prepare(`SELECT status, COUNT(*) AS count FROM print_jobs WHERE business_id = ? GROUP BY status`)
+    .all(businessId);
+  const summary = { pending: 0, printed: 0, failed: 0, cancelled: 0, stale_claimed: 0 };
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(summary, row.status)) {
+      summary[row.status] = Number(row.count) || 0;
+    }
+  }
+  const stale = db.prepare(`
+    SELECT COUNT(*) AS c
+    FROM print_jobs
+    WHERE business_id = ?
+      AND status = 'pending'
+      AND claimed_until IS NOT NULL
+      AND datetime(claimed_until) <= datetime('now')
+  `).get(businessId);
+  summary.stale_claimed = Number(stale?.c) || 0;
+  return summary;
+}
+
+function assertTableCanOpenOrder(tableId, businessId) {
+  if (!tableId) return null;
+  const table = db.prepare('SELECT * FROM tables WHERE id = ? AND business_id = ? AND is_active = 1').get(tableId, businessId);
+  if (!table) {
+    const err = new Error('Masa bulunamadı');
+    err.isBadRequest = true;
+    throw err;
+  }
+  if (table.status !== 'empty' || table.current_order_id) {
+    const err = new Error('Bu masada zaten açık bir adisyon var');
+    err.isBadRequest = true;
+    throw err;
+  }
+  const active = db.prepare(`
+    SELECT id FROM orders
+    WHERE business_id = ?
+      AND table_id = ?
+      AND order_type = 'dine_in'
+      AND status NOT IN ('closed', 'cancelled')
+    LIMIT 1
+  `).get(businessId, tableId);
+  if (active) {
+    const err = new Error('Bu masaya bağlı açık sipariş bulundu');
+    err.isBadRequest = true;
+    throw err;
+  }
+  return table;
+}
+
 function queueKitchenForNewItems(businessId, orderId, itemIds, userId, options = {}) {
   if (!itemIds?.length) return;
   const placeholders = itemIds.map(() => '?').join(',');
@@ -208,6 +393,54 @@ router.get('/', staff, (req, res) => {
     res.json(db.prepare(sql).all(...params));
   } catch (err) {
     console.error('Orders list error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// GET /api/orders/print-health - operasyon ekranları için yazdırma sağlığı
+router.get('/print-health', staff, (req, res) => {
+  try {
+    const recentFailed = db.prepare(`
+      SELECT pj.id, pj.order_id, pj.printer_id, pj.job_type, pj.error_message, pj.last_error_code, pj.created_at,
+             p.name AS printer_name
+      FROM print_jobs pj
+      LEFT JOIN printers p ON p.id = pj.printer_id
+      WHERE pj.business_id = ? AND pj.status = 'failed'
+      ORDER BY datetime(pj.created_at) DESC
+      LIMIT 5
+    `).all(req.businessId);
+    res.json({ summary: getPrintJobSummary(req.businessId), recentFailed });
+  } catch (err) {
+    console.error('Print health error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/orders/print-jobs/:id/retry - operasyon ekranından başarısız işi tekrar kuyruğa al
+router.post('/print-jobs/:id/retry', staff, (req, res) => {
+  try {
+    const job = db.prepare('SELECT * FROM print_jobs WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!job) return res.status(404).json({ error: 'Yazdırma işi bulunamadı' });
+    if (job.status !== 'failed') {
+      return res.status(409).json({ error: 'Yalnızca başarısız yazdırma işleri yeniden denenebilir' });
+    }
+    db.prepare(`
+      UPDATE print_jobs
+      SET status = 'pending',
+          error_message = NULL,
+          last_error_code = NULL,
+          claimed_at = NULL,
+          claimed_by = NULL,
+          claimed_until = NULL,
+          printed_at = NULL
+      WHERE id = ? AND business_id = ?
+    `).run(req.params.id, req.businessId);
+    auditLog(req.businessId, req.user.id, 'print_job_retry_from_ops', 'print_job', req.params.id, {
+      previous_error_code: job.last_error_code || null,
+    });
+    res.json({ ok: true, message: 'Yazdırma işi yeniden kuyruğa alındı' });
+  } catch (err) {
+    console.error('Print job retry error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -513,6 +746,10 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
     const txn = db.transaction(() => {
       const orderNo = getNextOrderNo(req.businessId);
 
+      if (resolvedType === 'dine_in' && table_id) {
+        assertTableCanOpenOrder(table_id, req.businessId);
+      }
+
       let subtotal = 0;
       const lines = [];
 
@@ -531,15 +768,24 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
           item.portion_id || null,
         );
 
+        const { resolvedAttrs, extraPrice } = resolveSelectedAttributes(
+          product.id,
+          product.category_id,
+          req.businessId,
+          item.selected_attributes || [],
+        );
+
+        const finalPrice = itemPrice + extraPrice;
         const qty = item.quantity || 1;
-        const lineTotal = itemPrice * qty;
+        const lineTotal = finalPrice * qty;
         subtotal += lineTotal;
 
         lines.push({
           product,
           qty,
-          itemPrice,
+          itemPrice: finalPrice,
           resolved,
+          resolvedAttrs,
           note: item.note || null,
           portion_id: item.portion_id || null,
           portion_label: portionLabel,
@@ -572,8 +818,8 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
       const insertItem = db.prepare(`INSERT INTO order_items (
         id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate,
         category_id_snapshot, category_name_snapshot, printer_target_snapshot,
-        created_by, portion_id, portion_label
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        created_by, portion_id, portion_label, selected_attributes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       createdItemIds = [];
       for (const line of lines) {
         const itemId = genId();
@@ -584,12 +830,21 @@ router.post('/', staff, validate(createOrderSchema), (req, res) => {
           line.snapshot.category_id_snapshot, line.snapshot.category_name_snapshot, line.snapshot.printer_target_snapshot,
           req.user.id,
           line.portion_id || null, line.portion_label || null,
+          JSON.stringify(line.resolvedAttrs || []),
         );
       }
 
       if (table_id) {
-        db.prepare("UPDATE tables SET status = 'occupied', current_order_id = ?, guest_count = ?, updated_at = datetime('now') WHERE id = ?")
-          .run(orderId, guest_count || 0, table_id);
+        const info = db.prepare(
+          `UPDATE tables
+           SET status = 'occupied', current_order_id = ?, guest_count = ?, updated_at = datetime('now')
+           WHERE id = ? AND business_id = ? AND status = 'empty' AND current_order_id IS NULL`,
+        ).run(orderId, guest_count || 0, table_id, req.businessId);
+        if (info.changes !== 1) {
+          const err = new Error('Masa başka bir işlem tarafından açılmış olabilir. Lütfen masaları yenileyin.');
+          err.isBadRequest = true;
+          throw err;
+        }
       }
 
       if ((order_type || 'dine_in') === 'takeaway') {
@@ -659,8 +914,16 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
           item.portion_id || null,
         );
 
+        const { resolvedAttrs: itemResolvedAttrs, extraPrice: itemExtraPrice } = resolveSelectedAttributes(
+          product.id,
+          product.category_id,
+          req.businessId,
+          item.selected_attributes || [],
+        );
+
+        const finalItemPrice = itemPrice + itemExtraPrice;
         const qty = item.quantity || 1;
-        addedSubtotal += itemPrice * qty;
+        addedSubtotal += finalItemPrice * qty;
 
         const itemId = genId();
         newItemIds.push(itemId);
@@ -668,13 +931,14 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
         db.prepare(`INSERT INTO order_items (
           id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate,
           category_id_snapshot, category_name_snapshot, printer_target_snapshot,
-          created_by, portion_id, portion_label
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-          itemId, order.id, product.id, product.name, qty, itemPrice,
+          created_by, portion_id, portion_label, selected_attributes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+          itemId, order.id, product.id, product.name, qty, finalItemPrice,
           JSON.stringify(resolved), item.note || null, 0,
           snapshot.category_id_snapshot, snapshot.category_name_snapshot, snapshot.printer_target_snapshot,
           req.user.id,
           item.portion_id || null, portionLabel,
+          JSON.stringify(itemResolvedAttrs || []),
         );
       }
 

@@ -430,6 +430,54 @@ export const migrations = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(stock_item_id)`,
 
+  // ── Özellik Grupları (Attributes) ──
+  `CREATE TABLE IF NOT EXISTS attribute_groups (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    name TEXT NOT NULL,
+    selection_type TEXT NOT NULL DEFAULT 'single' CHECK(selection_type IN ('single','multiple')),
+    is_required INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS attribute_options (
+    id TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL REFERENCES attribute_groups(id) ON DELETE CASCADE,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    name TEXT NOT NULL,
+    extra_price REAL DEFAULT 0,
+    is_default INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS category_attribute_groups (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL REFERENCES attribute_groups(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(category_id, group_id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS product_attribute_groups (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL REFERENCES attribute_groups(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(product_id, group_id)
+  )`,
+
+  `CREATE INDEX IF NOT EXISTS idx_attribute_groups_business ON attribute_groups(business_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_attribute_options_group ON attribute_options(group_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_category_attribute_groups_category ON category_attribute_groups(category_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_product_attribute_groups_product ON product_attribute_groups(product_id)`,
+
   // ── Garson Çağırma ──
   `CREATE TABLE IF NOT EXISTS waiter_calls (
     id TEXT PRIMARY KEY,
@@ -501,6 +549,53 @@ function ensurePrinterRoutingUniqueIndex() {
     );
   } catch (e) {
     console.error('ensurePrinterRoutingUniqueIndex:', e);
+  }
+}
+
+function ensureActiveDineInTableGuard() {
+  try {
+    db.exec(`
+      UPDATE tables
+      SET status = 'empty',
+          current_order_id = NULL,
+          guest_count = 0,
+          updated_at = datetime('now')
+      WHERE current_order_id IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM orders o
+          WHERE o.id = tables.current_order_id
+            AND o.business_id = tables.business_id
+            AND o.status NOT IN ('closed', 'cancelled')
+        )
+    `);
+
+    const dup = db.prepare(`
+      SELECT business_id, table_id, COUNT(*) AS c
+      FROM orders
+      WHERE order_type = 'dine_in'
+        AND table_id IS NOT NULL
+        AND status NOT IN ('closed', 'cancelled')
+      GROUP BY business_id, table_id
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    `).get();
+    if (dup) {
+      console.warn(
+        `⚠️ Aktif masa/sipariş tekilliği için indeks atlandı: table_id=${dup.table_id} açık sipariş sayısı=${dup.c}`,
+      );
+      return;
+    }
+
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_active_dine_in_table_unique
+      ON orders(business_id, table_id)
+      WHERE order_type = 'dine_in'
+        AND table_id IS NOT NULL
+        AND status NOT IN ('closed', 'cancelled')
+    `);
+  } catch (e) {
+    console.error('ensureActiveDineInTableGuard:', e);
   }
 }
 
@@ -689,6 +784,7 @@ function ensureColumnMigrations() {
   }
 
   ensurePrinterRoutingUniqueIndex();
+  ensureActiveDineInTableGuard();
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS call_logs (
@@ -734,6 +830,12 @@ function ensureColumnMigrations() {
     db.prepare('ALTER TABLE order_items ADD COLUMN printer_target_snapshot TEXT').run();
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_order_items_category_snapshot ON order_items(category_id_snapshot)`);
+
+  // Özellik seçimleri snapshot (attributes modülü)
+  const oiColsFinal = db.prepare('PRAGMA table_info(order_items)').all();
+  if (oiColsFinal.length && !oiColsFinal.some((c) => c.name === 'selected_attributes')) {
+    db.prepare("ALTER TABLE order_items ADD COLUMN selected_attributes TEXT DEFAULT '[]'").run();
+  }
 }
 
 /** Mevcut ürünler için varsayılan Tam porsiyonu (ürün başına bir kez). */

@@ -1,7 +1,9 @@
-import { Settings, Store, Users, Printer, Monitor, Phone } from 'lucide-react';
+import { Settings, Store, Users, Printer, Monitor, Phone, CheckCircle2, DatabaseBackup } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const sections = [
+  { icon: CheckCircle2, label: 'Kurulum Kontrolü', desc: 'İlk açılış, cihaz ve operasyon hazırlığı', to: '/settings/readiness' },
+  { icon: DatabaseBackup, label: 'Bakım ve Yedekleme', desc: 'Yedekler, manuel backup ve restore planı', to: '/settings/maintenance' },
   { icon: Store, label: 'İşletme Bilgileri', desc: 'Ad, adres, vergi bilgileri, fiş ayarları', to: '/settings/business' },
   { icon: Users, label: 'Kullanıcı Yönetimi', desc: 'Personel ekleme, rol atama, yetkilendirme', to: '/settings/users' },
   { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller ve kategori yönlendirme', to: '/settings/printers' },

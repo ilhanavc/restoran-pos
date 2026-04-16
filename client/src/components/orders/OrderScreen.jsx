@@ -16,10 +16,32 @@ import {
 } from '../../utils/orderActionPolicy.js';
 import {
   Search, Plus, Minus, Trash2, Save,
-  CreditCard, X, ArrowRightLeft, Phone, User,
+  CreditCard, X, ArrowRightLeft, Phone, User, ChevronLeft,
 } from 'lucide-react';
 import OrderProductDetailModal from './OrderProductDetailModal.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
+
+function toOrderAttributePayload(selectedAttributes = []) {
+  const byGroup = new Map();
+  for (const attr of selectedAttributes || []) {
+    if (!attr?.group_id) continue;
+    const optionIds = Array.isArray(attr.option_ids)
+      ? attr.option_ids
+      : attr.option_id
+        ? [attr.option_id]
+        : [];
+    if (optionIds.length === 0) continue;
+    const bucket = byGroup.get(attr.group_id) || new Set();
+    for (const optionId of optionIds) {
+      if (optionId) bucket.add(optionId);
+    }
+    byGroup.set(attr.group_id, bucket);
+  }
+  return Array.from(byGroup.entries()).map(([group_id, optionIds]) => ({
+    group_id,
+    option_ids: Array.from(optionIds),
+  }));
+}
 
 export default function OrderScreen({
   table,
@@ -178,6 +200,7 @@ export default function OrderScreen({
         portion_label = def.label || '';
         effectiveProduct = { ...fullProduct, price: Number(def.price) };
       }
+      // Eski modifier sistemi (geriye uyumluluk)
       const modGroups = await api.getModifiers(product.id);
       if (Object.keys(modGroups).length > 0) {
         setModifierModal({
@@ -193,19 +216,21 @@ export default function OrderScreen({
     }
   };
 
-  const applyCartLineEdit = (index, { quantity, note, effectiveProduct, portion_id, portion_label }) => {
+  const applyCartLineEdit = (index, { quantity, note, effectiveProduct, portion_id, portion_label, selected_attributes, attrExtraPrice }) => {
     setCartItems((prev) => {
       const ci = prev[index];
       if (!ci) return prev;
       const modDelta = (ci.modifiers || []).reduce((s, m) => s + (m.price_delta || 0), 0);
+      const extraAttr = attrExtraPrice != null ? attrExtraPrice : (ci.selected_attributes || []).reduce((s, a) => s + (a.extra_price || 0), 0);
       const updated = {
         ...ci,
         quantity,
         note,
         portion_id: portion_id ?? null,
         portion_label: portion_label ?? null,
-        unit_price: Number(effectiveProduct.price) + modDelta,
+        unit_price: Number(effectiveProduct.price) + modDelta + extraAttr,
         base_price: Number(effectiveProduct.price),
+        selected_attributes: selected_attributes !== undefined ? selected_attributes : (ci.selected_attributes || []),
       };
       return prev.map((c, i) => (i === index ? updated : c));
     });
@@ -256,13 +281,18 @@ export default function OrderScreen({
     const note = options.note != null ? String(options.note) : '';
     const portion_id = options.portion_id != null ? options.portion_id : null;
     const portion_label = options.portion_label != null ? options.portion_label : null;
+    const selected_attributes = options.selected_attributes || [];
+    const attrExtraPrice = options.attrExtraPrice || 0;
 
     const modDelta = modifiers.reduce((sum, m) => sum + (m.price_delta || 0), 0);
+    // Ürünleri attribute seçimleri farklıysa ayrı satır olarak ekle
+    const attrKey = JSON.stringify(selected_attributes);
     const existing = cartItems.findIndex(
       (ci) =>
         ci.product_id === product.id &&
         (ci.portion_id || null) === (portion_id || null) &&
         JSON.stringify(ci.modifiers || []) === JSON.stringify(modifiers) &&
+        JSON.stringify(ci.selected_attributes || []) === attrKey &&
         (ci.note || '') === (note || ''),
     );
 
@@ -276,10 +306,11 @@ export default function OrderScreen({
         {
           product_id: product.id,
           product_name: product.name,
-          unit_price: product.price + modDelta,
+          unit_price: product.price + modDelta + attrExtraPrice,
           base_price: product.price,
           quantity,
           modifiers,
+          selected_attributes,
           note,
           category_name: product.category_name,
           portion_id,
@@ -349,6 +380,7 @@ export default function OrderScreen({
           modifiers: ci.modifiers,
           note: ci.note,
           ...(ci.portion_id ? { portion_id: ci.portion_id } : {}),
+          ...(ci.selected_attributes?.length ? { selected_attributes: toOrderAttributePayload(ci.selected_attributes) } : {}),
         })));
         setExistingOrder(result);
         setCartItems([]);
@@ -369,6 +401,7 @@ export default function OrderScreen({
           modifiers: ci.modifiers,
           note: ci.note,
           ...(ci.portion_id ? { portion_id: ci.portion_id } : {}),
+          ...(ci.selected_attributes?.length ? { selected_attributes: toOrderAttributePayload(ci.selected_attributes) } : {}),
         })),
       };
       const result = await api.createOrder(orderData);
@@ -668,7 +701,10 @@ export default function OrderScreen({
       {/* Sol: üst bar + arama + yatay kategoriler + ürün ızgarası */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
         <div className="order-screen-topbar">
-          <div className="order-screen-back-zone order-screen-context-zone">
+          <button type="button" className="order-screen-back-zone" onClick={onBack} title="Masalar ekranına dön">
+            <span className="order-screen-back-zone-icon" aria-hidden="true">
+              <ChevronLeft size={20} />
+            </span>
             <span className="order-screen-back-zone-body">
               <span className="order-screen-table-title">
                 {table
@@ -693,7 +729,7 @@ export default function OrderScreen({
                 </span>
               )}
             </span>
-          </div>
+          </button>
 
           {orderType === 'dine_in' && table && (
             <>
@@ -1023,6 +1059,15 @@ export default function OrderScreen({
                           {mods.map((m) => m.name).join(', ')}
                         </div>
                       )}
+                      {(() => {
+                        let attrs = [];
+                        try { attrs = JSON.parse(item.selected_attributes || '[]'); } catch {}
+                        return attrs.length > 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                            {attrs.map((a) => a.option_name).join(', ')}
+                          </div>
+                        ) : null;
+                      })()}
                       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
                         {item.is_comped ? (
                           <span style={{ color: 'var(--danger)' }}>İKRAM</span>
@@ -1117,6 +1162,11 @@ export default function OrderScreen({
                       {mods.length > 0 && (
                         <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                           {mods.map(m => m.name).join(', ')}
+                        </div>
+                      )}
+                      {(item.selected_attributes || []).length > 0 && (
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                          {item.selected_attributes.map((a) => a.option_name).join(', ')}
                         </div>
                       )}
                       {item.note && <div style={{ fontSize: 12, color: 'var(--warning)' }}>📝 {item.note}</div>}
@@ -1263,6 +1313,7 @@ export default function OrderScreen({
               note: item.note,
               portion_id: item.portion_id,
               portion_label: item.portion_label,
+              selected_attributes: item.selected_attributes || [],
             }}
             modifiersDisplay={item.modifiers?.length ? item.modifiers : null}
             onClose={() => setLineDetailModal(null)}
@@ -1292,8 +1343,10 @@ export default function OrderScreen({
               note: item.note || '',
               portion_id: item.portion_id,
               portion_label: item.portion_label,
+              selected_attributes: (() => { try { return JSON.parse(item.selected_attributes || '[]'); } catch { return []; } })(),
             }}
             modifiersDisplay={mods.length ? mods : null}
+            readOnlyAttributes
             readOnlyQuantity={closed || comped || !isNew}
             readOnlyPortion={closed || comped || !isNew}
             readOnlyNote={closed || comped}

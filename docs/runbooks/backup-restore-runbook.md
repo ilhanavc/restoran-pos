@@ -27,7 +27,28 @@ Uygulama başladığında bugünkü yedek yoksa **hemen** alır; aksi halde 02:0
 
 ---
 
-## 2. Mevcut Yedekleri Görme
+## 2. Ürün İçinden Backup ve Restore
+
+Ana bakım yolu artık uygulama içindedir:
+
+```
+Ayarlar → Bakım ve Yedekleme
+```
+
+Bu ekranda:
+
+- mevcut yedekler listelenir,
+- son yedek ve yedek klasörü görünür,
+- **Manuel Yedek Al** ile anlık WAL-güvenli SQLite yedeği oluşturulur,
+- seçilen yedek için **Restore Planla** yapılır,
+- restore planı iptal edilebilir,
+- masaüstü uygulamasında bekleyen restore için yeniden başlatma tetiklenebilir.
+
+Restore işlemi canlı veritabanının altından dosya değiştirmez. Seçilen yedek önce doğrulanır, restore isteği kaydedilir ve uygulama yeniden başlatıldığında Express/SQLite başlamadan önce uygulanır. Restore öncesinde mevcut veritabanı `restore-safety-YYYY-MM-DD-HH-mm-ss.db` adıyla yedeklenir.
+
+---
+
+## 3. Mevcut Yedekleri Dosya Sisteminde Görme
 
 ```
 Win + R → %APPDATA%\restoran-pos\backups
@@ -41,7 +62,15 @@ dir "%APPDATA%\restoran-pos\backups"
 
 ---
 
-## 3. Manuel Yedek Alma (Acil Durum)
+## 4. Manuel Yedek Alma (Acil Durum)
+
+Önerilen yol:
+
+```
+Ayarlar → Bakım ve Yedekleme → Manuel Yedek Al
+```
+
+Uygulama açılamıyorsa veya UI kullanılamıyorsa:
 
 Otomatik backup çalışmadıysa veya hemen yedek almak istiyorsanız:
 
@@ -60,7 +89,17 @@ copy "%APPDATA%\restoran-pos\pos.db" "D:\yedekler\pos-%date:~-4,4%-%date:~-10,2%
 
 ---
 
-## 4. Restore — Veri Kaybı Sonrası Kurtarma
+## 5. Restore — Veri Kaybı Sonrası Kurtarma
+
+Önerilen yol:
+
+1. `Ayarlar → Bakım ve Yedekleme` ekranını açın.
+2. Geri dönmek istediğiniz yedeğin yanında **Restore Planla** seçin.
+3. Uygulamayı yeniden başlatın.
+4. Açılışta yedek doğrulanır ve aktif veritabanına uygulanır.
+5. Masalar, siparişler ve yazıcı ayarlarını kontrol edin.
+
+UI kullanılamıyorsa aşağıdaki elle restore adımlarını uygulayın.
 
 > ⚠️ **Dikkat:** Restore işlemi mevcut veritabanının üzerine yazar. Geri dönüş yoktur. Önce mevcut dosyayı yedekleyin.
 
@@ -94,7 +133,7 @@ Uygulama `pos.db`'yi otomatik olarak kullanmaya başlar.
 
 ---
 
-## 5. Hangi Yedek Dosyasını Seçmeliyim?
+## 6. Hangi Yedek Dosyasını Seçmeliyim?
 
 | Senaryo | Tavsiye |
 |---------|---------|
@@ -104,7 +143,7 @@ Uygulama `pos.db`'yi otomatik olarak kullanmaya başlar.
 
 ---
 
-## 6. Yedekleme Başarısız Olursa
+## 7. Yedekleme Başarısız Olursa
 
 Uygulama log dosyasında hata mesajı görünür:
 
@@ -123,7 +162,7 @@ Yaygın nedenler ve çözümleri:
 
 ---
 
-## 7. Yedeklerin Harici Konuma Kopyalanması (Önerilen)
+## 8. Yedeklerin Harici Konuma Kopyalanması (Önerilen)
 
 Otomatik yedekler yalnızca yerel diske yazılır. Disk arızasına karşı güvence için şu batch dosyasını her gece çalıştırın (Windows Görev Zamanlayıcı):
 
@@ -138,7 +177,7 @@ echo Yedek kopyalama tamamlandı: %DATE% %TIME%
 
 ---
 
-## 8. Restore Sonrası Kontrol Listesi
+## 9. Restore Sonrası Kontrol Listesi
 
 - [ ] Uygulama hatasız açıldı
 - [ ] Admin girişi çalışıyor
@@ -149,7 +188,7 @@ echo Yedek kopyalama tamamlandı: %DATE% %TIME%
 
 ---
 
-## 9. Önemli Dosya Konumları
+## 10. Önemli Dosya Konumları
 
 | Dosya | Konum |
 |-------|-------|
@@ -160,4 +199,4 @@ echo Yedek kopyalama tamamlandı: %DATE% %TIME%
 
 ---
 
-*Son güncelleme: Nisan 2026 — Restoran POS v1.0.9*
+*Son güncelleme: 16 Nisan 2026 — Restoran POS v1.0.9*

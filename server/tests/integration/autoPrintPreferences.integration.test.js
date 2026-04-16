@@ -57,6 +57,15 @@ function countJobs(db, orderId, jobType) {
   return db.prepare(`SELECT COUNT(*) AS c FROM print_jobs WHERE order_id = ? AND job_type = ?`).get(orderId, jobType).c;
 }
 
+function addEmptyTable(db, businessId, areaId, name = 'Masa 2') {
+  const tableId = `table-${name.replace(/\s+/g, '-').toLowerCase()}`;
+  db.prepare(`
+    INSERT INTO tables (id, business_id, dining_area_id, name, capacity, status, is_active, sort_order)
+    VALUES (?, ?, ?, ?, 4, 'empty', 1, 99)
+  `).run(tableId, businessId, areaId, name);
+  return tableId;
+}
+
 beforeAll(async () => {
   helpers = await import('./helpers.js');
   const { default: ordersRoutes } = await import('../../routes/orders.js');
@@ -114,7 +123,7 @@ describe('Auto print preferences policy', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({
-        table_id: seeds.tableId,
+        table_id: addEmptyTable(dbRef.current, seeds.businessId, seeds.areaId, 'Masa 2'),
         order_type: 'dine_in',
         items: [{ product_id: seeds.productId, quantity: 1 }],
       });
@@ -303,6 +312,10 @@ describe('Auto print preferences policy', () => {
         items: [{ product_id: seeds.productId, quantity: 1 }],
       });
     expect(created.status).toBe(201);
+    const labelJob = dbRef.current
+      .prepare(`SELECT printer_id FROM print_jobs WHERE order_id = ? AND job_type = 'takeaway_label'`)
+      .get(created.body.id);
+    expect(labelJob?.printer_id).toBe('kitchen-printer-3');
 
     const out = await request(app)
       .patch(`/api/orders/${created.body.id}/takeaway/delivery`)

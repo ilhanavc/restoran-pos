@@ -132,7 +132,6 @@ describe('POST /api/orders', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({
-        table_id: seeds.tableId,
         order_type: 'dine_in',
         call_log_id: incomingRes.body.callLogId,
         items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
@@ -166,7 +165,6 @@ describe('GET /api/orders/:id', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({
-        table_id: seeds.tableId,
         order_type: 'dine_in',
         items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
       });
@@ -277,7 +275,6 @@ describe('Sipariş ve kalem notu validasyonu (P2)', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({
-        table_id: seeds.tableId,
         order_type: 'dine_in',
         note: 'Fıstık alerjisi var',
         items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
@@ -300,7 +297,6 @@ describe('Sipariş ve kalem notu validasyonu (P2)', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({
-        table_id: seeds.tableId,
         order_type: 'dine_in',
         items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
       });
@@ -357,7 +353,6 @@ describe('GET /api/orders/active — mutfak ekranı (P2)', () => {
       .post('/api/orders')
       .set('Authorization', authHeader)
       .send({
-        table_id: seeds.tableId,
         order_type: 'dine_in',
         items: [{ product_id: seeds.productId, quantity: 1, modifiers: [] }],
       });
@@ -479,5 +474,36 @@ describe('POST /api/orders — takeaway + table_id çakışma guard (G-2)', () =
       });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/table_id/);
+  });
+});
+
+describe('Print health operasyon endpointleri', () => {
+  it('başarısız yazdırma işlerini özetler ve tekrar kuyruğa alır', async () => {
+    const jobId = 'ops-print-failed-1';
+    dbRef.current.prepare(`
+      INSERT INTO print_jobs (
+        id, business_id, order_id, printer_id, job_type, payload, status,
+        error_message, last_error_code, idempotency_key, created_at
+      ) VALUES (?, ?, NULL, NULL, 'kitchen', '{}', 'failed', 'USB yazıcı hatası', 'usb_print_failed', ?, datetime('now', '+1 hour'))
+    `).run(jobId, seeds.businessId, `idem-${jobId}`);
+
+    const health = await request(app)
+      .get('/api/orders/print-health')
+      .set('Authorization', authHeader);
+
+    expect(health.status).toBe(200);
+    expect(health.body.summary.failed).toBeGreaterThan(0);
+    expect(health.body.recentFailed.some((job) => job.id === jobId)).toBe(true);
+
+    const retry = await request(app)
+      .post(`/api/orders/print-jobs/${jobId}/retry`)
+      .set('Authorization', authHeader)
+      .send({});
+
+    expect(retry.status).toBe(200);
+    const row = dbRef.current.prepare('SELECT status, error_message, last_error_code FROM print_jobs WHERE id = ?').get(jobId);
+    expect(row.status).toBe('pending');
+    expect(row.error_message).toBeNull();
+    expect(row.last_error_code).toBeNull();
   });
 });

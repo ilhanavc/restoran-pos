@@ -86,6 +86,8 @@ class ApiService extends ApiHttpClient {
     const body = options?.printer_id ? { printer_id: options.printer_id } : {};
     return this.post(`/orders/${orderId}/print-receipt`, body);
   }
+  getPrintHealth() { return this.get('/orders/print-health'); }
+  retryPrintJob(jobId) { return this.post(`/orders/print-jobs/${encodeURIComponent(jobId)}/retry`, {}); }
 
   // Payments
   createPayment(data) { return this.post('/payments', data); }
@@ -158,6 +160,12 @@ class ApiService extends ApiHttpClient {
   // Admin / Ayarlar (admin rolü gerekir)
   getAdminBusiness() { return this.get('/admin/business'); }
   patchAdminBusiness(body) { return this.patch('/admin/business', body); }
+  getDesktopReadiness() { return this.get('/admin/desktop-readiness'); }
+  completeDesktopReadiness() { return this.post('/admin/desktop-readiness/complete', {}); }
+  getMaintenanceStatus() { return this.get('/admin/maintenance'); }
+  createManualBackup() { return this.post('/admin/maintenance/backups', {}); }
+  requestRestore(backupId) { return this.post('/admin/maintenance/restore-request', { backup_id: backupId }); }
+  cancelRestoreRequest() { return this.delete('/admin/maintenance/restore-request'); }
   getDisplaySettings() { return this.get('/admin/display-settings'); }
   patchDisplaySettings(body) { return this.patch('/admin/display-settings', body); }
   getPrinterSettings() { return this.get('/admin/printer-settings'); }
@@ -205,6 +213,35 @@ class ApiService extends ApiHttpClient {
   deleteAdminDiningArea(id) { return this.delete(`/admin/dining-areas/${id}`); }
   syncDiningAreaTables(areaId, targetTableCount) {
     return this.post(`/admin/dining-areas/${areaId}/sync-tables`, { target_table_count: targetTableCount });
+  }
+
+  // Özellik Grupları (Attributes)
+  getAttributeGroups() { return this.get('/attributes/groups'); }
+  createAttributeGroup(body) { return this.post('/attributes/groups', body); }
+  updateAttributeGroup(id, body) { return this.patch(`/attributes/groups/${id}`, body); }
+  deleteAttributeGroup(id) { return this.delete(`/attributes/groups/${id}`); }
+
+  getAttributeOptions(groupId) { return this.get(`/attributes/groups/${groupId}/options`); }
+  createAttributeOption(groupId, body) { return this.post(`/attributes/groups/${groupId}/options`, body); }
+  updateAttributeOption(optionId, body) { return this.patch(`/attributes/options/${optionId}`, body); }
+  deleteAttributeOption(optionId) { return this.delete(`/attributes/options/${optionId}`); }
+
+  getEffectiveAttributes(productId) { return this.get(`/attributes/effective/${productId}`); }
+
+  getCategoryAttributeGroups(categoryId) { return this.get(`/attributes/category/${categoryId}`); }
+  assignAttributeToCategory(categoryId, groupId) {
+    return this.post(`/attributes/category/${categoryId}/assign`, { group_id: groupId });
+  }
+  removeAttributeFromCategory(categoryId, groupId) {
+    return this.delete(`/attributes/category/${categoryId}/${groupId}`);
+  }
+
+  getProductAttributeGroups(productId) { return this.get(`/attributes/product/${productId}`); }
+  assignAttributeToProduct(productId, groupId) {
+    return this.post(`/attributes/product/${productId}/assign`, { group_id: groupId });
+  }
+  removeAttributeFromProduct(productId, groupId) {
+    return this.delete(`/attributes/product/${productId}/${groupId}`);
   }
 }
 

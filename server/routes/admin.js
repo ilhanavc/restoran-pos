@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import bcryptjs from 'bcryptjs';
 import { z } from 'zod';
+import fs from 'fs';
+import path from 'path';
+import Database from 'better-sqlite3';
 import { getPrinterPreviewPlainLines } from '../../store-bridge/printers/renderers.js';
 import db from '../config/database.js';
 import config from '../config/index.js';
@@ -11,6 +14,8 @@ import { ORDER_STATUSES_CLOSED } from '../constants/orderStatus.js';
 const router = Router();
 router.use(authenticate, businessScope, authorize('admin'));
 const DISCOVERY_CACHE_KEY = 'bridge.discovered_printers';
+const RESTORE_REQUEST_FILE = 'restore-request.json';
+const BACKUP_FILE_RE = /^(pos|pos-manual|restore-safety)-[A-Za-z0-9._-]+\.db$/;
 
 function resolveDiscoveryState(payload, printers) {
   const known = new Set(['never_scanned', 'scanning', 'success', 'empty', 'bridge_unreachable', 'auth_error']);
@@ -392,6 +397,453 @@ function getUserRoleSlug(userId) {
   const r = db.prepare(`SELECT r.slug FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`).get(userId);
   return r?.slug || null;
 }
+
+function latestBackupInfo() {
+  const userDataPath = process.env.USER_DATA_PATH || '';
+  if (!userDataPath) {
+    return {
+      configured: false,
+      latest: null,
+      message: 'Electron kullanıcı veri klasörü bulunamadı',
+    };
+  }
+
+  const backupsDir = path.join(userDataPath, 'backups');
+  if (!fs.existsSync(backupsDir)) {
+    return {
+      configured: true,
+      latest: null,
+      message: 'Henüz yedek alınmamış',
+      backupsDir,
+    };
+  }
+
+  const files = fs
+    .readdirSync(backupsDir)
+    .filter((name) => /^pos-\d{4}-\d{2}-\d{2}\.db$/.test(name))
+    .map((name) => {
+      const fullPath = path.join(backupsDir, name);
+      const stat = fs.statSync(fullPath);
+      return {
+        name,
+        path: fullPath,
+        size: stat.size,
+        modified_at: stat.mtime.toISOString(),
+      };
+    })
+    .sort((a, b) => String(b.modified_at).localeCompare(String(a.modified_at)));
+
+  return {
+    configured: true,
+    latest: files[0] || null,
+    message: files[0] ? 'Yedek klasörü hazır' : 'Henüz yedek alınmamış',
+    backupsDir,
+  };
+}
+
+function getUserDataPath() {
+  return process.env.USER_DATA_PATH || '';
+}
+
+function getBackupsDir() {
+  const userDataPath = getUserDataPath();
+  return userDataPath ? path.join(userDataPath, 'backups') : '';
+}
+
+function getRestoreRequestPath() {
+  const userDataPath = getUserDataPath();
+  return userDataPath ? path.join(userDataPath, RESTORE_REQUEST_FILE) : '';
+}
+
+function ensureBackupsDir() {
+  const backupsDir = getBackupsDir();
+  if (!backupsDir) {
+    const err = new Error('Electron kullanıcı veri klasörü bulunamadı');
+    err.status = 503;
+    throw err;
+  }
+  fs.mkdirSync(backupsDir, { recursive: true });
+  return backupsDir;
+}
+
+function safeBackupFileName(value) {
+  const fileName = path.basename(String(value || '').trim());
+  if (!BACKUP_FILE_RE.test(fileName)) return null;
+  return fileName;
+}
+
+function verifySqliteFile(filePath) {
+  const backupDb = new Database(filePath, { readonly: true, fileMustExist: true });
+  try {
+    const result = backupDb.pragma('integrity_check', { simple: true });
+    if (result !== 'ok') {
+      const err = new Error(`Yedek doğrulaması başarısız: ${result}`);
+      err.status = 422;
+      throw err;
+    }
+  } finally {
+    backupDb.close();
+  }
+}
+
+function listBackupFiles() {
+  const backupsDir = getBackupsDir();
+  if (!backupsDir || !fs.existsSync(backupsDir)) return [];
+  return fs
+    .readdirSync(backupsDir)
+    .filter((name) => BACKUP_FILE_RE.test(name))
+    .map((name) => {
+      const fullPath = path.join(backupsDir, name);
+      const stat = fs.statSync(fullPath);
+      return {
+        id: name,
+        name,
+        size: stat.size,
+        modified_at: stat.mtime.toISOString(),
+        kind: name.startsWith('pos-manual-') ? 'manual' : name.startsWith('restore-safety-') ? 'safety' : 'auto',
+      };
+    })
+    .sort((a, b) => String(b.modified_at).localeCompare(String(a.modified_at)));
+}
+
+function readRestoreRequest() {
+  const restorePath = getRestoreRequestPath();
+  if (!restorePath || !fs.existsSync(restorePath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(restorePath, 'utf8'));
+    if (!parsed?.backupFile) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function createManualBackup() {
+  const backupsDir = ensureBackupsDir();
+  if (!config.db?.path || !fs.existsSync(config.db.path)) {
+    const err = new Error('Aktif veritabanı dosyası bulunamadı');
+    err.status = 503;
+    throw err;
+  }
+
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const fileName = `pos-manual-${stamp}.db`;
+  const backupPath = path.join(backupsDir, fileName);
+  const tempPath = `${backupPath}.tmp-${process.pid}`;
+  const liveDb = new Database(config.db.path, { readonly: true, fileMustExist: true });
+  try {
+    await liveDb.backup(tempPath);
+    verifySqliteFile(tempPath);
+    fs.renameSync(tempPath, backupPath);
+  } finally {
+    liveDb.close();
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* ignore cleanup failure */
+      }
+    }
+  }
+  return listBackupFiles().find((b) => b.id === fileName) || { id: fileName, name: fileName };
+}
+
+function writeRestoreRequest({ businessId, userId, backupId }) {
+  const fileName = safeBackupFileName(backupId);
+  if (!fileName) {
+    const err = new Error('Geçersiz yedek dosyası');
+    err.status = 400;
+    throw err;
+  }
+
+  const backupsDir = ensureBackupsDir();
+  const backupPath = path.join(backupsDir, fileName);
+  if (!fs.existsSync(backupPath)) {
+    const err = new Error('Yedek dosyası bulunamadı');
+    err.status = 404;
+    throw err;
+  }
+
+  verifySqliteFile(backupPath);
+
+  const restorePath = getRestoreRequestPath();
+  const request = {
+    backupFile: fileName,
+    requestedAt: new Date().toISOString(),
+    requestedBy: userId,
+    businessId,
+  };
+  fs.writeFileSync(restorePath, JSON.stringify(request, null, 2), 'utf8');
+  return request;
+}
+
+function readinessStatus({ ok, warning = false }) {
+  if (ok) return 'ok';
+  return warning ? 'warning' : 'blocker';
+}
+
+function buildDesktopReadiness(businessId) {
+  const business = db
+    .prepare(
+      `SELECT id, name, address, tax_id, phone, receipt_header, receipt_footer
+       FROM businesses WHERE id = ?`,
+    )
+    .get(businessId);
+  const settings = getJsonSetting(businessId, 'app.setup', {});
+  const printerConfig = getJsonSetting(businessId, 'printer.config', {});
+
+  const counts = {
+    activeAdmins:
+      db
+        .prepare(
+          `SELECT COUNT(*) AS c
+           FROM users u
+           JOIN roles r ON r.id = u.role_id
+           WHERE u.business_id = ? AND u.is_active = 1 AND r.slug = 'admin'`,
+        )
+        .get(businessId).c || 0,
+    activeUsers:
+      db.prepare(`SELECT COUNT(*) AS c FROM users WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    activeAreas:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM dining_areas WHERE business_id = ? AND is_active = 1`)
+        .get(businessId).c || 0,
+    activeTables:
+      db.prepare(`SELECT COUNT(*) AS c FROM tables WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    activeCategories:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM categories WHERE business_id = ? AND is_active = 1`)
+        .get(businessId).c || 0,
+    activeProducts:
+      db.prepare(`SELECT COUNT(*) AS c FROM products WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    activePrinters:
+      db.prepare(`SELECT COUNT(*) AS c FROM printers WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    receiptPrinters:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM printers WHERE business_id = ? AND is_active = 1 AND type = 'receipt'`)
+        .get(businessId).c || 0,
+    kitchenPrinters:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM printers WHERE business_id = ? AND is_active = 1 AND type = 'kitchen'`)
+        .get(businessId).c || 0,
+  };
+
+  const configuredReceiptPrinter =
+    printerConfig.defaultPrinterId || printerConfig.usagePaymentId || null;
+  const configuredKitchenPrinter =
+    printerConfig.takeawayLabelPrinterId || printerConfig.usageKitchenId || null;
+  const configuredReceiptOk =
+    !!configuredReceiptPrinter &&
+    !!db
+      .prepare(`SELECT 1 FROM printers WHERE id = ? AND business_id = ? AND is_active = 1 AND type = 'receipt'`)
+      .get(configuredReceiptPrinter, businessId);
+  const configuredKitchenOk =
+    !!configuredKitchenPrinter &&
+    !!db
+      .prepare(`SELECT 1 FROM printers WHERE id = ? AND business_id = ? AND is_active = 1 AND type = 'kitchen'`)
+      .get(configuredKitchenPrinter, businessId);
+
+  const backup = latestBackupInfo();
+  const bridgeCache = getJsonSetting(businessId, DISCOVERY_CACHE_KEY, null);
+  const bridgeReady =
+    bridgeCache?.scanState === 'success' ||
+    (Array.isArray(bridgeCache?.printers) && bridgeCache.printers.length > 0);
+
+  const checks = [
+    {
+      key: 'business',
+      title: 'İşletme bilgileri',
+      status: readinessStatus({ ok: !!business?.name && !!business?.tax_id }),
+      message:
+        business?.name && business?.tax_id
+          ? 'İşletme adı ve vergi bilgisi hazır'
+          : 'İşletme adı ve vergi numarası tamamlanmalı',
+      action: '/settings/business',
+    },
+    {
+      key: 'users',
+      title: 'Yönetici kullanıcı',
+      status: readinessStatus({ ok: counts.activeAdmins >= 1 }),
+      message:
+        counts.activeAdmins >= 1
+          ? `${counts.activeAdmins} aktif yönetici var`
+          : 'En az bir aktif yönetici kullanıcısı gerekli',
+      action: '/settings/users',
+    },
+    {
+      key: 'tables',
+      title: 'Salon ve masa düzeni',
+      status: readinessStatus({ ok: counts.activeAreas >= 1 && counts.activeTables >= 1 }),
+      message:
+        counts.activeAreas >= 1 && counts.activeTables >= 1
+          ? `${counts.activeAreas} bölge, ${counts.activeTables} aktif masa hazır`
+          : 'En az bir bölge ve bir aktif masa gerekli',
+      action: '/settings/dining-areas',
+    },
+    {
+      key: 'menu',
+      title: 'Menü ve ürünler',
+      status: readinessStatus({ ok: counts.activeCategories >= 1 && counts.activeProducts >= 1 }),
+      message:
+        counts.activeCategories >= 1 && counts.activeProducts >= 1
+          ? `${counts.activeCategories} kategori, ${counts.activeProducts} aktif ürün hazır`
+          : 'Sipariş alabilmek için en az bir kategori ve ürün gerekli',
+      action: '/settings/menu',
+    },
+    {
+      key: 'receipt_printer',
+      title: 'Kasa fişi yazıcısı',
+      status: readinessStatus({ ok: counts.receiptPrinters >= 1 && configuredReceiptOk }),
+      message:
+        counts.receiptPrinters >= 1 && configuredReceiptOk
+          ? 'Aktif kasa fişi yazıcısı seçilmiş'
+          : 'Aktif bir kasa fişi yazıcısı seçilmeli',
+      action: '/settings/printers',
+    },
+    {
+      key: 'kitchen_printer',
+      title: 'Mutfak yazıcısı',
+      status: readinessStatus({ ok: counts.kitchenPrinters >= 1 && configuredKitchenOk }),
+      message:
+        counts.kitchenPrinters >= 1 && configuredKitchenOk
+          ? 'Aktif mutfak yazıcısı seçilmiş'
+          : 'Mutfak akışı için aktif bir mutfak yazıcısı seçilmeli',
+      action: '/settings/printers',
+    },
+    {
+      key: 'backup',
+      title: 'Yerel yedekleme',
+      status: readinessStatus({ ok: backup.configured && !!backup.latest, warning: true }),
+      message: backup.latest
+        ? `Son yedek: ${backup.latest.name}`
+        : backup.message || 'Yedek durumu doğrulanamadı',
+      action: null,
+    },
+    {
+      key: 'storebridge',
+      title: 'StoreBridge yazıcı servisi',
+      status: readinessStatus({ ok: bridgeReady, warning: true }),
+      message: bridgeReady
+        ? 'Yazıcı tarama verisi alındı'
+        : discoveryMessageForState(bridgeCache?.scanState) || 'StoreBridge taraması henüz doğrulanmadı',
+      action: '/settings/printers',
+    },
+  ];
+
+  const blockerCount = checks.filter((c) => c.status === 'blocker').length;
+  const warningCount = checks.filter((c) => c.status === 'warning').length;
+
+  return {
+    completed: !!settings.completedAt,
+    completed_at: settings.completedAt || null,
+    completed_by: settings.completedBy || null,
+    ready: blockerCount === 0,
+    blockerCount,
+    warningCount,
+    checks,
+    counts,
+    backup,
+  };
+}
+
+router.get('/desktop-readiness', (req, res) => {
+  try {
+    res.json(buildDesktopReadiness(req.businessId));
+  } catch (err) {
+    console.error('[admin:desktop-readiness:get]', err);
+    res.status(500).json({ error: 'Kurulum durumu alınamadı' });
+  }
+});
+
+router.post('/desktop-readiness/complete', (req, res) => {
+  try {
+    const readiness = buildDesktopReadiness(req.businessId);
+    if (!readiness.ready) {
+      return res.status(409).json({
+        error: 'Kurulum tamamlanmadan önce bloklayıcı eksikler giderilmeli',
+        readiness,
+      });
+    }
+
+    const setup = {
+      completedAt: new Date().toISOString(),
+      completedBy: req.user.id,
+    };
+    upsertSetting(req.businessId, 'app.setup', setup);
+    auditLog(req.businessId, req.user.id, 'desktop_setup_complete', 'settings', 'app.setup', {
+      warningCount: readiness.warningCount,
+    });
+    res.json({ ...buildDesktopReadiness(req.businessId), message: 'Kurulum kontrolü tamamlandı' });
+  } catch (err) {
+    console.error('[admin:desktop-readiness:complete]', err);
+    res.status(500).json({ error: 'Kurulum tamamlanamadı' });
+  }
+});
+
+router.get('/maintenance', (req, res) => {
+  try {
+    const backups = listBackupFiles();
+    const latest = backups[0] || null;
+    res.json({
+      dbPath: config.db?.path || null,
+      userDataPath: getUserDataPath() || null,
+      backupsDir: getBackupsDir() || null,
+      backups,
+      latest,
+      pendingRestore: readRestoreRequest(),
+    });
+  } catch (err) {
+    console.error('[admin:maintenance:get]', err);
+    res.status(500).json({ error: 'Bakım durumu alınamadı' });
+  }
+});
+
+router.post('/maintenance/backups', async (req, res) => {
+  try {
+    const backup = await createManualBackup();
+    auditLog(req.businessId, req.user.id, 'manual_backup_created', 'backup', backup.id);
+    res.status(201).json({
+      backup,
+      backups: listBackupFiles(),
+      message: 'Manuel yedek alındı',
+    });
+  } catch (err) {
+    console.error('[admin:maintenance:backup]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Yedek alınamadı' });
+  }
+});
+
+router.post('/maintenance/restore-request', (req, res) => {
+  try {
+    const request = writeRestoreRequest({
+      businessId: req.businessId,
+      userId: req.user.id,
+      backupId: req.body?.backup_id,
+    });
+    auditLog(req.businessId, req.user.id, 'restore_requested', 'backup', request.backupFile);
+    res.json({
+      pendingRestore: request,
+      message: 'Restore isteği kaydedildi. Uygulamayı yeniden başlatınca seçilen yedek uygulanacak.',
+    });
+  } catch (err) {
+    console.error('[admin:maintenance:restore-request]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Restore isteği kaydedilemedi' });
+  }
+});
+
+router.delete('/maintenance/restore-request', (req, res) => {
+  try {
+    const restorePath = getRestoreRequestPath();
+    if (restorePath && fs.existsSync(restorePath)) {
+      fs.unlinkSync(restorePath);
+      auditLog(req.businessId, req.user.id, 'restore_request_cancelled', 'backup', 'restore-request');
+    }
+    res.json({ pendingRestore: null, message: 'Bekleyen restore isteği iptal edildi' });
+  } catch (err) {
+    console.error('[admin:maintenance:restore-cancel]', err);
+    res.status(500).json({ error: 'Restore isteği iptal edilemedi' });
+  }
+});
 
 // ── Business ──
 router.get('/business', (req, res) => {

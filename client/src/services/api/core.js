@@ -62,6 +62,7 @@ export class ApiHttpClient {
       if (data.businesses) err.businesses = data.businesses;
       if (Array.isArray(data.blockers)) err.blockers = data.blockers;
       if (data.usage) err.usage = data.usage;
+      if (data.readiness) err.readiness = data.readiness;
       throw err;
     }
     return data;

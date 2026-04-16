@@ -2,7 +2,12 @@ import crypto from 'crypto';
 import db from '../config/database.js';
 import config from '../config/index.js';
 import { genId, auditLog } from '../utils/helpers.js';
-import { resolvePrinterForKitchenLine, resolveReceiptPrinter, stationFromPrinter } from './printRouting.js';
+import {
+  resolvePrinterForKitchenLine,
+  resolveReceiptPrinter,
+  resolveTakeawayLabelPrinter,
+  stationFromPrinter,
+} from './printRouting.js';
 import { isAutoPrintEnabledForPrinter } from './printerAutoPrintPolicy.js';
 
 /** Mutfağa görünür satırlar: iptal/azaltma fişi yalnız bunlar için basılır (varsayılan). */
@@ -559,7 +564,7 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
     .all(orderId);
 
   const biz = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
-  let resolved = resolveReceiptPrinter(businessId);
+  let resolved = resolveTakeawayLabelPrinter(businessId);
   if (forcedPrinterId) {
     const forced = db
       .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ? AND is_active = 1`)
@@ -603,7 +608,7 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
       jobType: 'takeaway_label',
       payload,
       status: 'failed',
-      errorMessage: 'Paket etiketi yazıcısı bulunamadı (varsayılan veya type=receipt)',
+      errorMessage: 'Paket etiketi için aktif mutfak yazıcısı bulunamadı',
       idempotencyKey,
     });
     if (userId) auditLog(businessId, userId, 'print_job_failed', 'order', orderId, { kind: 'takeaway_label' });

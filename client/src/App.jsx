@@ -18,6 +18,8 @@ const CustomersScreen = lazy(() => import('./components/customers/CustomersScree
 const ReportsScreen = lazy(() => import('./components/reports/ReportsScreen.jsx'));
 const SettingsLayout = lazy(() => import('./components/settings/SettingsLayout.jsx'));
 const SettingsHome = lazy(() => import('./components/settings/SettingsHome.jsx'));
+const SetupReadinessPage = lazy(() => import('./components/settings/SetupReadinessPage.jsx'));
+const MaintenancePage = lazy(() => import('./components/settings/MaintenancePage.jsx'));
 const BusinessSettingsPage = lazy(() => import('./components/settings/BusinessSettingsPage.jsx'));
 const UsersSettingsPage = lazy(() => import('./components/settings/UsersSettingsPage.jsx'));
 const PrinterSettingsRoutes = lazy(() => import('./components/settings/PrinterSettingsRoutes.jsx'));
@@ -28,20 +30,21 @@ const DisplaySettingsPage = lazy(() => import('./components/settings/DisplaySett
 const MenuSettingsPage = lazy(() => import('./components/settings/MenuSettingsPage.jsx'));
 const MenuProductEditorPage = lazy(() => import('./components/settings/MenuProductEditorPage.jsx'));
 const DiningAreasSettingsPage = lazy(() => import('./components/settings/DiningAreasSettingsPage.jsx'));
-const FeatureDefinitionsPage = lazy(() => import('./components/settings/FeatureDefinitionsPage.jsx'));
+const AttributeGroupsPage = lazy(() => import('./components/settings/AttributeGroupsPage.jsx'));
 const CallerIdScreen = lazy(() => import('./components/callerid/CallerIdScreen.jsx'));
 const ReservationsScreen = lazy(() => import('./components/reservations/ReservationsScreen.jsx'));
 const StockScreen = lazy(() => import('./components/stock/StockScreen.jsx'));
 
 function getShellTitle(pathname) {
   if (pathname === '/home') return 'Anasayfa';
-  if (pathname === '/tables') return 'Masalar';
   if (pathname === '/kitchen') return 'Mutfak Ekranı';
   if (pathname === '/customers') return 'Müşteriler';
   if (pathname === '/reservations') return 'Rezervasyonlar';
   if (pathname === '/stock') return 'Stok Takibi';
   if (pathname === '/reports') return 'Raporlar';
   if (pathname === '/settings') return 'Ayarlar';
+  if (pathname === '/settings/readiness') return 'Kurulum Kontrolü';
+  if (pathname === '/settings/maintenance') return 'Bakım ve Yedekleme';
   if (pathname === '/settings/business') return 'İşletme Bilgileri';
   if (pathname === '/settings/users') return 'Kullanıcı Yönetimi';
   if (pathname === '/settings/printers') return 'Yazıcılar';
@@ -96,6 +99,23 @@ export default function App() {
     }
     api.me().then((d) => d.display && applyDisplaySettings(d.display)).catch(() => {});
   }, [user]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'admin') return;
+    if (location.pathname.startsWith('/settings')) return;
+    let cancelled = false;
+    api.getDesktopReadiness()
+      .then((readiness) => {
+        if (cancelled) return;
+        if (!readiness.completed || !readiness.ready) {
+          navigate('/settings/readiness', { replace: true });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname, navigate, user]);
 
   const handleOpenOrder = useCallback((table) => {
     navigate(`/order/table/${table.id}`, { state: { table, existingOrderId: table.current_order_id, orderType: 'dine_in' } });
@@ -237,6 +257,8 @@ export default function App() {
           <Route path="/reports" element={<ProtectedRoute requiredRoles={['admin', 'cashier']}><ReportsScreen /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute requiredRoles={['admin']}><SettingsLayout /></ProtectedRoute>}>
             <Route index element={<SettingsHome />} />
+            <Route path="readiness" element={<SetupReadinessPage />} />
+            <Route path="maintenance" element={<MaintenancePage />} />
             <Route path="business" element={<BusinessSettingsPage />} />
             <Route path="users" element={<UsersSettingsPage />} />
             <Route path="printers" element={<PrinterSettingsRoutes />}>
@@ -249,7 +271,7 @@ export default function App() {
             <Route path="menu/product/:productId" element={<MenuProductEditorPage />} />
             <Route path="menu" element={<MenuSettingsPage />} />
             <Route path="dining-areas" element={<DiningAreasSettingsPage />} />
-            <Route path="features" element={<FeatureDefinitionsPage />} />
+            <Route path="features" element={<AttributeGroupsPage />} />
             <Route path="caller-id" element={<CallerIdScreen />} />
           </Route>
           
