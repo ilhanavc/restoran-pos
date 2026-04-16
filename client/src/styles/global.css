@@ -334,6 +334,22 @@ body {
   pointer-events: none;
 }
 
+.app-content--with-shell-title .page-title,
+.app-content--with-shell-title .page-toolbar-title {
+  display: none;
+}
+
+.app-content--with-shell-title .page-title-line,
+.app-content--with-shell-title .tables-header-main,
+.app-content--with-shell-title .page-toolbar .page-header-main {
+  padding-left: 0;
+}
+
+.app-content--with-shell-title .page-header:has(.page-title):not(:has(.page-header-actions)),
+.app-content--with-shell-title .page-header:has(.page-toolbar-title):not(:has(.page-header-actions)) {
+  display: none;
+}
+
 .sidebar-top {
   display: flex;
   flex-direction: row;
@@ -1952,6 +1968,14 @@ body {
 
 .order-screen-back-zone:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+.order-screen-context-zone {
+  cursor: default;
+}
+
+.order-screen-context-zone:hover {
+  background: transparent;
 }
 
 .order-screen-back-zone:focus-visible {

@@ -15,7 +15,7 @@ import {
   isOrderClosedOrCancelled,
 } from '../../utils/orderActionPolicy.js';
 import {
-  ArrowLeft, Search, Plus, Minus, Trash2, Save,
+  Search, Plus, Minus, Trash2, Save,
   CreditCard, X, ArrowRightLeft, Phone, User,
 } from 'lucide-react';
 import OrderProductDetailModal from './OrderProductDetailModal.jsx';
@@ -657,7 +657,6 @@ export default function OrderScreen({
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" onClick={() => navigate('/settings/menu')}>Menü ayarları</button>
-            <button type="button" className="btn btn-ghost" onClick={onBack}>← Masalara dön</button>
           </div>
         </div>
       </div>
@@ -669,15 +668,7 @@ export default function OrderScreen({
       {/* Sol: üst bar + arama + yatay kategoriler + ürün ızgarası */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
         <div className="order-screen-topbar">
-          <button
-            type="button"
-            className="order-screen-back-zone"
-            onClick={onBack}
-            aria-label="Geri"
-          >
-            <span className="order-screen-back-zone-icon" aria-hidden>
-              <ArrowLeft size={22} strokeWidth={2.25} />
-            </span>
+          <div className="order-screen-back-zone order-screen-context-zone">
             <span className="order-screen-back-zone-body">
               <span className="order-screen-table-title">
                 {table
@@ -702,7 +693,7 @@ export default function OrderScreen({
                 </span>
               )}
             </span>
-          </button>
+          </div>
 
           {orderType === 'dine_in' && table && (
             <>

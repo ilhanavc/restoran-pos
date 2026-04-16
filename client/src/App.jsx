@@ -28,9 +28,35 @@ const DisplaySettingsPage = lazy(() => import('./components/settings/DisplaySett
 const MenuSettingsPage = lazy(() => import('./components/settings/MenuSettingsPage.jsx'));
 const MenuProductEditorPage = lazy(() => import('./components/settings/MenuProductEditorPage.jsx'));
 const DiningAreasSettingsPage = lazy(() => import('./components/settings/DiningAreasSettingsPage.jsx'));
+const FeatureDefinitionsPage = lazy(() => import('./components/settings/FeatureDefinitionsPage.jsx'));
 const CallerIdScreen = lazy(() => import('./components/callerid/CallerIdScreen.jsx'));
 const ReservationsScreen = lazy(() => import('./components/reservations/ReservationsScreen.jsx'));
 const StockScreen = lazy(() => import('./components/stock/StockScreen.jsx'));
+
+function getShellTitle(pathname) {
+  if (pathname === '/home') return 'Anasayfa';
+  if (pathname === '/tables') return 'Masalar';
+  if (pathname === '/kitchen') return 'Mutfak Ekranı';
+  if (pathname === '/customers') return 'Müşteriler';
+  if (pathname === '/reservations') return 'Rezervasyonlar';
+  if (pathname === '/stock') return 'Stok Takibi';
+  if (pathname === '/reports') return 'Raporlar';
+  if (pathname === '/settings') return 'Ayarlar';
+  if (pathname === '/settings/business') return 'İşletme Bilgileri';
+  if (pathname === '/settings/users') return 'Kullanıcı Yönetimi';
+  if (pathname === '/settings/printers') return 'Yazıcılar';
+  if (pathname === '/settings/printers/routing') return 'Yazıcı Yönlendirme';
+  if (pathname === '/settings/printers/new') return 'Yeni Yazıcı';
+  if (pathname.startsWith('/settings/printers/')) return 'Yazıcı Detayı';
+  if (pathname === '/settings/display') return 'Ekran Ayarları';
+  if (pathname === '/settings/menu') return 'Menü tanımları';
+  if (pathname === '/settings/menu/product/new') return 'Yeni ürün';
+  if (pathname.startsWith('/settings/menu/product/')) return 'Ürün detayı';
+  if (pathname === '/settings/dining-areas') return 'Salon Bölgeleri';
+  if (pathname === '/settings/features') return 'Özellikler';
+  if (pathname === '/settings/caller-id') return 'Gelen Aramalar';
+  return null;
+}
 
 function ProtectedRoute({ children, requiredRoles }) {
   const { user, loading, hasRole } = useAuth();
@@ -54,7 +80,7 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
   const isOrderScreen = location.pathname.startsWith('/order/');
-  const shellTitle = location.pathname === '/settings/menu' ? 'Menü tanımları' : null;
+  const shellTitle = !isOrderScreen ? getShellTitle(location.pathname) : null;
   const canSeeTakeawayQuickButton = hasRole('admin', 'cashier');
   const defaultPath = hasRole('admin', 'cashier')
     ? '/home'
@@ -183,7 +209,7 @@ export default function App() {
           />
         </>
       )}
-      <main className={`app-content ${!isOrderScreen ? 'app-content--with-shell-toggle' : ''}`}>
+      <main className={`app-content ${!isOrderScreen ? 'app-content--with-shell-toggle' : ''} ${shellTitle ? 'app-content--with-shell-title' : ''}`}>
         <Suspense fallback={<AppRouteFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to={defaultPath} replace />} />
@@ -223,6 +249,7 @@ export default function App() {
             <Route path="menu/product/:productId" element={<MenuProductEditorPage />} />
             <Route path="menu" element={<MenuSettingsPage />} />
             <Route path="dining-areas" element={<DiningAreasSettingsPage />} />
+            <Route path="features" element={<FeatureDefinitionsPage />} />
             <Route path="caller-id" element={<CallerIdScreen />} />
           </Route>
           

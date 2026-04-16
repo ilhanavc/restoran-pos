@@ -54,6 +54,7 @@ const NAV_ITEMS = [
 const DEFINITIONS_ITEMS = [
   { id: 'menu-definitions', path: '/settings/menu', label: 'Menü Tanımları', roles: ['admin'] },
   { id: 'dining-area-definitions', path: '/settings/dining-areas', label: 'Salon Bölgeleri', roles: ['admin'] },
+  { id: 'feature-definitions', path: '/settings/features', label: 'Özellikler', roles: ['admin'] },
 ];
 
 const SETTINGS_EXCLUDED_PATHS = DEFINITIONS_ITEMS.map((item) => item.path);
