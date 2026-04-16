@@ -8,8 +8,6 @@ export default function PrinterDeleteModal({
   onClose,
   printerId,
   printerName,
-  printerIsActive = true,
-  onAfterDeactivate,
   onAfterDelete,
 }) {
   const { success, error } = useToast();
@@ -40,7 +38,6 @@ export default function PrinterDeleteModal({
           setEligibilityError(message);
           setEl({
             canHardDelete: false,
-            canDeactivate: printerIsActive,
             blockers: ['Kalıcı silme uygunluğu doğrulanamadı. Lütfen bağlantıyı kontrol edip tekrar deneyin.'],
             usage: null,
           });
@@ -52,7 +49,7 @@ export default function PrinterDeleteModal({
     return () => {
       cancelled = true;
     };
-  }, [open, printerId, printerIsActive]);
+  }, [open, printerId]);
 
   const usage = el?.usage;
   const blockers = el?.blockers || [];
@@ -66,20 +63,6 @@ export default function PrinterDeleteModal({
   }, [loading, eligibilityError, blockers, el?.canHardDelete]);
 
   if (!open) return null;
-
-  const doDeactivate = async () => {
-    setBusy(true);
-    try {
-      const res = await api.patchAdminPrinter(printerId, { is_active: false });
-      success(res.message || 'Yazıcı pasifleştirildi');
-      onClose();
-      onAfterDeactivate?.();
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const doHardDelete = async () => {
     if (!el?.canHardDelete) return;
@@ -224,9 +207,6 @@ export default function PrinterDeleteModal({
                   <li key={b}>{b}</li>
                 ))}
               </ul>
-              <div style={{ marginTop: 10, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
-                Bekleyen yazdırma işleri tamamlandıktan sonra tekrar deneyebilirsiniz. İsterseniz bu sırada yazıcıyı pasife alabilirsiniz.
-              </div>
             </div>
           )}
         </div>
@@ -239,11 +219,6 @@ export default function PrinterDeleteModal({
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
             Vazgeç
             </button>
-            {el?.canDeactivate ? (
-              <button type="button" className="btn btn-primary" onClick={doDeactivate} disabled={busy || loading}>
-                {busy ? 'İşleniyor...' : 'Pasif yap'}
-              </button>
-            ) : null}
             <button
               type="button"
               className="btn btn-danger"

@@ -97,7 +97,6 @@ export default function BusinessSettingsPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="İşletme Bilgileri" onBack={handleBack} />
-
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={loading || saving || !dirty}>
           Kaydet

@@ -95,13 +95,15 @@ export default function HomeScreen() {
   return (
     <div className="page-container home-page">
       <div className="page-header">
-        <div>
+        <div className="page-header-main page-title-line">
           <h1 className="page-title">Anasayfa</h1>
-          <div className="home-subtitle">Günlük operasyon özeti ve canlı satış görünümü</div>
+          <div className="page-header-subtitle">Günlük operasyon özeti ve canlı satış görünümü</div>
         </div>
-        <button className="btn btn-ghost" onClick={loadDashboard} disabled={loading}>
-          Yenile
-        </button>
+        <div className="page-header-actions">
+          <button className="btn btn-ghost" onClick={loadDashboard} disabled={loading}>
+            Yenile
+          </button>
+        </div>
       </div>
 
       <div className="home-metric-grid">

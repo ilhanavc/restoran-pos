@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useCallback, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
+import { Menu, X } from 'lucide-react';
 import Sidebar from './components/layout/Sidebar.jsx';
 import LoginScreen from './components/auth/LoginScreen.jsx';
 import api from './services/api.js';
@@ -52,8 +53,8 @@ export default function App() {
   const paymentAfterCompleteRef = useRef('back');
   const navigate = useNavigate();
   const location = useLocation();
-  const isTablesPage = location.pathname.startsWith('/tables');
   const isOrderScreen = location.pathname.startsWith('/order/');
+  const shellTitle = location.pathname === '/settings/menu' ? 'Menü tanımları' : null;
   const canSeeTakeawayQuickButton = hasRole('admin', 'cashier');
   const defaultPath = hasRole('admin', 'cashier')
     ? '/home'
@@ -158,15 +159,31 @@ export default function App() {
   return (
     <div className="app-layout">
       {!isOrderScreen && (
-        <Sidebar
-          isOpen={sidebarOpen}
-          onToggle={() => setSidebarOpen((prev) => !prev)}
-          onNavigate={() => setSidebarOpen(false)}
-          showTakeawayQuickButton={isTablesPage && canSeeTakeawayQuickButton}
-          onTakeawayQuickClick={() => handleNewTakeawayOrder()}
-        />
+        <>
+          <button
+            type="button"
+            className="sidebar-menu-btn"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            aria-label={sidebarOpen ? "Menüyü kapat" : "Menüyü aç"}
+            title={sidebarOpen ? "Menüyü kapat" : "Menüyü aç"}
+          >
+            {sidebarOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+          {shellTitle ? (
+            <div className="shell-inline-title" aria-hidden={sidebarOpen}>
+              {shellTitle}
+            </div>
+          ) : null}
+          {sidebarOpen && (
+            <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+          )}
+          <Sidebar
+            isOpen={sidebarOpen}
+            onNavigate={() => setSidebarOpen(false)}
+          />
+        </>
       )}
-      <main className={`app-content ${isOrderScreen ? 'no-sidebar' : ''}`}>
+      <main className={`app-content ${!isOrderScreen ? 'app-content--with-shell-toggle' : ''}`}>
         <Suspense fallback={<AppRouteFallback />}>
         <Routes>
           <Route path="/" element={<Navigate to={defaultPath} replace />} />
@@ -183,6 +200,7 @@ export default function App() {
                 onQuickPayment={handleQuickPaymentFromTables}
                 showTakeawaySidebar={hasRole('admin', 'cashier')}
                 onOpenTakeawayOrder={handleOpenTakeawayFromTables}
+                onNewTakeawayOrder={canSeeTakeawayQuickButton ? handleNewTakeawayOrder : undefined}
               />
             </ProtectedRoute>
           } />

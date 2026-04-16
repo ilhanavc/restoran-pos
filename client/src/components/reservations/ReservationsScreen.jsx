@@ -170,11 +170,13 @@ export default function ReservationsScreen() {
   return (
     <div className="page-container">
       <div className="page-header">
-        <h1 className="page-title">
-          <CalendarDays size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-          Rezervasyonlar
-        </h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="page-header-main page-title-line">
+          <h1 className="page-title">
+            <CalendarDays size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
+            Rezervasyonlar
+          </h1>
+        </div>
+        <div className="page-header-actions">
           <input type="date" className="input" value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)} style={{ width: 180 }} />
           <button className="btn btn-primary" onClick={() => { setEditingReservation(null); setModalOpen(true); }}>
@@ -182,7 +184,6 @@ export default function ReservationsScreen() {
           </button>
         </div>
       </div>
-
       {loading ? (
         <div className="empty-state">Yükleniyor...</div>
       ) : reservations.length === 0 ? (

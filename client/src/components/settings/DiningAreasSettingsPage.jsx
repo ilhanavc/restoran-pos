@@ -165,7 +165,6 @@ export default function DiningAreasSettingsPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Salon bölgeleri ve masa sayısı" onBack={handleBack} />
-
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
         Her bölge için hedef masa sayısını girin. Boş masalar güvenle kapatılır; dolu masa veya açık adisyon varken
         sayı düşürülemez.

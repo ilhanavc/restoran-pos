@@ -91,7 +91,6 @@ export default function PrinterRoutingPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Kategori → Yazıcı Yönlendirme" onBack={handleBack} />
-
       <p style={{ margin: '0 0 16px', color: 'var(--text-secondary)', fontSize: 14, maxWidth: 720 }}>
         Her kategoriyi doğrudan bir yazıcıya bağlayın (ör. fırın, ızgara, bar). Boş bırakıldığında sistem{' '}
         <strong>ürün/kategori printer_target</strong> ve diğer varsayılan kuralları kullanır.

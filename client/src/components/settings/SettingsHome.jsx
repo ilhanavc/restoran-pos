@@ -15,10 +15,12 @@ export default function SettingsHome() {
   return (
     <div className="page-container">
       <div className="page-header">
-        <h1 className="page-title">
-          <Settings size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-          Ayarlar
-        </h1>
+        <div className="page-header-main page-title-line">
+          <h1 className="page-title">
+            <Settings size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
+            Ayarlar
+          </h1>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>

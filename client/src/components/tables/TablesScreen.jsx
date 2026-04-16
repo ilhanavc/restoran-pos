@@ -10,7 +10,7 @@ import { getPaymentStateLabel, isOrderFullyPaid } from '../../utils/orderPayment
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 import {
-  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2,
+  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2, Package,
 } from 'lucide-react';
 
 function formatOrderElapsed(dateStr, now = Date.now()) {
@@ -38,6 +38,7 @@ export default function TablesScreen({
   onQuickPayment,
   showTakeawaySidebar = false,
   onOpenTakeawayOrder,
+  onNewTakeawayOrder,
 }) {
   const [areas, setAreas] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
@@ -500,42 +501,57 @@ export default function TablesScreen({
   };
 
   return (
-    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 0 }}>
-      <div style={{ padding: '16px 24px 0', flexShrink: 0 }}>
-        <div className="page-header">
-          <div>
+    <div className="page-container page-container--flush" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="page-top-safe" style={{ flexShrink: 0 }}>
+        <div className="page-header tables-page-header">
+          <div className="tables-header-main">
             <h1 className="page-title">Masalar</h1>
-            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <div className="tables-header-stats">
+              <span className="tables-header-stat">
                 <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.empty}</span> Boş
               </span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              <span className="tables-header-stat">
                 <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{stats.occupied}</span> Dolu
               </span>
               {stats.paid > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                <span className="tables-header-stat">
                   <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.paid}</span> Hesap Ödendi
                 </span>
               )}
               {stats.hot > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                <span className="tables-header-stat">
                   <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{stats.hot}</span> Uzun Süre
                 </span>
               )}
             </div>
           </div>
-          <div className="tables-header-actions">
-            <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
-              <Phone size={16} />
-            </button>
-            {transferMode && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setTransferMode(null)}>
-                İptal
+          {onNewTakeawayOrder && (
+            <div className="tables-header-primary">
+              <button
+                type="button"
+                className="btn btn-ghost tables-paket-btn"
+                onClick={onNewTakeawayOrder}
+                title="Yeni paket siparişi"
+              >
+                <Package size={18} />
+                Paket
               </button>
-            )}
-            <button className="btn btn-ghost btn-icon tables-action-btn" onClick={refreshAll} title="Yenile">
-              <RefreshCw size={16} />
-            </button>
+            </div>
+          )}
+          <div className="tables-header-actions">
+            <div className="tables-header-secondary">
+              <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
+                <Phone size={16} />
+              </button>
+              {transferMode && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setTransferMode(null)}>
+                  İptal
+                </button>
+              )}
+              <button className="btn btn-ghost btn-icon tables-action-btn" onClick={refreshAll} title="Yenile">
+                <RefreshCw size={16} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -566,7 +582,7 @@ export default function TablesScreen({
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
         <div style={{
-          flex: 1, overflow: 'auto', padding: '16px 24px 24px',
+          flex: 1, overflow: 'auto', padding: '16px var(--page-padding-x) 24px var(--page-safe-left)',
           paddingRight: showTakeawaySidebar ? 12 : 24,
         }}>
           {loading ? (

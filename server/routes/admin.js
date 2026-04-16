@@ -339,16 +339,11 @@ function getPrinterDeleteEligibility(businessId, printerId) {
       .get(businessId, printerId).c || 0;
 
   const blockers = [];
-  if (pendingJobs > 0) {
-    blockers.push('Bu yazıcıya ait bekleyen yazdırma işi var. İşlem bitene veya iptal edilene kadar kalıcı silinemez.');
-  }
 
-  const canHardDelete = pendingJobs === 0;
-  const canDeactivate = row.is_active === 1 || row.is_active === true;
+  const canHardDelete = true;
 
   return {
     canHardDelete,
-    canDeactivate,
     blockers,
     usage: {
       isDefault,
@@ -827,6 +822,10 @@ router.delete('/printers/:id', (req, res) => {
 
     db.transaction(() => {
       db.prepare(`DELETE FROM printer_routing WHERE business_id = ? AND printer_id = ?`).run(req.businessId, req.params.id);
+      db.prepare(`DELETE FROM print_jobs WHERE business_id = ? AND printer_id = ? AND status = 'pending'`).run(
+        req.businessId,
+        req.params.id,
+      );
       db.prepare(`UPDATE print_jobs SET printer_id = NULL WHERE business_id = ? AND printer_id = ?`).run(
         req.businessId,
         req.params.id,

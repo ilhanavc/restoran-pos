@@ -100,19 +100,15 @@ export default function KitchenScreen() {
   };
 
   return (
-    <div className="page-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: 0 }}>
+    <div className="page-container page-container--flush" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{
-        padding: '14px 24px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'var(--bg-secondary)', flexShrink: 0,
-      }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800 }}>
+      <div className="page-top-safe page-toolbar" style={{ flexShrink: 0 }}>
+        <div className="page-header-main">
+          <h1 className="page-toolbar-title">
             <ChefHat size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
             Mutfak Ekranı
           </h1>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+          <div className="page-header-subtitle">
             {orders.length} aktif sipariş
           </div>
         </div>
@@ -122,7 +118,7 @@ export default function KitchenScreen() {
       </div>
 
       {/* Orders Grid */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div className="page-scroll-safe" style={{ flex: 1, overflow: 'auto' }}>
         {loading ? (
           <div className="empty-state">Yükleniyor...</div>
         ) : orders.length === 0 ? (

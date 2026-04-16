@@ -114,7 +114,6 @@ export default function UsersSettingsPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Kullanıcı Yönetimi" />
-
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 14 }}>
         <button type="button" className="btn btn-primary btn-sm" onClick={openCreate}>
           Yeni Kullanıcı Ekle

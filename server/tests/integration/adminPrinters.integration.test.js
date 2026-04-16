@@ -118,7 +118,7 @@ describe('admin printer delete behavior', () => {
     expect(routing.c).toBe(0);
   });
 
-  it('still blocks delete when pending print jobs exist', async () => {
+  it('deletes printer and its pending print jobs together', async () => {
     const printerId = insertPrinter({ id: 'printer-pending', name: 'Bekleyen Yazici' });
     const orderId = insertOrder({ id: 'order-pending-printer' });
     dbRef.current.prepare(`
@@ -131,15 +131,17 @@ describe('admin printer delete behavior', () => {
       .set('Authorization', authHeader);
 
     expect(eligibilityRes.status).toBe(200);
-    expect(eligibilityRes.body.canHardDelete).toBe(false);
+    expect(eligibilityRes.body.canHardDelete).toBe(true);
     expect(eligibilityRes.body.usage.pendingJobs).toBe(1);
 
     const deleteRes = await request(app)
       .delete(`/api/admin/printers/${printerId}`)
       .set('Authorization', authHeader);
 
-    expect(deleteRes.status).toBe(400);
-    expect(deleteRes.body.blockers?.length).toBeGreaterThan(0);
+    expect(deleteRes.status).toBe(200);
+
+    const remainingJob = dbRef.current.prepare('SELECT COUNT(*) AS c FROM print_jobs WHERE id = ?').get('job-1');
+    expect(remainingJob.c).toBe(0);
   });
 });
 

@@ -415,13 +415,13 @@ export default function ReportsScreen() {
   return (
     <div className="page-container">
       <div className="page-header">
-        <div>
+        <div className="page-header-main page-title-line">
           <h1 className="page-title">
             <BarChart3 size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
             Raporlar
           </h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="page-header-actions">
           <Calendar size={16} color="var(--text-muted)" />
           <input type="date" className="input" value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)}
@@ -450,7 +450,6 @@ export default function ReportsScreen() {
           )}
         </div>
       </div>
-
       {loading ? (
         <div className="empty-state">Yükleniyor...</div>
       ) : report ? (

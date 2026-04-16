@@ -100,13 +100,23 @@ function appendEncodingDiagnostic(parts, width) {
   const sample = 'ÇĞİÖŞÜ çğıöşü';
   const sampleWords = 'Çorba Göbek İmam Öküz Şeker Ücret';
   const candidates = [
+    // --- Epson TM serisi standart degerler ---
     { code: 'A', label: 'WIN1254 ESCt33', escT: 33, encoder: encodeWin1254 },
     { code: 'B', label: 'WIN1254 ESCt28', escT: 28, encoder: encodeWin1254 },
     { code: 'C', label: 'WIN1254 ESCt32', escT: 32, encoder: encodeWin1254 },
     { code: 'D', label: 'WIN1254 ESCt17', escT: 17, encoder: encodeWin1254 },
     { code: 'E', label: 'WIN1254 ESCt16', escT: 16, encoder: encodeWin1254 },
-    { code: 'F', label: 'PC857 ESCt12', escT: 12, encoder: encodePC857 },
-    { code: 'G', label: 'PC857 ESCt13', escT: 13, encoder: encodePC857 },
+    { code: 'F', label: 'PC857 ESCt12',  escT: 12, encoder: encodePC857 },
+    { code: 'G', label: 'PC857 ESCt13',  escT: 13, encoder: encodePC857 },
+    // --- STAR / Klon yazici adaylari ---
+    // STAR Micronics tablosunda ESCt34 = CP1254 Turkish (Epson'da 32 olan deger)
+    { code: 'I', label: 'WIN1254 ESCt34', escT: 34, encoder: encodeWin1254 },
+    // Bazi klon modellerde ESCt36 veya ESCt47 Turkish tanimli
+    { code: 'J', label: 'WIN1254 ESCt36', escT: 36, encoder: encodeWin1254 },
+    { code: 'K', label: 'WIN1254 ESCt47', escT: 47, encoder: encodeWin1254 },
+    // PC857 klon offset adaylari
+    { code: 'L', label: 'PC857 ESCt1',   escT: 1,  encoder: encodePC857 },
+    { code: 'M', label: 'PC857 ESCt2',   escT: 2,  encoder: encodePC857 },
   ];
 
   parts.push(asciiTextLine(separator(width)));

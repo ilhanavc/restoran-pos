@@ -181,17 +181,20 @@ export default function StockScreen() {
   return (
     <div className="page-container">
       <div className="page-header">
-        <h1 className="page-title">
-          <Package size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-          Stok Takibi
-        </h1>
+        <div className="page-header-main page-title-line">
+          <h1 className="page-title">
+            <Package size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
+            Stok Takibi
+          </h1>
+        </div>
         {isAdmin && (
-          <button className="btn btn-primary" onClick={() => setItemModal('new')}>
-            <Plus size={16} /> Yeni Kalem
-          </button>
+          <div className="page-header-actions">
+            <button className="btn btn-primary" onClick={() => setItemModal('new')}>
+              <Plus size={16} /> Yeni Kalem
+            </button>
+          </div>
         )}
       </div>
-
       {lowStock.length > 0 && (
         <div style={{ background: 'var(--danger-muted)', border: '1px solid var(--danger)', borderRadius: 'var(--radius-sm)', padding: '10px 16px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>
           <AlertTriangle size={16} />

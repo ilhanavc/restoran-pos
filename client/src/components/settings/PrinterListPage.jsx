@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { EllipsisVertical, Pencil, RefreshCw, TestTube2, Trash2, UserMinus, UserCheck } from 'lucide-react';
+import { EllipsisVertical, Pencil, RefreshCw, TestTube2, Trash2 } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
@@ -96,7 +96,7 @@ export default function PrinterListPage() {
   const [discoveredPrinters, setDiscoveredPrinters] = useState([]);
   const [discoveryState, setDiscoveryState] = useState('never_scanned');
   const [discoveryLastErrorCode, setDiscoveryLastErrorCode] = useState(null);
-  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
+  const { confirmDialog, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,16 +164,6 @@ export default function PrinterListPage() {
     }
   };
 
-  const activate = async (p) => {
-    try {
-      await api.patchAdminPrinter(p.id, { is_active: true });
-      success('Yazıcı aktifleştirildi');
-      await load();
-    } catch (e) {
-      error(e.message || 'Yazıcı aktifleştirilemedi');
-    }
-  };
-
   const toggleKitchenAdjNew = async () => {
     setSavingAdjRule(true);
     try {
@@ -187,24 +177,6 @@ export default function PrinterListPage() {
     } finally {
       setSavingAdjRule(false);
     }
-  };
-
-  const deactivate = async (p) => {
-    requestConfirm({
-      title: 'Yazıcı pasifleştirilsin mi?',
-      body: `"${p.name}" aktif yazıcı listesinden çıkarılacak. Daha sonra tekrar aktifleştirilebilir.`,
-      confirmLabel: 'Pasifleştir',
-      tone: 'danger',
-      onConfirm: async () => {
-        try {
-          await api.patchAdminPrinter(p.id, { is_active: false });
-          success('Yazıcı pasifleştirildi');
-          await load();
-        } catch (e) {
-          error(e.message || 'İşlem başarısız');
-        }
-      },
-    });
   };
 
   const discoveredNameSet = useMemo(
@@ -254,7 +226,6 @@ export default function PrinterListPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Yazıcılar" onBack={handleBack} />
-
       <p style={{ margin: '0 0 18px', color: 'var(--text-secondary)', fontSize: 14, maxWidth: 760, lineHeight: 1.55 }}>
         Mutfak ve müşteri fişi yazıcılarınızı tek ekrandan yönetin. Burada temel durumu görür, test eder ve hızlıca
         düzenleme yaparsınız.
@@ -384,22 +355,11 @@ export default function PrinterListPage() {
                           zIndex: 5,
                         }}
                       >
-                        {p.is_active ? (
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => deactivate(p)}>
-                            <UserMinus size={15} style={{ marginRight: 4 }} />
-                            Pasifleştir
-                          </button>
-                        ) : (
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => activate(p)}>
-                            <UserCheck size={15} style={{ marginRight: 4 }} />
-                            Aktifleştir
-                          </button>
-                        )}
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"
                           onClick={() => {
-                            setDeleteTarget({ id: p.id, name: p.name, isActive: p.is_active !== false });
+                            setDeleteTarget({ id: p.id, name: p.name });
                           }}
                         >
                           <Trash2 size={15} style={{ marginRight: 4 }} />
@@ -451,8 +411,6 @@ export default function PrinterListPage() {
         onClose={() => setDeleteTarget(null)}
         printerId={deleteTarget?.id}
         printerName={deleteTarget?.name}
-        printerIsActive={deleteTarget?.isActive !== false}
-        onAfterDeactivate={load}
         onAfterDelete={load}
       />
       <ConfirmDialog

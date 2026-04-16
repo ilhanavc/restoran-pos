@@ -80,7 +80,6 @@ export default function DisplaySettingsPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Ekran Ayarları" onBack={handleBack} />
-
       <div style={{ marginBottom: 14 }}>
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={loading || saving || !dirty}>
           Kaydet

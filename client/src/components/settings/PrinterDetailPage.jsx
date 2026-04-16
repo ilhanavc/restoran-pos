@@ -294,7 +294,7 @@ export default function PrinterDetailPage() {
         setDiscoveryLoading(false);
       }
     },
-    [discoveredPrinters, fetchDiscoveredPrinters, printOptions?.device?.physicalName],
+    [fetchDiscoveredPrinters],
   );
 
   const load = useCallback(async () => {
@@ -507,25 +507,6 @@ export default function PrinterDetailPage() {
     });
   };
 
-  const deactivate = async () => {
-    if (isNew) return;
-    requestConfirm({
-      title: 'Yazıcı pasifleştirilsin mi?',
-      body: 'Bu yazıcı aktif yazıcı listesinden çıkarılacak. Daha sonra tekrar aktifleştirilebilir.',
-      confirmLabel: 'Pasifleştir',
-      tone: 'danger',
-      onConfirm: async () => {
-        try {
-          await api.patchAdminPrinter(id, { is_active: false });
-          success('Yazıcı pasifleştirildi');
-          navigate('/settings/printers');
-        } catch (e) {
-          error(e.message || 'İşlem başarısız');
-        }
-      },
-    });
-  };
-
   useEffect(() => {
     setPrintOptions((prev) => normalizePrintOptions(prev, type));
   }, [type]);
@@ -552,7 +533,6 @@ export default function PrinterDetailPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title={isNew ? 'Yeni Yazıcı' : 'Yazıcı Detayı'} onBack={handleBack} />
-
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={loading || saving || !dirty}>
           Kaydet
@@ -560,11 +540,6 @@ export default function PrinterDetailPage() {
         <button type="button" className="btn btn-ghost btn-sm" onClick={testPrint} disabled={loading || testing || isNew} title="Bu kayıtlı yazıcı için test">
           {testing ? 'Test…' : 'Test çıktısı'}
         </button>
-        {!isNew && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={deactivate} disabled={!isActive}>
-            Pasif yap
-          </button>
-        )}
         {!isNew && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDeleteOpen(true)}>
             Sil
@@ -862,8 +837,6 @@ export default function PrinterDetailPage() {
         onClose={() => setDeleteOpen(false)}
         printerId={id}
         printerName={name}
-        printerIsActive={isActive}
-        onAfterDeactivate={() => navigate('/settings/printers', { replace: true })}
         onAfterDelete={() => navigate('/settings/printers', { replace: true })}
       />
       <ConfirmDialog

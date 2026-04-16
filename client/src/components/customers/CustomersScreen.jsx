@@ -239,23 +239,27 @@ export default function CustomersScreen() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100%' }}>
+    <div className="page-container page-container--flush" style={{ display: 'flex', height: '100%' }}>
       {/* List */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <h1 className="page-title" style={{ fontSize: 20, marginBottom: 12 }}>
-            <Users size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-            Müşteriler
-          </h1>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10, gap: 8 }}>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExportOpen(true)}>
-              <Download size={14} />
-              Dışa Aktar
-            </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setImportOpen(true)}>
-              <FileUp size={14} />
-              Excel'den İçe Aktar
-            </button>
+        <div className="page-top-safe" style={{ borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div className="page-header" style={{ marginBottom: 10 }}>
+            <div className="page-header-main page-title-line">
+              <h1 className="page-title" style={{ fontSize: 20 }}>
+                <Users size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
+                Müşteriler
+              </h1>
+            </div>
+            <div className="page-header-actions">
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExportOpen(true)}>
+                <Download size={14} />
+                Dışa Aktar
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setImportOpen(true)}>
+                <FileUp size={14} />
+                Excel'den İçe Aktar
+              </button>
+            </div>
           </div>
           <div style={{ position: 'relative' }}>
             <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -265,7 +269,7 @@ export default function CustomersScreen() {
           </div>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+        <div className="page-scroll-safe" style={{ flex: 1, overflow: 'auto' }}>
           {customers.map(cust => (
             <div key={cust.id} className="card card-padded" style={{ marginBottom: 8, cursor: 'pointer' }}
               onClick={() => viewCustomer(cust.id)}>
