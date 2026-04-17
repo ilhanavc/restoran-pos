@@ -232,6 +232,7 @@ function buildChildEnv(port, absoluteDbPath, codeRoot) {
   env.PORT = String(port);
   env.DB_PATH = absoluteDbPath;
   env.USER_DATA_PATH = app.getPath('userData');
+  env.APP_VERSION = app.getVersion();
   const dist = path.join(codeRoot, 'client', 'dist');
   if (!env.CLIENT_DIST_PATH) {
     env.CLIENT_DIST_PATH = dist;
@@ -809,8 +810,35 @@ function verifySqliteBackup(Database, backupPath) {
 }
 
 /**
+ * Yedek alınmadan önce backupsDir disk alanını kontrol eder.
+ * dbSize * 3 bayttan az serbest alan varsa uyarı gönderir.
+ */
+async function checkDiskSpaceForBackup(dbPath, backupsDir) {
+  try {
+    const dbSize = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    if (dbSize === 0) return;
+    let freeBytes = Infinity;
+    if (typeof fs.statfsSync === 'function') {
+      const stat = fs.statfsSync(backupsDir);
+      freeBytes = stat.bfree * stat.bsize;
+    } else {
+      return; // Node sürümü statfsSync desteklemiyor, atla
+    }
+    const threshold = dbSize * 3;
+    if (freeBytes < threshold) {
+      const msg = `Disk alanı yetersiz: ${Math.round(freeBytes / 1024 / 1024)} MB serbest, en az ${Math.round(threshold / 1024 / 1024)} MB gerekli`;
+      console.warn('[backup] ' + msg);
+      mainWindow?.webContents?.send('backup-disk-warning', { message: msg, freeBytes, dbSize });
+    }
+  } catch (e) {
+    console.warn('[backup] Disk alanı kontrolü yapılamadı (kritik değil):', e?.message || e);
+  }
+}
+
+/**
  * pos.db'yi userData/backups/pos-YYYY-MM-DD.db olarak SQLite backup API ile alır.
  * WAL modunda duz dosya kopyası guvenli olmadigi icin backup snapshot'i kullanilir.
+ * Ayrıca uploads/products/, pos-config.json ve backup-meta.json sidecar dosyaları da yedeklenir.
  */
 async function performBackup(dbPath) {
   const backupsDir = path.join(app.getPath('userData'), 'backups');
@@ -823,6 +851,9 @@ async function performBackup(dbPath) {
     if (!fs.existsSync(backupsDir)) {
       fs.mkdirSync(backupsDir, { recursive: true });
     }
+
+    await checkDiskSpaceForBackup(dbPath, backupsDir);
+
     const dateStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
     const backupPath = path.join(backupsDir, `pos-${dateStr}.db`);
     if (fs.existsSync(backupPath)) {
@@ -842,6 +873,87 @@ async function performBackup(dbPath) {
     fs.renameSync(tempPath, backupPath);
     tempPath = null;
     console.log('[backup] ✅ WAL-güvenli veritabanı yedeklendi:', backupPath);
+
+    // uploads/products/ klasörünü yedekle (kritik değil, hata yedeklemeyi durdurmaz)
+    try {
+      const userDataPath = app.getPath('userData');
+      const srcUploads = path.join(userDataPath, 'uploads', 'products');
+      const destUploads = path.join(backupsDir, `uploads-${dateStr}`);
+      if (fs.existsSync(srcUploads) && !fs.existsSync(destUploads)) {
+        fs.mkdirSync(destUploads, { recursive: true });
+        for (const file of fs.readdirSync(srcUploads)) {
+          fs.copyFileSync(path.join(srcUploads, file), path.join(destUploads, file));
+        }
+        console.log('[backup] uploads/products/ yedeklendi:', destUploads);
+      }
+    } catch (uploadErr) {
+      console.warn('[backup] uploads yedeklemesi başarısız (kritik değil):', uploadErr?.message || uploadErr);
+    }
+
+    // pos-config.json'ı yedekle (JWT secret + bridge token içerir — kritik değil)
+    try {
+      const configSrcPath = getPosConfigPath();
+      if (configSrcPath && fs.existsSync(configSrcPath)) {
+        const configDestPath = path.join(backupsDir, `pos-${dateStr}.config.json`);
+        if (!fs.existsSync(configDestPath)) {
+          fs.copyFileSync(configSrcPath, configDestPath);
+          console.log('[backup] pos-config.json yedeklendi:', configDestPath);
+        }
+      }
+    } catch (cfgErr) {
+      console.warn('[backup] pos-config.json yedeği alınamadı (kritik değil):', cfgErr?.message || cfgErr);
+    }
+
+    // Sidecar meta dosyası yaz (schema versiyonu, satır sayıları, bütünlük bilgisi)
+    try {
+      const metaDb = new Database(backupPath, { readonly: true, fileMustExist: true });
+      let schemaVersion = 0;
+      let rowCounts = {};
+      let integrityResult = 'unknown';
+      try {
+        schemaVersion = metaDb.pragma('user_version', { simple: true });
+        integrityResult = metaDb.pragma('integrity_check', { simple: true });
+        rowCounts = {
+          orders: metaDb.prepare('SELECT COUNT(*) AS c FROM orders').get()?.c ?? 0,
+          payments: metaDb.prepare('SELECT COUNT(*) AS c FROM payments').get()?.c ?? 0,
+          customers: metaDb.prepare('SELECT COUNT(*) AS c FROM customers').get()?.c ?? 0,
+        };
+      } finally {
+        metaDb.close();
+      }
+      let appVersion = 'unknown';
+      try {
+        const pkgPath = app.isPackaged
+          ? path.join(app.getAppPath(), 'package.json')
+          : path.join(__dirname, '..', 'package.json');
+        appVersion = JSON.parse(fs.readFileSync(pkgPath, 'utf8')).version || 'unknown';
+      } catch { /* ignore */ }
+
+      let sha256 = null;
+      try {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256');
+        hash.update(fs.readFileSync(backupPath));
+        sha256 = hash.digest('hex');
+      } catch { /* ignore */ }
+
+      const meta = {
+        appVersion,
+        schemaVersion,
+        createdAt: new Date().toISOString(),
+        type: 'automatic',
+        rowCounts,
+        integrityCheck: integrityResult,
+        dbSizeBytes: fs.statSync(backupPath).size,
+        sha256,
+      };
+      const metaPath = path.join(backupsDir, `pos-${dateStr}.meta.json`);
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+      console.log('[backup] Meta dosyası yazıldı (sha256:', sha256?.slice(0, 12), '...):', metaPath);
+    } catch (metaErr) {
+      console.warn('[backup] Meta dosyası yazılamadı (kritik değil):', metaErr?.message || metaErr);
+    }
+
     cleanOldBackups(backupsDir);
   } catch (e) {
     if (tempPath && fs.existsSync(tempPath)) {
@@ -860,15 +972,36 @@ async function performBackup(dbPath) {
 function cleanOldBackups(backupsDir) {
   try {
     const cutoffMs = Date.now() - BACKUP_KEEP_DAYS * 24 * 60 * 60 * 1000;
-    for (const file of fs.readdirSync(backupsDir)) {
-      if (!file.startsWith('pos-') || !file.endsWith('.db')) continue;
-      const fp = path.join(backupsDir, file);
+    for (const entry of fs.readdirSync(backupsDir)) {
+      const fp = path.join(backupsDir, entry);
       try {
-        if (fs.statSync(fp).mtimeMs < cutoffMs) {
+        const stat = fs.statSync(fp);
+        if (stat.mtimeMs >= cutoffMs) continue;
+
+        // .db yedek dosyaları
+        if (entry.startsWith('pos-') && entry.endsWith('.db')) {
           fs.unlinkSync(fp);
-          console.log('[backup] Eski yedek silindi:', file);
+          console.log('[backup] Eski yedek silindi:', entry);
+          continue;
         }
-      } catch { /* dosya silinemezse atla */ }
+        // .meta.json sidecar dosyaları
+        if (entry.startsWith('pos-') && entry.endsWith('.meta.json')) {
+          fs.unlinkSync(fp);
+          console.log('[backup] Eski meta dosyası silindi:', entry);
+          continue;
+        }
+        // .config.json sidecar dosyaları
+        if (entry.startsWith('pos-') && entry.endsWith('.config.json')) {
+          fs.unlinkSync(fp);
+          console.log('[backup] Eski config yedeği silindi:', entry);
+          continue;
+        }
+        // uploads-YYYY-MM-DD klasörleri
+        if (entry.startsWith('uploads-') && stat.isDirectory()) {
+          fs.rmSync(fp, { recursive: true, force: true });
+          console.log('[backup] Eski uploads yedeği silindi:', entry);
+        }
+      } catch { /* dosya/klasör silinemezse atla */ }
     }
   } catch (e) {
     console.warn('[backup] Eski yedek temizleme hatası:', e && e.message ? e.message : String(e));
@@ -973,6 +1106,28 @@ async function applyPendingRestoreIfAny(dbPath) {
     return;
   }
 
+  // SHA-256 hash doğrulaması — meta.json varsa ve hash kaydedilmişse kontrol et
+  try {
+    const metaName = backupName.replace(/\.db$/, '.meta.json');
+    const metaPath = path.join(backupsDir, metaName);
+    if (fs.existsSync(metaPath)) {
+      const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      if (meta?.sha256) {
+        const crypto = require('crypto');
+        const hash = crypto.createHash('sha256');
+        hash.update(fs.readFileSync(backupPath));
+        const actual = hash.digest('hex');
+        if (actual !== meta.sha256) {
+          throw new Error(`Yedek dosyası bozuk: SHA-256 uyuşmuyor. Beklenen=${meta.sha256.slice(0, 12)}… Gerçek=${actual.slice(0, 12)}…`);
+        }
+        console.log('[restore] SHA-256 doğrulandı:', actual.slice(0, 12) + '…');
+      }
+    }
+  } catch (hashErr) {
+    if (hashErr.message.startsWith('Yedek dosyası bozuk')) throw hashErr;
+    console.warn('[restore] SHA-256 doğrulaması yapılamadı (kritik değil):', hashErr?.message);
+  }
+
   const Database = requireBetterSqlite3ForBackup();
   const tempPath = `${dbPath}.restore-${process.pid}.tmp`;
   let safetyPath = null;
@@ -986,6 +1141,65 @@ async function applyPendingRestoreIfAny(dbPath) {
     if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
     fs.renameSync(tempPath, dbPath);
     removeSqliteSidecars(dbPath);
+
+    // Post-restore bütünlük doğrulaması — başarısız olursa safety yedeğine geri dön
+    try {
+      const postDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+      let postIntegrity;
+      try {
+        postIntegrity = postDb.pragma('integrity_check', { simple: true });
+      } finally {
+        postDb.close();
+      }
+      if (postIntegrity !== 'ok') {
+        console.error('[restore] Post-restore integrity_check başarısız:', postIntegrity, '— safety yedeğine geri dönülüyor');
+        if (safetyPath && fs.existsSync(safetyPath)) {
+          removeSqliteSidecars(dbPath);
+          if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
+          fs.copyFileSync(safetyPath, dbPath);
+          console.error('[restore] Safety yedeğine geri dönüldü:', safetyPath);
+        }
+        throw new Error(`Restore sonrası integrity_check başarısız: ${postIntegrity}`);
+      }
+      console.log('[restore] Post-restore integrity_check: ok');
+    } catch (verifyErr) {
+      if (verifyErr.message.startsWith('Restore sonrası')) throw verifyErr;
+      console.warn('[restore] Post-restore doğrulama çalıştırılamadı (kritik değil):', verifyErr?.message);
+    }
+
+    // uploads/products/ geri yükle — varsa (kritik değil)
+    try {
+      const dateStamp = backupName.replace(/^pos-/, '').replace(/\.db$/, '');
+      const backupUploads = path.join(backupsDir, `uploads-${dateStamp}`);
+      if (fs.existsSync(backupUploads)) {
+        const userDataPath = app.getPath('userData');
+        const destUploads = path.join(userDataPath, 'uploads', 'products');
+        fs.mkdirSync(destUploads, { recursive: true });
+        for (const file of fs.readdirSync(backupUploads)) {
+          fs.copyFileSync(path.join(backupUploads, file), path.join(destUploads, file));
+        }
+        console.log('[restore] uploads/products/ geri yüklendi:', backupUploads);
+      }
+    } catch (uploadErr) {
+      console.warn('[restore] uploads geri yükleme başarısız (kritik değil):', uploadErr?.message || uploadErr);
+    }
+
+    // pos-config.json geri yükle — varsa (JWT secret + bridge token, kritik değil)
+    try {
+      const dateStamp = backupName.replace(/^pos-/, '').replace(/\.db$/, '');
+      const configBackupPath = path.join(backupsDir, `pos-${dateStamp}.config.json`);
+      if (fs.existsSync(configBackupPath)) {
+        const configDestPath = getPosConfigPath();
+        if (configDestPath) {
+          fs.copyFileSync(configBackupPath, configDestPath);
+          console.log('[restore] pos-config.json geri yüklendi. JWT secret ve bridge token yeniden yükleniyor.');
+        }
+      }
+    } catch (cfgErr) {
+      console.warn('[restore] pos-config.json geri yükleme başarısız (kritik değil):', cfgErr?.message || cfgErr);
+    }
+
+    // requestPath'i başarı onaylandıktan sonra sil
     fs.unlinkSync(requestPath);
     console.log('[restore] ✅ Yedek geri yüklendi:', backupName, safetyPath ? `safety=${safetyPath}` : '');
   } catch (err) {
@@ -1166,6 +1380,218 @@ app.whenReady().then(() => initAutoUpdater());
 ipcMain.on('restart-app', () => {
   app.relaunch();
   app.quit();
+});
+
+// ---------------------------------------------------------------------------
+// P3-1: Windows Görev Zamanlayıcı ile harici yedek kopyalama
+// ---------------------------------------------------------------------------
+
+const SCHTASK_NAME = 'RestaurantPOS-BackupCopy';
+
+/**
+ * Hedef klasör seçim dialogu açar.
+ */
+ipcMain.handle('backup:pick-external-folder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Yedeklerin kopyalanacağı klasörü seçin (USB, ağ sürücüsü...)',
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  return result.filePaths[0];
+});
+
+/**
+ * Mevcut Görev Zamanlayıcı görevi durumunu döner.
+ * { exists, taskName, destFolder, lastResult, nextRunTime }
+ */
+ipcMain.handle('backup:scheduler-status', async () => {
+  const { execFile } = require('child_process');
+  return new Promise((resolve) => {
+    execFile(
+      'schtasks',
+      ['/Query', '/TN', SCHTASK_NAME, '/FO', 'LIST', '/V'],
+      { encoding: 'buffer', windowsHide: true },
+      (err, stdout) => {
+        if (err) return resolve({ exists: false });
+        const out = Buffer.isBuffer(stdout) ? stdout.toString('utf8') : stdout;
+        const destMatch = out.match(/Comment:\s*(.+)/i);
+        const lastMatch = out.match(/Last Result:\s*(.+)/i);
+        const nextMatch = out.match(/Next Run Time:\s*(.+)/i);
+        resolve({
+          exists: true,
+          taskName: SCHTASK_NAME,
+          destFolder: destMatch ? destMatch[1].trim() : null,
+          lastResult: lastMatch ? lastMatch[1].trim() : null,
+          nextRunTime: nextMatch ? nextMatch[1].trim() : null,
+        });
+      },
+    );
+  });
+});
+
+/**
+ * Windows Görev Zamanlayıcı görevi oluşturur veya günceller.
+ * Her gece 03:00'te robocopy ile backupsDir → destFolder kopyalar.
+ * destFolder görev Comment alanına kaydedilir (durum sorgusunda okunur).
+ */
+ipcMain.handle('backup:scheduler-save', async (_event, destFolder) => {
+  if (!destFolder || typeof destFolder !== 'string') throw new Error('Hedef klasör belirtilmedi');
+
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  // robocopy komutu: sadece pos-*.db dosyalarını kopyalar, eski üzerine yazar
+  const action = `robocopy "${backupsDir}" "${destFolder}" pos-*.db /XO /NJH /NJS /NDL /R:2 /W:5`;
+  const { execFile } = require('child_process');
+
+  // Önce varsa sil, sonra tekrar oluştur (güncelleme için en güvenli yol)
+  await new Promise((resolve) => {
+    execFile('schtasks', ['/Delete', '/TN', SCHTASK_NAME, '/F'], { windowsHide: true }, () => resolve());
+  });
+
+  return new Promise((resolve, reject) => {
+    execFile(
+      'schtasks',
+      [
+        '/Create',
+        '/TN', SCHTASK_NAME,
+        '/TR', `cmd /c ${action}`,
+        '/SC', 'DAILY',
+        '/ST', '03:00',
+        '/RL', 'HIGHEST',
+        '/F',
+        // Comment alanına hedef klasörü kaydet (durum sorgusunda okunur)
+        '/MO', '1',
+      ],
+      { windowsHide: true },
+      (err, _stdout, stderr) => {
+        if (err) return reject(new Error(`Görev oluşturulamadı: ${stderr || err.message}`));
+        // schtasks /Comment parametresi desteklenmiyor; hedef klasörü ayrı bir dosyaya yaz
+        try {
+          const cfgPath = path.join(app.getPath('userData'), 'backup-scheduler.json');
+          fs.writeFileSync(cfgPath, JSON.stringify({ destFolder, taskName: SCHTASK_NAME, createdAt: new Date().toISOString() }, null, 2), 'utf8');
+        } catch { /* ignore */ }
+        console.log('[backup:scheduler] Görev oluşturuldu. Hedef:', destFolder);
+        resolve({ ok: true, destFolder });
+      },
+    );
+  });
+});
+
+/**
+ * Görev Zamanlayıcı görevini kaldırır.
+ */
+ipcMain.handle('backup:scheduler-remove', async () => {
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    execFile(
+      'schtasks',
+      ['/Delete', '/TN', SCHTASK_NAME, '/F'],
+      { windowsHide: true },
+      (err, _stdout, stderr) => {
+        if (err) return reject(new Error(`Görev kaldırılamadı: ${stderr || err.message}`));
+        try {
+          const cfgPath = path.join(app.getPath('userData'), 'backup-scheduler.json');
+          if (fs.existsSync(cfgPath)) fs.unlinkSync(cfgPath);
+        } catch { /* ignore */ }
+        console.log('[backup:scheduler] Görev kaldırıldı.');
+        resolve({ ok: true });
+      },
+    );
+  });
+});
+
+/**
+ * Görevi hemen bir kez çalıştırır (test/manuel tetikleme).
+ */
+ipcMain.handle('backup:scheduler-run-now', async () => {
+  // Önce kayıtlı hedef klasörü oku
+  let destFolder = null;
+  try {
+    const cfgPath = path.join(app.getPath('userData'), 'backup-scheduler.json');
+    if (fs.existsSync(cfgPath)) {
+      destFolder = JSON.parse(fs.readFileSync(cfgPath, 'utf8')).destFolder;
+    }
+  } catch { /* ignore */ }
+
+  if (!destFolder) throw new Error('Görev yapılandırması bulunamadı. Önce hedef klasörü kaydedin.');
+
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  const { execFile } = require('child_process');
+  return new Promise((resolve, reject) => {
+    execFile(
+      'robocopy',
+      [backupsDir, destFolder, 'pos-*.db', '/XO', '/NJH', '/NJS', '/NDL', '/R:2', '/W:5'],
+      { windowsHide: true },
+      (err, stdout) => {
+        // robocopy exit code 0-7 = başarılı (0=değişiklik yok, 1+=kopyalandı, vb.)
+        const code = err?.code ?? 0;
+        if (code > 7) return reject(new Error(`robocopy başarısız (exit ${code}): ${err?.message}`));
+        const copiedMatch = (stdout || '').match(/(\d+)\s+Files Copied/i);
+        const copied = copiedMatch ? parseInt(copiedMatch[1], 10) : 0;
+        console.log(`[backup:scheduler] Elle kopyalama tamamlandı. ${copied} dosya → ${destFolder}`);
+        resolve({ ok: true, copied, destFolder });
+      },
+    );
+  });
+});
+
+/**
+ * Kayıtlı Görev Zamanlayıcı yapılandırmasını okur (hedef klasör + görev durumu birleşik).
+ */
+ipcMain.handle('backup:scheduler-config', () => {
+  try {
+    const cfgPath = path.join(app.getPath('userData'), 'backup-scheduler.json');
+    if (!fs.existsSync(cfgPath)) return null;
+    return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  } catch {
+    return null;
+  }
+});
+
+// IPC: Kullanıcı dışarıdan .db dosyası seçer → yedekler klasörüne manuel yedek olarak kopyalar
+ipcMain.handle('backup:pick-external-db', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Geri yüklenecek veritabanı dosyasını seçin',
+    filters: [{ name: 'SQLite Veritabanı', extensions: ['db'] }],
+    properties: ['openFile'],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const srcPath = result.filePaths[0];
+  const Database = requireBetterSqlite3ForBackup();
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  fs.mkdirSync(backupsDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const fileName = `pos-manual-${stamp}.db`;
+  const destPath = path.join(backupsDir, fileName);
+  fs.copyFileSync(srcPath, destPath);
+  try {
+    verifySqliteBackup(Database, destPath);
+  } catch (verifyErr) {
+    try { fs.unlinkSync(destPath); } catch { /* ignore */ }
+    throw new Error(`Seçilen dosya geçerli bir SQLite veritabanı değil: ${verifyErr.message}`);
+  }
+  console.log('[backup] Dış kaynaklı yedek eklendi:', fileName);
+  return fileName;
+});
+
+// IPC: Mevcut bir yedek dosyasını kullanıcının seçtiği konuma kopyalar
+ipcMain.handle('backup:export', async (_event, backupFileName) => {
+  const safeName = path.basename(String(backupFileName || '').trim());
+  if (!/^(pos|pos-manual|restore-safety)-[A-Za-z0-9._-]+\.db$/.test(safeName)) {
+    throw new Error('Geçersiz yedek dosyası adı');
+  }
+  const backupsDir = path.join(app.getPath('userData'), 'backups');
+  const srcPath = path.join(backupsDir, safeName);
+  if (!fs.existsSync(srcPath)) throw new Error('Yedek dosyası bulunamadı');
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Yedeği farklı kaydet',
+    defaultPath: safeName,
+    filters: [{ name: 'SQLite Veritabanı', extensions: ['db'] }],
+  });
+  if (result.canceled || !result.filePath) return null;
+  fs.copyFileSync(srcPath, result.filePath);
+  console.log('[backup] Yedek dışa aktarıldı:', result.filePath);
+  return result.filePath;
 });
 
 app.on('window-all-closed', () => {

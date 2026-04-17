@@ -166,6 +166,7 @@ class ApiService extends ApiHttpClient {
   getAdminStoreBridgeLogs(params = {}) { return this.get(`/admin/storebridge/logs${this.buildQuery(params)}`); }
   getSupportBundle() { return this.get('/admin/support-bundle'); }
   getMaintenanceStatus() { return this.get('/admin/maintenance'); }
+  getOpenOrderCount() { return this.get('/admin/maintenance/open-orders'); }
   createManualBackup() { return this.post('/admin/maintenance/backups', {}); }
   requestRestore(backupId) { return this.post('/admin/maintenance/restore-request', { backup_id: backupId }); }
   cancelRestoreRequest() { return this.delete('/admin/maintenance/restore-request'); }

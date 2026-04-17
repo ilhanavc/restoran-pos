@@ -486,6 +486,17 @@ function verifySqliteFile(filePath) {
   }
 }
 
+function readBackupMeta(backupsDir, dbFileName) {
+  const metaName = dbFileName.replace(/\.db$/, '.meta.json');
+  const metaPath = path.join(backupsDir, metaName);
+  if (!fs.existsSync(metaPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
 function listBackupFiles() {
   const backupsDir = getBackupsDir();
   if (!backupsDir || !fs.existsSync(backupsDir)) return [];
@@ -501,6 +512,8 @@ function listBackupFiles() {
         size: stat.size,
         modified_at: stat.mtime.toISOString(),
         kind: name.startsWith('pos-manual-') ? 'manual' : name.startsWith('restore-safety-') ? 'safety' : 'auto',
+        meta: readBackupMeta(backupsDir, name),
+        hasConfigBackup: fs.existsSync(path.join(backupsDir, name.replace(/\.db$/, '.config.json'))),
       };
     })
     .sort((a, b) => String(b.modified_at).localeCompare(String(a.modified_at)));
@@ -545,6 +558,45 @@ async function createManualBackup() {
       }
     }
   }
+
+  // Manuel yedek için sidecar meta dosyası yaz
+  try {
+    const metaDb = new Database(backupPath, { readonly: true, fileMustExist: true });
+    let schemaVersion = 0, rowCounts = {}, integrityResult = 'unknown';
+    try {
+      schemaVersion = metaDb.pragma('user_version', { simple: true });
+      integrityResult = metaDb.pragma('integrity_check', { simple: true });
+      rowCounts = {
+        orders: metaDb.prepare('SELECT COUNT(*) AS c FROM orders').get()?.c ?? 0,
+        payments: metaDb.prepare('SELECT COUNT(*) AS c FROM payments').get()?.c ?? 0,
+        customers: metaDb.prepare('SELECT COUNT(*) AS c FROM customers').get()?.c ?? 0,
+      };
+    } finally {
+      metaDb.close();
+    }
+    let sha256 = null;
+    try {
+      const { createHash } = await import('crypto');
+      const hash = createHash('sha256');
+      hash.update(fs.readFileSync(backupPath));
+      sha256 = hash.digest('hex');
+    } catch { /* ignore */ }
+
+    const metaPath = path.join(backupsDir, fileName.replace(/\.db$/, '.meta.json'));
+    fs.writeFileSync(metaPath, JSON.stringify({
+      appVersion: process.env.APP_VERSION || 'unknown',
+      schemaVersion,
+      createdAt: new Date().toISOString(),
+      type: 'manual',
+      rowCounts,
+      integrityCheck: integrityResult,
+      dbSizeBytes: fs.statSync(backupPath).size,
+      sha256,
+    }, null, 2), 'utf8');
+  } catch (metaErr) {
+    console.warn('[admin:backup:manual] Meta dosyası yazılamadı (kritik değil):', metaErr?.message);
+  }
+
   return listBackupFiles().find((b) => b.id === fileName) || { id: fileName, name: fileName };
 }
 
@@ -942,6 +994,21 @@ router.get('/storebridge/logs', (req, res) => {
   } catch (err) {
     console.error('[admin:storebridge:logs]', err);
     res.status(500).json({ error: 'StoreBridge logları alınamadı' });
+  }
+});
+
+router.get('/maintenance/open-orders', (req, res) => {
+  try {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM orders
+         WHERE business_id = ? AND status NOT IN (${ORDER_STATUSES_CLOSED.map(() => '?').join(',')})`,
+      )
+      .get(req.businessId, ...ORDER_STATUSES_CLOSED);
+    res.json({ openOrderCount: row?.c ?? 0 });
+  } catch (err) {
+    console.error('[admin:maintenance:open-orders]', err);
+    res.status(500).json({ error: 'Açık sipariş sayısı alınamadı' });
   }
 });
 

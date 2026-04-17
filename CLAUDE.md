@@ -5,19 +5,19 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 9.1/10** · 11 sprints completed · **318 automated tests** · 15/15 production checklist items passed
+**Overall score: 9.2/10** · 12 sprints completed · **318 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
 |---------------------|--------|--------|
 | Feature Completeness| 9/10   | ±0     |
 | Code Quality        | 9/10   | ±0     |
-| Security            | 9/10   | +0.5   |
+| Security            | 9/10   | ±0     |
 | Performance         | 8/10   | ±0     |
 | Test Coverage       | 9/10   | ±0     |
-| Documentation       | 9/10   | +1     |
+| Documentation       | 10/10  | +1     |
 | Deployment          | 9/10   | ±0     |
-| **Overall**         | **9.1**| **+0.1** |
+| **Overall**         | **9.2**| **+0.1** |
 
 ## Completed Sprints
 
@@ -34,6 +34,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | 9 | Feature Completion + Packaging Fix | Product image upload + combo menu, Customer 360 profile, Advanced order analytics, electron-updater auto-update, receipt template rebuild (4 templates, 48-char, PC857), **iconv-lite/store-bridge packaging bug fixed** (v1.0.3) |
 | 10 | Audit Hardening + Release Hardening | Full codebase audit (10 audit reports in `docs/audit/`: 00–09 + quality hardening), route lazy-loading (main chunk 948kB→265kB), `ConfirmDialog`/`useConfirmDialog` common component (window.confirm removed), `orderActionPolicy`/`orderPaymentState` utility layer, `api/core.js` HTTP separation, print_jobs lease-based claim + claim ownership guard + manual retry + structured error codes, StoreBridge API timeout/health-retry, CallerID reconnect + bounded POST retry + duplicate ringing guard, Electron persistent logging (`userData/logs/electron-main.log`), JWT secret persisted to `pos-config.json`, CallerID helper packaging fix (`extraResources`), `desktop:preflight` script, `build:callerid-helper` script, encoding module extracted to `store-bridge/printers/encoding.js`, password min-length guard (G-1), takeaway+table_id conflict guard (G-2), transfer Zod schema (G-3), 25 console.error context labels (admin.js), ErrorBoundary, bridge max-restart circuit-breaker, backup-restore runbook, 30 new tests (285 total) |
 | 11 | Desktop Core Hardening + Repo Cleanup | StoreBridgePage health/log/queue panel, `printErrorMessages.js` 16-code error dictionary (TR), `toast.warning` type, MaintenancePage backup staleness banner, PaymentScreen print-failure feedback, `backup-failed` IPC channel, `GET /admin/support-bundle` diagnostic endpoint, `smoke:server-health` script wired into `dist:prepare`, `dist:release` = dist:win + latest.yml, CallerID self-contained win-x64 publish (.NET 8), `printer-acceptance-checklist.md`, `code-signing-runbook.md`, ESLint 27 warnings → 0 (`lint:ci --max-warnings 0`), Playwright e2e specs (table-order-payment, takeaway), `adminBridgeObservability` integration test, **repo cleanup** (451 MB freed: old zips/artifacts/tmp), **pos-config.json removed from git** (security), 9 sprint pass docs → `docs/audit/archive/`, 33 new tests (318 total) |
+| 12 | Backup/Restore Hardening | **P1 critical gaps:** uploads folder backup + restore, backup meta.json (appVersion, schemaVersion, rowCounts, integrityCheck), open order uyarısı restore planlamadan önce (GET /maintenance/open-orders), pos-config.json snapshot backup + restore (JWT secret, bridge token). **P2 operational UX:** "Dosyadan Geri Yükle" + file picker, post-restore SHA-256+integrity-check + safety revert, "Dışa Aktar" per-backup button, disk-space pre-check warning, two-step restore modal (summary + final confirm). **P3 external protection:** SHA-256 hash in meta.json + verification on restore, Windows Task Scheduler integration (gece 03:00 robocopy, hedef klasör picker, manuel tetik, config JSON). `backup-restore-readiness-plan.md` risk matrix + runbook. 0 lint warnings. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -49,7 +50,16 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Order history with advanced filters (date range, customer, amount)
 - CallerID (C812A V8 HID device, clipboard bridge via PowerShell; SDK helper as primary — **self-contained win-x64 binary**)
 - Socket.io real-time (kitchen, table, takeaway screens)
-- Daily automatic DB backup (02:00, 30-day retention)
+- **Daily automatic DB backup** (02:00, 30-day retention, WAL-safe snapshot)
+  - Backup scope: pos.db + uploads/products/ folder + pos-config.json snapshot
+  - Sidecar meta.json: appVersion, schemaVersion, rowCounts, integrityCheck, sha256, dbSizeBytes
+  - Manual backup via Settings → Bakım ve Yedekleme → Manuel Yedek Al
+  - Restore via two-step modal (summary + final confirm) with open-order warning
+  - Post-restore integrity verification + automatic safety revert on failure
+  - SHA-256 hash validation on restore (detect corrupted backups)
+  - Windows Task Scheduler: nightly 03:00 robocopy to external folder (USB, network drive)
+  - External backup import (UI file picker) + export (save dialog) per backup
+  - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
 - **318 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
@@ -99,8 +109,8 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 ## Pending Tasks
 
-All short-term and medium-term roadmap items completed as of Sprint 11.
-Long-term items deferred pending production testing period.
+All backup/restore critical gaps (P1) and operational (P2) items completed as of Sprint 12.
+Long-term roadmap items deferred pending production testing period.
 
 ### Remaining architectural debt (do next, low risk)
 - `OrderScreen.jsx` (1428 lines) — extract catalog/cart/customer/action hooks separately; do NOT refactor in one pass
@@ -120,8 +130,7 @@ Long-term items deferred pending production testing period.
 ### Desktop / release (P1→P2)
 - Code signing certificate + signed NSIS pipeline (currently SmartScreen warning on install) — see `docs/runbooks/code-signing-runbook.md`
 - First-run setup wizard (business name, printer, bridge config)
-- Backup/restore UI — current backup is file-only, no in-app restore
-- SQLite `VACUUM INTO` or backup API for WAL-safe snapshots
+- Backup encryption (AES-256) with key management — low priority, defer to v2 if needed
 
 ### After production testing (v2 roadmap)
 - Multi-branch dashboard
@@ -204,8 +213,6 @@ restoran-pos-v3/
 │   ├── smoke-electron-sqlite.cjs  # Electron+SQLite smoke test
 │   └── rebuild-server-native.cjs  # better-sqlite3 ABI rebuild
 ├── docs/
-│   ├── audit/                 # 11 numbered audit reports (00–10) + repo-cleanup-audit
-│   │   └── archive/           # 9 completed sprint pass docs (read-only reference)
 │   ├── runbooks/              # desktop-install, backup-restore, code-signing,
 │   │                          # printer-acceptance-checklist
 │   └── testing/               # regression-checklist.md
