@@ -49,6 +49,8 @@ beforeEach(() => {
   authHeader = `Bearer ${jwt.sign({ userId: seeds.userId }, TEST_JWT_SECRET)}`;
   tempUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'pos-maintenance-'));
   process.env.USER_DATA_PATH = tempUserData;
+  testConfig.bridge.token = 'bridge-test-token';
+  testConfig.bridge.businessId = 'bridge-biz';
 });
 
 afterEach(() => {
@@ -74,6 +76,21 @@ function insertOrder({ id = 'order-1' } = {}) {
       id, business_id, user_id, order_type, status, subtotal, grand_total, created_by
     ) VALUES (?, ?, ?, 'takeaway', 'saved', 10, 10, ?)
   `).run(id, seeds.businessId, seeds.userId, seeds.userId);
+  return id;
+}
+
+function upsertSetting(key, value, businessId = seeds.businessId) {
+  const existing = dbRef.current.prepare(`SELECT id FROM settings WHERE business_id = ? AND key = ?`).get(businessId, key);
+  if (existing) {
+    dbRef.current
+      .prepare(`UPDATE settings SET value = ?, updated_at = datetime('now') WHERE business_id = ? AND key = ?`)
+      .run(JSON.stringify(value), businessId, key);
+    return existing.id;
+  }
+  const id = `setting-${key}-${Math.random().toString(36).slice(2, 8)}`;
+  dbRef.current
+    .prepare(`INSERT INTO settings (id, business_id, key, value, updated_at) VALUES (?, ?, ?, ?, datetime('now'))`)
+    .run(id, businessId, key, JSON.stringify(value));
   return id;
 }
 
@@ -277,6 +294,115 @@ describe('admin desktop readiness', () => {
       .prepare(`SELECT value FROM settings WHERE business_id = ? AND key = 'app.setup'`)
       .get(seeds.businessId);
     expect(JSON.parse(setting.value).completedBy).toBe(seeds.userId);
+  });
+});
+
+describe('admin storebridge observability', () => {
+  it('reports degraded health when failed jobs and stale claims exist', async () => {
+    const kitchenPrinterId = insertPrinter({ id: 'printer-health-kitchen', name: 'Mutfak Health' });
+    dbRef.current.prepare(`UPDATE printers SET type = 'kitchen', print_options = ? WHERE id = ?`).run(
+      JSON.stringify({ device: { physicalName: 'Mutfak USB' } }),
+      kitchenPrinterId,
+    );
+    const receiptPrinterId = insertPrinter({ id: 'printer-health-receipt', name: 'Kasa Health' });
+    dbRef.current.prepare(`UPDATE printers SET print_options = ? WHERE id = ?`).run(
+      JSON.stringify({ device: { physicalName: 'Kasa USB' } }),
+      receiptPrinterId,
+    );
+    upsertSetting('printer.config', {
+      defaultPrinterId: receiptPrinterId,
+      usagePaymentId: receiptPrinterId,
+      usageKitchenId: kitchenPrinterId,
+    });
+    upsertSetting('bridge.discovered_printers', {
+      scanState: 'success',
+      lastErrorCode: null,
+      updatedAt: '2026-04-16T10:00:00.000Z',
+      printers: [{ name: 'Kasa USB', isOnline: true }],
+    });
+
+    const orderId = insertOrder({ id: 'order-health-1' });
+    dbRef.current.prepare(`
+      INSERT INTO print_jobs (
+        id, business_id, order_id, printer_id, job_type, payload, status,
+        error_message, last_error_code, idempotency_key, created_at, claimed_until
+      ) VALUES (?, ?, ?, ?, 'receipt', '{}', 'failed', 'USB hata', 'usb_print_failed', ?, datetime('now'), NULL)
+    `).run('job-health-failed', seeds.businessId, orderId, receiptPrinterId, 'idem-health-failed');
+    dbRef.current.prepare(`
+      INSERT INTO print_jobs (
+        id, business_id, order_id, printer_id, job_type, payload, status,
+        idempotency_key, created_at, claimed_by, claimed_until
+      ) VALUES (?, ?, ?, ?, 'kitchen', '{}', 'pending', ?, datetime('now'), 'dead-bridge', '2020-01-01 00:00:00')
+    `).run('job-health-stale', seeds.businessId, orderId, kitchenPrinterId, 'idem-health-stale');
+
+    const res = await request(app)
+      .get('/api/admin/storebridge/health')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.queueSummary.failed).toBe(1);
+    expect(res.body.queueSummary.stale_claimed).toBe(1);
+    expect(res.body.lastErrorCode).toBe('usb_print_failed');
+    expect(res.body.discovery.printerCount).toBe(1);
+    expect(res.body.selectedPrinters.missingConfiguredPhysical).toEqual([
+      expect.objectContaining({ type: 'kitchen', physicalName: 'Mutfak USB' }),
+    ]);
+  });
+
+  it('reports unconfigured health without mutating readiness completion state', async () => {
+    testConfig.bridge.token = '';
+    testConfig.bridge.businessId = '';
+    upsertSetting('app.setup', {
+      completedAt: '2026-04-16T11:00:00.000Z',
+      completedBy: seeds.userId,
+    });
+    upsertSetting('bridge.discovered_printers', {
+      scanState: 'bridge_unreachable',
+      lastErrorCode: 'bridge_not_configured',
+      updatedAt: '2026-04-16T11:05:00.000Z',
+      printers: [],
+    });
+
+    const healthRes = await request(app)
+      .get('/api/admin/storebridge/health')
+      .set('Authorization', authHeader);
+    const readinessRes = await request(app)
+      .get('/api/admin/desktop-readiness')
+      .set('Authorization', authHeader);
+
+    expect(healthRes.status).toBe(200);
+    expect(healthRes.body.status).toBe('unconfigured');
+    expect(healthRes.body.configured).toBe(false);
+
+    expect(readinessRes.status).toBe(200);
+    expect(readinessRes.body.completed).toBe(true);
+    expect(readinessRes.body.checks.some((check) => check.key === 'storebridge' && check.status === 'warning')).toBe(true);
+  });
+
+  it('isolates storebridge health to the authenticated business', async () => {
+    const otherSeeds = helpers.seedBusiness(dbRef.current);
+    upsertSetting('bridge.discovered_printers', {
+      scanState: 'success',
+      lastErrorCode: null,
+      updatedAt: '2026-04-16T12:00:00.000Z',
+      printers: [{ name: 'Ana USB', isOnline: true }],
+    });
+    upsertSetting('bridge.discovered_printers', {
+      scanState: 'bridge_unreachable',
+      lastErrorCode: 'bridge_unreachable',
+      updatedAt: '2026-04-16T12:05:00.000Z',
+      printers: [],
+    }, otherSeeds.businessId);
+
+    const res = await request(app)
+      .get('/api/admin/storebridge/health')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body.scanState).toBe('success');
+    expect(res.body.discovery.printers).toEqual([expect.objectContaining({ name: 'Ana USB' })]);
+    expect(res.body.lastErrorCode).toBeNull();
   });
 });
 

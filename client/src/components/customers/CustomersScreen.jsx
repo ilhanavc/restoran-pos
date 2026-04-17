@@ -20,13 +20,13 @@ export default function CustomersScreen() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
-  const [importPage, setImportPage] = useState(1);
+  const [_importPage, setImportPage] = useState(1);
   const [importPageSize, setImportPageSize] = useState(250);
   const [customerStats, setCustomerStats] = useState(null);
   const [statsLoading, setStatsLoading] = useState(false);
   const toast = useToast();
 
-  useEffect(() => { loadCustomers(); }, []);
+  useEffect(() => { loadCustomers(); }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount-only; loadCustomers is not memoized
 
   const loadCustomers = async (params = {}, append = false) => {
     try {
@@ -40,7 +40,7 @@ export default function CustomersScreen() {
       }
       setCustomerTotal(data.total ?? list.length);
       setHasMore(data.has_more ?? false);
-    } catch (err) {
+    } catch {
       toast.error('Müşteriler yüklenemedi');
     } finally {
       setLoading(false);
@@ -78,7 +78,7 @@ export default function CustomersScreen() {
         .then(stats => setCustomerStats(stats))
         .catch(() => {})
         .finally(() => setStatsLoading(false));
-    } catch (err) {
+    } catch {
       toast.error('Müşteri bilgisi yüklenemedi');
     }
   };
@@ -102,7 +102,7 @@ export default function CustomersScreen() {
       setImportRows(rows);
       setImportFileName(file.name);
       toast.success(`${rows.length} satır yüklendi`);
-    } catch (err) {
+    } catch {
       toast.error('Dosya okunamadı (xlsx/csv)');
       setImportRows([]);
       setImportFileName('');

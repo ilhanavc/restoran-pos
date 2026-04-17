@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useCallback, useEffect, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
+import { useToast } from './context/ToastContext.jsx';
 import { Menu, X } from 'lucide-react';
 import Sidebar from './components/layout/Sidebar.jsx';
 import LoginScreen from './components/auth/LoginScreen.jsx';
@@ -20,6 +21,7 @@ const SettingsLayout = lazy(() => import('./components/settings/SettingsLayout.j
 const SettingsHome = lazy(() => import('./components/settings/SettingsHome.jsx'));
 const SetupReadinessPage = lazy(() => import('./components/settings/SetupReadinessPage.jsx'));
 const MaintenancePage = lazy(() => import('./components/settings/MaintenancePage.jsx'));
+const StoreBridgePage = lazy(() => import('./components/settings/StoreBridgePage.jsx'));
 const BusinessSettingsPage = lazy(() => import('./components/settings/BusinessSettingsPage.jsx'));
 const UsersSettingsPage = lazy(() => import('./components/settings/UsersSettingsPage.jsx'));
 const PrinterSettingsRoutes = lazy(() => import('./components/settings/PrinterSettingsRoutes.jsx'));
@@ -45,6 +47,7 @@ function getShellTitle(pathname) {
   if (pathname === '/settings') return 'Ayarlar';
   if (pathname === '/settings/readiness') return 'Kurulum Kontrolü';
   if (pathname === '/settings/maintenance') return 'Bakım ve Yedekleme';
+  if (pathname === '/settings/bridge') return 'StoreBridge Durumu';
   if (pathname === '/settings/business') return 'İşletme Bilgileri';
   if (pathname === '/settings/users') return 'Kullanıcı Yönetimi';
   if (pathname === '/settings/printers') return 'Yazıcılar';
@@ -76,6 +79,7 @@ function ProtectedRoute({ children, requiredRoles }) {
 
 export default function App() {
   const { user, loading, hasRole } = useAuth();
+  const toast = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [quickPaymentOrder, setQuickPaymentOrder] = useState(null);
@@ -116,6 +120,15 @@ export default function App() {
       cancelled = true;
     };
   }, [location.pathname, navigate, user]);
+
+  // Electron IPC: show toast if automatic backup failed
+  useEffect(() => {
+    if (!window.electronAPI?.onBackupFailed) return;
+    const remove = window.electronAPI.onBackupFailed(() => {
+      toast.warning('Otomatik yedekleme başarısız oldu. Bakım ve Yedekleme sayfasında manuel yedek alın.');
+    });
+    return remove;
+  }, [toast]);
 
   const handleOpenOrder = useCallback((table) => {
     navigate(`/order/table/${table.id}`, { state: { table, existingOrderId: table.current_order_id, orderType: 'dine_in' } });
@@ -259,6 +272,7 @@ export default function App() {
             <Route index element={<SettingsHome />} />
             <Route path="readiness" element={<SetupReadinessPage />} />
             <Route path="maintenance" element={<MaintenancePage />} />
+            <Route path="bridge" element={<StoreBridgePage />} />
             <Route path="business" element={<BusinessSettingsPage />} />
             <Route path="users" element={<UsersSettingsPage />} />
             <Route path="printers" element={<PrinterSettingsRoutes />}>

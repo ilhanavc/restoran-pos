@@ -851,7 +851,9 @@ async function performBackup(dbPath) {
         /* ignore */
       }
     }
-    console.error('[backup] Yedekleme hatası:', e && e.message ? e.message : String(e));
+    const errMsg = e && e.message ? e.message : String(e);
+    console.error('[backup] Yedekleme hatası:', errMsg);
+    mainWindow?.webContents?.send('backup-failed', { message: errMsg });
   }
 }
 

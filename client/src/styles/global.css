@@ -1145,6 +1145,7 @@ body {
 .toast-success { background: var(--toast-success-bg); color: var(--toast-success-text); border: 1px solid var(--success-soft); }
 .toast-error { background: var(--toast-error-bg); color: var(--toast-error-text); border: 1px solid var(--danger-soft); }
 .toast-info { background: var(--toast-info-bg); color: var(--toast-info-text); border: 1px solid var(--info-soft); }
+.toast-warning { background: rgba(245, 158, 11, 0.14); color: var(--warning); border: 1px solid var(--warning-soft); }
 
 /* ── Page Header ── */
 .page-header {

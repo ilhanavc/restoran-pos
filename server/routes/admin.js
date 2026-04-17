@@ -746,6 +746,144 @@ function buildDesktopReadiness(businessId) {
   };
 }
 
+function getBridgeLogPathCandidates() {
+  const userDataPath = getUserDataPath();
+  if (!userDataPath) return [];
+  const logsDir = path.join(userDataPath, 'logs');
+  return [
+    { path: path.join(logsDir, 'store-bridge.log'), source: 'store-bridge' },
+    { path: path.join(logsDir, 'electron-main.log'), source: 'electron-main' },
+  ];
+}
+
+function readLogTail({ filePath, source, limit = 200 }) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { source, file: path.basename(filePath || ''), exists: false, lines: [] };
+  }
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const allLines = raw.split(/\r?\n/);
+  const filtered = source === 'electron-main'
+    ? allLines.filter((line) => line.includes('[store-bridge]'))
+    : allLines;
+  const token = String(config.bridge?.token || '').trim();
+  const lines = filtered
+    .map((line) => (token ? line.replaceAll(token, '***') : line))
+    .filter(Boolean)
+    .slice(-limit);
+  return {
+    source,
+    file: path.basename(filePath),
+    exists: true,
+    lines,
+  };
+}
+
+function buildStoreBridgeHealth(businessId) {
+  const discovery = getJsonSetting(businessId, DISCOVERY_CACHE_KEY, null);
+  const queueSummary = getPrintJobSummary(businessId);
+  const printerConfig = getJsonSetting(businessId, 'printer.config', {});
+  const configuredPrinters = db
+    .prepare(
+      `SELECT id, type, is_active, print_options
+       FROM printers
+       WHERE business_id = ?
+         AND is_active = 1
+         AND type IN ('receipt', 'kitchen')`,
+    )
+    .all(businessId)
+    .map((row) => mapPrinterRow(row));
+  const discoveredNames = new Set(
+    (Array.isArray(discovery?.printers) ? discovery.printers : [])
+      .map((printer) => String(printer?.name || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const selectedPhysicalNames = configuredPrinters
+    .map((printer) => ({
+      type: printer.type,
+      physicalName: String(printer?.print_options?.device?.physicalName || '').trim(),
+    }))
+    .filter((item) => item.physicalName);
+  const missingConfiguredPhysical = selectedPhysicalNames.filter(
+    (item) => discoveredNames.size > 0 && !discoveredNames.has(item.physicalName.toLowerCase()),
+  );
+  const latestFailedJob = db
+    .prepare(
+      `SELECT id, printer_id, error_message, last_error_code, created_at, last_attempt_at
+       FROM print_jobs
+       WHERE business_id = ? AND status = 'failed'
+       ORDER BY datetime(COALESCE(last_attempt_at, created_at)) DESC
+       LIMIT 1`,
+    )
+    .get(businessId);
+  const latestJob = db
+    .prepare(
+      `SELECT id, status, created_at, printed_at, last_attempt_at, last_error_code
+       FROM print_jobs
+       WHERE business_id = ?
+       ORDER BY datetime(COALESCE(last_attempt_at, printed_at, created_at)) DESC
+       LIMIT 1`,
+    )
+    .get(businessId);
+  const bridgeConfigured = !!config.bridge?.token && !!config.bridge?.businessId;
+  const scanState = resolveDiscoveryState(discovery, Array.isArray(discovery?.printers) ? discovery.printers : []);
+
+  let status = 'ok';
+  let message = 'StoreBridge görünümü sağlıklı.';
+  if (!bridgeConfigured) {
+    status = 'unconfigured';
+    message = 'Bridge yapılandırması eksik.';
+  } else if (scanState === 'bridge_unreachable' || scanState === 'auth_error') {
+    status = 'down';
+    message = discoveryMessageForState(scanState) || 'StoreBridge servisine ulaşılamadı.';
+  } else if (
+    scanState === 'never_scanned' ||
+    scanState === 'scanning' ||
+    queueSummary.failed > 0 ||
+    queueSummary.stale_claimed > 0 ||
+    missingConfiguredPhysical.length > 0 ||
+    scanState === 'empty'
+  ) {
+    status = 'degraded';
+    message = latestFailedJob?.last_error_code
+      ? `Son yazdırma hatası: ${latestFailedJob.last_error_code}`
+      : discoveryMessageForState(scanState) || 'StoreBridge dikkat gerektiriyor.';
+  }
+
+  const lastSeenAt = discovery?.updatedAt || null;
+  const logs = getBridgeLogPathCandidates().map(({ path: filePath, source }) => ({
+    source,
+    file: path.basename(filePath),
+    exists: fs.existsSync(filePath),
+  }));
+
+  return {
+    status,
+    running: status === 'ok' || status === 'degraded',
+    configured: bridgeConfigured,
+    message,
+    scanState,
+    lastSeenAt,
+    lastJobAt: latestJob?.created_at || null,
+    lastAttemptAt: latestJob?.last_attempt_at || null,
+    queueSummary,
+    lastErrorCode: latestFailedJob?.last_error_code || discovery?.lastErrorCode || null,
+    discovery: {
+      available: Array.isArray(discovery?.printers) && discovery.printers.length > 0,
+      updatedAt: discovery?.updatedAt || null,
+      printerCount: Array.isArray(discovery?.printers) ? discovery.printers.length : 0,
+      printers: Array.isArray(discovery?.printers) ? discovery.printers : [],
+      lastErrorCode: discovery?.lastErrorCode || null,
+    },
+    selectedPrinters: {
+      receiptPrinterId: printerConfig.defaultPrinterId || printerConfig.usagePaymentId || null,
+      kitchenPrinterId: printerConfig.takeawayLabelPrinterId || printerConfig.usageKitchenId || null,
+      missingConfiguredPhysical,
+    },
+    latestFailedJob: latestFailedJob || null,
+    logs,
+  };
+}
+
 router.get('/desktop-readiness', (req, res) => {
   try {
     res.json(buildDesktopReadiness(req.businessId));
@@ -777,6 +915,33 @@ router.post('/desktop-readiness/complete', (req, res) => {
   } catch (err) {
     console.error('[admin:desktop-readiness:complete]', err);
     res.status(500).json({ error: 'Kurulum tamamlanamadı' });
+  }
+});
+
+router.get('/storebridge/health', (req, res) => {
+  try {
+    res.json(buildStoreBridgeHealth(req.businessId));
+  } catch (err) {
+    console.error('[admin:storebridge:health]', err);
+    res.status(500).json({ error: 'StoreBridge sağlık durumu alınamadı' });
+  }
+});
+
+router.get('/storebridge/logs', (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 10), 1000);
+    const candidates = getBridgeLogPathCandidates();
+    const primary = candidates.find((candidate) => fs.existsSync(candidate.path)) || candidates[0];
+    const log = readLogTail({ filePath: primary?.path, source: primary?.source || 'store-bridge', limit });
+    res.json({
+      source: log.source,
+      file: log.file,
+      exists: log.exists,
+      lines: log.lines,
+    });
+  } catch (err) {
+    console.error('[admin:storebridge:logs]', err);
+    res.status(500).json({ error: 'StoreBridge logları alınamadı' });
   }
 });
 
@@ -1928,6 +2093,115 @@ router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
   } catch (err) {
     console.error('[admin:dining-areas:sync-tables]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Support Bundle ──────────────────────────────────────────────────────────
+// GET /admin/support-bundle
+// Returns a JSON payload with system info, print queue summary, last failed
+// jobs, recent audit log, backup summary and log tails — suitable for
+// attaching to a support ticket or exporting from the maintenance UI.
+router.get('/support-bundle', (req, res) => {
+  try {
+    const userDataPath = getUserDataPath();
+    const dbPath = config.db?.path || null;
+    const backupsDir = getBackupsDir();
+
+    // DB file size
+    let dbSizeBytes = null;
+    try {
+      if (dbPath && fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
+    } catch { /* ignore */ }
+
+    // Print queue counts + last 5 failed jobs
+    const queueSummary = getPrintJobSummary(req.businessId);
+    const recentFailedJobs = db
+      .prepare(
+        `SELECT id, printer_id, status, last_error_code, error_message,
+                created_at, last_attempt_at, attempt_count
+         FROM print_jobs
+         WHERE business_id = ? AND status = 'failed'
+         ORDER BY datetime(COALESCE(last_attempt_at, created_at)) DESC
+         LIMIT 10`,
+      )
+      .all(req.businessId);
+
+    // Recent audit log (last 30 entries)
+    const recentAudit = db
+      .prepare(
+        `SELECT action, entity_type, entity_id, created_at
+         FROM audit_logs
+         WHERE business_id = ?
+         ORDER BY id DESC
+         LIMIT 30`,
+      )
+      .all(req.businessId);
+
+    // Backup summary
+    const backups = listBackupFiles();
+    const latestBackup = backups[0] || null;
+
+    // Bridge health
+    const bridgeHealth = buildStoreBridgeHealth(req.businessId);
+
+    // Log tails — electron-main (full, last 100 lines) + store-bridge (last 150 lines)
+    const logsDir = userDataPath ? path.join(userDataPath, 'logs') : null;
+    const token = String(config.bridge?.token || '').trim();
+
+    function readRawTail(filePath, limit) {
+      if (!filePath || !fs.existsSync(filePath)) return { exists: false, lines: [] };
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const lines = raw
+        .split(/\r?\n/)
+        .map((l) => (token ? l.replaceAll(token, '***') : l))
+        .filter(Boolean)
+        .slice(-limit);
+      return { exists: true, lines };
+    }
+
+    const electronLog = logsDir
+      ? readRawTail(path.join(logsDir, 'electron-main.log'), 100)
+      : { exists: false, lines: [] };
+    const bridgeLog = logsDir
+      ? readRawTail(path.join(logsDir, 'store-bridge.log'), 150)
+      : { exists: false, lines: [] };
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      system: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        userDataPath: userDataPath || null,
+        dbPath,
+        dbSizeBytes,
+        backupsDir: backupsDir || null,
+        backupCount: backups.length,
+        latestBackup: latestBackup
+          ? { name: latestBackup.name, modified_at: latestBackup.modified_at, size: latestBackup.size }
+          : null,
+      },
+      bridge: {
+        status: bridgeHealth.status,
+        message: bridgeHealth.message,
+        scanState: bridgeHealth.scanState,
+        lastSeenAt: bridgeHealth.lastSeenAt,
+        lastErrorCode: bridgeHealth.lastErrorCode,
+        discoveredPrinters: bridgeHealth.discovery?.printerCount ?? 0,
+      },
+      printQueue: {
+        summary: queueSummary,
+        recentFailedJobs,
+      },
+      recentAudit,
+      logs: {
+        electronMain: electronLog,
+        storeBridge: bridgeLog,
+      },
+    });
+  } catch (err) {
+    console.error('[admin:support-bundle]', err);
+    res.status(500).json({ error: 'Destek paketi oluşturulamadı' });
   }
 });
 

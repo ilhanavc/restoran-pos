@@ -25,7 +25,7 @@ const loginSchema = {
   body: z.object({
     email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
     password: z.string().min(1, 'Şifre gerekli').max(128),
-    business_id: z.number().int().positive().optional(),
+    business_id: z.string().trim().min(1).optional(),
   }),
 };
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { DatabaseBackup, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, DatabaseBackup, RefreshCw, RotateCcw, ShieldAlert } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
@@ -46,6 +46,14 @@ export default function MaintenancePage() {
   const backups = useMemo(() => status?.backups || [], [status]);
   const latest = status?.latest || null;
   const pendingRestore = status?.pendingRestore || null;
+
+  // Show staleness warning if latest backup is more than 2 days old (or missing)
+  const backupStale = useMemo(() => {
+    if (!status) return false;
+    if (!latest) return true;
+    const ageMs = Date.now() - new Date(latest.modified_at).getTime();
+    return ageMs > 2 * 24 * 60 * 60 * 1000;
+  }, [status, latest]);
 
   const createBackup = async () => {
     setWorking(true);
@@ -126,6 +134,23 @@ export default function MaintenancePage() {
           </button>
         </div>
       </div>
+
+      {!loading && backupStale ? (
+        <div className="maintenance-restore-alert" style={{ borderColor: 'var(--color-warning)', color: 'var(--color-warning)' }}>
+          <AlertTriangle size={20} />
+          <div>
+            <strong>Güncel yedek yok</strong>
+            <p>
+              {latest
+                ? `Son yedek ${new Date(latest.modified_at).toLocaleDateString('tr-TR')} tarihinde alındı. Otomatik yedekleme çalışmıyor olabilir.`
+                : 'Hiç yedek bulunamadı. Servis öncesi manuel yedek alın.'}
+            </p>
+          </div>
+          <button type="button" className="btn btn-warning btn-sm" onClick={createBackup} disabled={working}>
+            Şimdi Yedekle
+          </button>
+        </div>
+      ) : null}
 
       {pendingRestore ? (
         <div className="maintenance-restore-alert">

@@ -156,6 +156,10 @@ function isOrderFullyPaid(order) {
   return getOrderPaidTotal(order.id) + 0.02 >= round2(order.grand_total || 0);
 }
 
+function isOrderTerminalStatus(status) {
+  return status === 'closed' || status === 'cancelled';
+}
+
 function recordTakeawayDeliveryPaymentIfNeeded(order, businessId, userId) {
   const total = round2(order?.grand_total || 0);
   const paid = getOrderPaidTotal(order.id);
@@ -1005,6 +1009,19 @@ router.patch('/:id/status', staffAndKitchen, validate(updateOrderStatusSchema), 
       return res.json(updated);
     }
 
+    if (status === 'closed') {
+      if (order.status === 'closed') {
+        return res.status(400).json({ error: 'Sipariş zaten kapalı' });
+      }
+      if (order.status === 'cancelled') {
+        return res.status(400).json({ error: 'İptal sipariş kapatılamaz' });
+      }
+    }
+
+    if (status === 'cancelled' && order.status === 'closed') {
+      return res.status(400).json({ error: 'Kapalı sipariş iptal edilemez' });
+    }
+
     let sentItemIds = [];
     if (status === 'in_kitchen') {
       const rows = db.prepare(`SELECT id FROM order_items WHERE order_id = ? AND status = 'new'`).all(order.id);
@@ -1034,7 +1051,7 @@ router.patch('/:id/status', staffAndKitchen, validate(updateOrderStatusSchema), 
            WHERE business_id = ? AND current_order_id = ?`,
         ).run(req.businessId, order.id);
       }
-      if (status === 'closed' && order.customer_id) {
+      if (status === 'closed' && order.customer_id && !isOrderTerminalStatus(order.status)) {
         db.prepare("UPDATE customers SET total_orders = total_orders + 1, last_order_at = datetime('now') WHERE id = ?")
           .run(order.customer_id);
       }

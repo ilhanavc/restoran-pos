@@ -132,6 +132,107 @@ describe('bridge print job lease behavior', () => {
   });
 });
 
+describe('bridge health and discovery contract', () => {
+  it('returns structured health with discovery, refresh request and queue summary', async () => {
+    insertPrintJob({ id: 'health-pending', status: 'pending' });
+    dbRef.current.prepare(`
+      INSERT INTO print_jobs (
+        id, business_id, order_id, printer_id, job_type, payload, status,
+        error_message, last_error_code, idempotency_key, created_at
+      ) VALUES (?, ?, NULL, NULL, 'test', '{}', 'failed', 'USB hata', 'usb_print_failed', ?, datetime('now'))
+    `).run('health-failed', seeds.businessId, 'idem-health-failed');
+    dbRef.current.prepare(`
+      INSERT INTO settings (id, business_id, key, value, updated_at)
+      VALUES ('discovery-cache', ?, 'bridge.discovered_printers', ?, datetime('now'))
+    `).run(
+      seeds.businessId,
+      JSON.stringify({
+        scanState: 'success',
+        lastErrorCode: null,
+        updatedAt: '2026-04-16T13:00:00.000Z',
+        printers: [{ name: 'USB-1', isOnline: true }],
+      }),
+    );
+    dbRef.current.prepare(`
+      INSERT INTO settings (id, business_id, key, value, updated_at)
+      VALUES ('refresh-request', ?, 'bridge.discovery_refresh_request', ?, datetime('now'))
+    `).run(
+      seeds.businessId,
+      JSON.stringify({
+        requestId: 'scan-1',
+        requestedAt: '2026-04-16T13:01:00.000Z',
+        status: 'requested',
+        source: 'admin',
+      }),
+    );
+
+    const res = await withBridgeAuth(request(app).get('/api/bridge/health'));
+
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.discovery.scanState).toBe('success');
+    expect(res.body.discovery.printers).toEqual([expect.objectContaining({ name: 'USB-1' })]);
+    expect(res.body.refreshRequest).toEqual(expect.objectContaining({ requestId: 'scan-1', status: 'requested' }));
+    expect(res.body.queueSummary).toEqual(expect.objectContaining({ pending: 1, failed: 1, stale_claimed: 0 }));
+    expect(res.body.lastErrorCode).toBe('usb_print_failed');
+  });
+
+  it('tracks discovery refresh lifecycle and normalizes cache payload', async () => {
+    const refreshRes = await withBridgeAuth(request(app).post('/api/bridge/printers/discovered/refresh')).send({});
+    expect(refreshRes.status).toBe(200);
+    expect(refreshRes.body.scanState).toBe('scanning');
+    expect(refreshRes.body.request).toEqual(expect.objectContaining({ status: 'requested' }));
+
+    const requestState = await withBridgeAuth(request(app).get('/api/bridge/printers/discovered/refresh-request'));
+    expect(requestState.status).toBe(200);
+    expect(requestState.body.hasPending).toBe(true);
+
+    const discoveredRes = await withBridgeAuth(request(app).post('/api/bridge/printers/discovered'))
+      .send({
+        requestId: refreshRes.body.requestId,
+        scanState: 'success',
+        printers: [{ name: 'Windows Printer', isDefault: true, isOnline: true, connectionType: 'usb', portName: 'USB001' }],
+      });
+    expect(discoveredRes.status).toBe(200);
+
+    const listRes = await withBridgeAuth(request(app).get('/api/bridge/printers/discovered'));
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.scanState).toBe('success');
+    expect(listRes.body.printers).toEqual([
+      expect.objectContaining({
+        name: 'Windows Printer',
+        connectionType: 'usb',
+        portName: 'USB001',
+        source: 'windows',
+      }),
+    ]);
+
+    const requestDone = await withBridgeAuth(request(app).get('/api/bridge/printers/discovered/refresh-request'));
+    expect(requestDone.status).toBe(200);
+    expect(requestDone.body.request).toEqual(expect.objectContaining({ status: 'completed' }));
+    expect(requestDone.body.hasPending).toBe(false);
+  });
+
+  it('preserves auth and business isolation for discovery cache', async () => {
+    const otherSeeds = helpers.seedBusiness(dbRef.current);
+    dbRef.current.prepare(`
+      INSERT INTO settings (id, business_id, key, value, updated_at)
+      VALUES ('discovery-current', ?, 'bridge.discovered_printers', ?, datetime('now'))
+    `).run(seeds.businessId, JSON.stringify({ scanState: 'success', printers: [{ name: 'Current' }] }));
+    dbRef.current.prepare(`
+      INSERT INTO settings (id, business_id, key, value, updated_at)
+      VALUES ('discovery-other', ?, 'bridge.discovered_printers', ?, datetime('now'))
+    `).run(otherSeeds.businessId, JSON.stringify({ scanState: 'success', printers: [{ name: 'Other' }] }));
+
+    const currentRes = await withBridgeAuth(request(app).get('/api/bridge/printers/discovered'));
+    expect(currentRes.status).toBe(200);
+    expect(currentRes.body.printers).toEqual([expect.objectContaining({ name: 'Current' })]);
+
+    const unauthRes = await request(app).get('/api/bridge/health');
+    expect(unauthRes.status).toBe(401);
+  });
+});
+
 // ── P2: Print queue filtre ve özet endpoint testleri ─────────────────────────
 
 describe('GET /api/bridge/print-jobs — filtre ve özet (P2)', () => {

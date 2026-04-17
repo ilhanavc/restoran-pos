@@ -128,6 +128,11 @@ describe('canOpenOrderPayment', () => {
     expect(canOpenOrderPayment(closed, [])).toBe(false);
   });
 
+  it('sipariş iptal → false', () => {
+    const cancelled = { ...baseOrder, status: 'cancelled' };
+    expect(canOpenOrderPayment(cancelled, [])).toBe(false);
+  });
+
   it('sipariş null → false', () => {
     expect(canOpenOrderPayment(null, [])).toBe(false);
   });

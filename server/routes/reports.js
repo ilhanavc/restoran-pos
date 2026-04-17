@@ -42,9 +42,19 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
     `).get(req.businessId, startAt, endAt);
 
     const paymentBreakdown = db.prepare(`
-      SELECT payment_type, COUNT(*) as count, COALESCE(SUM(amount), 0) as total
-      FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
-      GROUP BY payment_type
+      SELECT
+        CASE
+          WHEN source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
+          ELSE payment_type
+        END AS payment_type,
+        COUNT(*) as count,
+        COALESCE(SUM(amount), 0) as total
+      FROM payments
+      WHERE business_id = ? AND created_at >= ? AND created_at < ?
+      GROUP BY CASE
+        WHEN source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
+        ELSE payment_type
+      END
     `).all(req.businessId, startAt, endAt);
 
     const topProducts = db.prepare(`
@@ -168,7 +178,14 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
         COALESCE(o.table_name_snapshot, t.name) AS table_name,
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
-        (SELECT p.payment_type FROM payments p WHERE p.order_id = o.id ORDER BY p.created_at LIMIT 1) AS payment_type
+        (SELECT CASE
+            WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
+            ELSE p.payment_type
+          END
+         FROM payments p
+         WHERE p.order_id = o.id
+         ORDER BY p.created_at
+         LIMIT 1) AS payment_type
       FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
       LEFT JOIN users u ON o.user_id = u.id
@@ -229,7 +246,14 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
         COALESCE(o.table_name_snapshot, t.name) AS table_name,
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
-        (SELECT p.payment_type FROM payments p WHERE p.order_id = o.id ORDER BY p.created_at LIMIT 1) AS payment_type
+        (SELECT CASE
+            WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
+            ELSE p.payment_type
+          END
+         FROM payments p
+         WHERE p.order_id = o.id
+         ORDER BY p.created_at
+         LIMIT 1) AS payment_type
       FROM orders o
       LEFT JOIN tables t ON o.table_id = t.id
       LEFT JOIN users u ON o.user_id = u.id

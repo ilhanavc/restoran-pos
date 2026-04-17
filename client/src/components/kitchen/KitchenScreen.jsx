@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
-import { formatTime, timeAgo, ORDER_STATUS, parseDbTimestampMs } from '../../constants/index.js';
+import { timeAgo, parseDbTimestampMs } from '../../constants/index.js';
 import { RefreshCw, Clock, Package, ChefHat, Check, AlertCircle } from 'lucide-react';
 
 /** Web Audio API ile kısa bip sesi çalar */
@@ -51,14 +51,14 @@ export default function KitchenScreen() {
       if (prevOrderIds.current.size > 0 && hasNew) playBeep();
       prevOrderIds.current = newIds;
       setOrders(data);
-    } catch (err) {
+    } catch {
       toast.error('Siparişler yüklenemedi');
     } finally {
       setLoading(false);
     }
   }, [toast]);
 
-  useEffect(() => { loadOrders(); }, []);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
 
   // Saniye sayacı — yaş renklerini canlı günceller
   useEffect(() => {

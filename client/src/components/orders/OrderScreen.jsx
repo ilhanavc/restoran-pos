@@ -85,6 +85,7 @@ export default function OrderScreen({
 
   useEffect(() => {
     loadCategories();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; loadCategories is not memoized
   }, []);
 
   useEffect(() => {
@@ -142,7 +143,7 @@ export default function OrderScreen({
         setActiveCat(cats[0].id);
         loadProducts(cats[0].id);
       }
-    } catch (err) { toast.error('Kategoriler yüklenemedi'); }
+    } catch { toast.error('Kategoriler yüklenemedi'); }
     finally { setCategoriesLoading(false); }
   };
 
@@ -152,7 +153,7 @@ export default function OrderScreen({
         ? await api.getProducts({})
         : await api.getProducts({ category_id: catId });
       setProducts(prods);
-    } catch (err) { toast.error('Ürünler yüklenemedi'); }
+    } catch { toast.error('Ürünler yüklenemedi'); }
   };
 
   const loadExistingOrder = async (orderId) => {
@@ -177,7 +178,7 @@ export default function OrderScreen({
         const prods = await api.getProducts({ search: q });
         setProducts(prods);
         setActiveCat(null);
-      } catch (err) {}
+      } catch {}
     } else if (q === '') {
       const catId = activeCat || categories[0]?.id;
       if (catId) {
@@ -738,6 +739,7 @@ export default function OrderScreen({
                 type="button"
                 className="order-screen-topbar-icon-btn"
                 onClick={openCustomerModal}
+                data-testid="order-select-customer-button"
                 disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
                 title={selectedCustomer ? 'Müşteriyi değiştir' : 'Müşteri seç'}
               >
@@ -854,6 +856,7 @@ export default function OrderScreen({
                   <button
                     type="button"
                     onClick={() => quickAddFromGrid(prod)}
+                    data-testid={`product-card-${prod.id}`}
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -1237,6 +1240,7 @@ export default function OrderScreen({
             <button
               type="button"
               className="btn btn-primary"
+              data-testid="order-save-button"
               style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
               onClick={handleSaveOrder}
               disabled={saving}
@@ -1248,6 +1252,7 @@ export default function OrderScreen({
               <button
                 type="button"
                 className="btn btn-primary"
+                data-testid="order-payment-button"
                 style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
                 onClick={() => openPaymentFlow('detail')}
                 disabled={saving}
@@ -1324,7 +1329,7 @@ export default function OrderScreen({
       {lineDetailModal?.kind === 'existing' && existingOrder && (() => {
         const item = (existingOrder.items || []).find((i) => i.id === lineDetailModal.itemId);
         if (!item) return null;
-        let mods = [];
+        let mods;
         try {
           mods = JSON.parse(item.modifiers || '[]');
         } catch {
@@ -1410,6 +1415,7 @@ export default function OrderScreen({
                 <Search size={15} className="order-customer-modal-search-icon" />
                 <input
                   className="input"
+                  data-testid="order-customer-search-input"
                   placeholder="Ad veya telefon ile ara..."
                   value={customerSearchQuery}
                   onChange={(e) => handleCustomerSearchInput(e.target.value)}
@@ -1478,6 +1484,7 @@ export default function OrderScreen({
                     <button
                       key={c.id}
                       type="button"
+                      data-testid={`customer-row-${c.id}`}
                       className={`order-customer-row ${selectedCustomer?.id === c.id ? 'is-active' : ''}`}
                       onClick={() => handlePickCustomer(c)}
                       disabled={saving}
@@ -1513,7 +1520,7 @@ export default function OrderScreen({
               )}
             </div>
             <div className="modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
+              <button type="button" className="btn btn-ghost" data-testid="order-customer-modal-close-button" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
             </div>
           </div>
         </div>

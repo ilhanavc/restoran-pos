@@ -82,6 +82,7 @@ export default function LoginScreen() {
             <div style={{ position: 'relative' }}>
               <Mail size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)}
+                data-testid="login-email-input"
                 placeholder="ornek@restoran.com" style={{ paddingLeft: 38 }} autoComplete="email" />
             </div>
           </div>
@@ -107,11 +108,12 @@ export default function LoginScreen() {
             <div style={{ position: 'relative' }}>
               <Lock size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)}
+                data-testid="login-password-input"
                 placeholder="••••••" style={{ paddingLeft: 38 }} />
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading}>
+          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading} data-testid="login-submit-button">
             {loading ? <Loader size={18} style={{ animation: 'spin 1s linear infinite' }} /> : 'Giriş Yap'}
           </button>
         </form>
@@ -128,7 +130,11 @@ export default function LoginScreen() {
               { label: 'Garson', email: 'garson@demo.com', color: 'var(--warning)' },
               { label: 'Mutfak', email: 'mutfak@demo.com', color: 'var(--orange)' },
             ].map(q => (
-              <button key={q.email} className="btn btn-ghost btn-sm" onClick={() => quickLogin(q.email)}
+              <button
+                key={q.email}
+                className="btn btn-ghost btn-sm"
+                data-testid={`quick-login-${q.email.split('@')[0]}`}
+                onClick={() => quickLogin(q.email)}
                 style={{ justifyContent: 'flex-start', gap: 8 }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: q.color, flexShrink: 0 }} />
                 <span>{q.label}</span>

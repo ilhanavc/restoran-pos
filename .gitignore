@@ -60,3 +60,12 @@ fisornek.txt
 restoran-pos-v3-ozet.docx
 .claude/
 .tmp/
+
+# Yerel uygulama config (JWT secret içerebilir — asla commit etme)
+pos-config.json
+
+# Üretilmiş rapor/roadmap PDF çıktıları (generate-roadmap.cjs çıktısı)
+*.pdf
+
+# Playwright test çıktıları
+test-results/

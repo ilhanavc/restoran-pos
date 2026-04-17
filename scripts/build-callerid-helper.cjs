@@ -49,18 +49,29 @@ if (dotnetCheck.status !== 0) {
 }
 
 console.log(`[build-callerid-helper] dotnet ${String(dotnetCheck.stdout || '').trim()}`);
-const buildArgs = [
-  'build',
+
+// Use `dotnet publish` with self-contained win-x64 so the resulting .exe
+// does not require the .NET runtime on the target machine.
+// Output is placed directly into bin/Release/net8.0/ so extraResources and
+// preflight paths stay unchanged.
+const publishArgs = [
+  'publish',
   csproj,
   '-c',
   'Release',
+  '-r',
+  'win-x64',
+  '--self-contained',
+  'true',
+  '-o',
+  outputDir,
   '--nologo',
   '-p:RestoreFallbackFolders=',
   '-p:RestoreAdditionalProjectFallbackFolders=',
   '-p:DisableImplicitNuGetFallbackFolder=true',
 ];
 
-const build = spawnSync('dotnet', buildArgs, {
+const build = spawnSync('dotnet', publishArgs, {
   cwd: root,
   stdio: 'inherit',
   shell: true,
@@ -69,7 +80,7 @@ const build = spawnSync('dotnet', buildArgs, {
 if (build.status !== 0 || build.error) {
   if (build.error) console.error(build.error);
   if (fs.existsSync(exePath)) {
-    console.warn('[build-callerid-helper] WARN: dotnet build basarisiz oldu; mevcut Release helper kullaniliyor.');
+    console.warn('[build-callerid-helper] WARN: dotnet publish basarisiz oldu; mevcut Release helper kullaniliyor.');
     console.warn('[build-callerid-helper] WARN: release makinesinde .NET/NuGet ortamini duzeltin ve helper build logunu kontrol edin.');
   } else {
     process.exit(build.status || 1);

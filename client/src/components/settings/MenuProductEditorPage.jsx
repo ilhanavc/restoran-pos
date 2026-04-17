@@ -108,7 +108,7 @@ export default function MenuProductEditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [isNew, productId, defaultCategoryFromNav, navigate]);
+  }, [isNew, productId, defaultCategoryFromNav, navigate, error]);
 
   // Load all products for combo picker (edit mode only)
   useEffect(() => {

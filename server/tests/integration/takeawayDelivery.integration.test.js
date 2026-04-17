@@ -107,8 +107,9 @@ describe('takeaway delivery payment behavior', () => {
     expect(order.closed_at).toBeTruthy();
     expect(order.takeaway_delivered_at).toBeTruthy();
 
-    const payment = dbRef.current.prepare('SELECT payment_type, amount, note FROM payments WHERE order_id = ?').get(orderId);
+    const payment = dbRef.current.prepare('SELECT payment_type, source, amount, note FROM payments WHERE order_id = ?').get(orderId);
     expect(payment.payment_type).toBe('other');
+    expect(payment.source).toBe('system_takeaway_delivery');
     expect(payment.amount).toBe(240);
     expect(payment.note).toContain('Paket teslim');
   });

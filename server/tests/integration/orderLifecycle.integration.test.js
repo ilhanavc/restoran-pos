@@ -243,6 +243,61 @@ describe('PATCH /api/orders/:id/status — sipariş kapanması', () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/ödeme/i);
   });
+
+  it('zaten kapalı sipariş tekrar kapatılamaz → 400 ve side-effect tekrarlanmaz', async () => {
+    const created = await createOrder();
+    const orderId = created.body.id;
+    const total = created.body.grand_total;
+
+    dbRef.current.prepare(`
+      INSERT INTO customers (id, business_id, full_name, total_orders)
+      VALUES ('customer-close-repeat', ?, 'Tekrar Musteri', 0)
+    `).run(seeds.businessId);
+    dbRef.current.prepare(`UPDATE orders SET customer_id = ? WHERE id = ?`).run('customer-close-repeat', orderId);
+
+    dbRef.current.prepare(`
+      INSERT INTO payments (id, business_id, order_id, payment_type, amount, created_by)
+      VALUES ('pay-close-repeat-1', ?, ?, 'cash', ?, ?)
+    `).run(seeds.businessId, orderId, total, seeds.userId);
+
+    const first = await request(app)
+      .patch(`/api/orders/${orderId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+    expect(first.status).toBe(200);
+
+    const customerAfterFirst = dbRef.current.prepare('SELECT total_orders FROM customers WHERE id = ?').get('customer-close-repeat');
+
+    const second = await request(app)
+      .patch(`/api/orders/${orderId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+
+    expect(second.status).toBe(400);
+    expect(second.body.error).toMatch(/zaten kapalı/i);
+
+    const customerAfterSecond = dbRef.current.prepare('SELECT total_orders FROM customers WHERE id = ?').get('customer-close-repeat');
+    expect(customerAfterSecond.total_orders).toBe(customerAfterFirst.total_orders);
+  });
+
+  it('iptal sipariş kapatılamaz → 400', async () => {
+    const created = await createOrder();
+    const orderId = created.body.id;
+
+    await request(app)
+      .patch(`/api/orders/${orderId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'cancelled' })
+      .expect(200);
+
+    const res = await request(app)
+      .patch(`/api/orders/${orderId}/status`)
+      .set('Authorization', authHeader)
+      .send({ status: 'closed' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('sipariş');
+  });
 });
 
 // ── PATCH /api/orders/:id/status → in_kitchen ─────────────────────────────────

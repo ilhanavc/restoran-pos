@@ -198,21 +198,29 @@ function buildSplitState(orderId, businessId) {
 }
 
 function closeOrderAndTableIfPaid(order, businessId, userId) {
-  const totalPaid = db.prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = ?').get(order.id);
-  const current = db.prepare('SELECT grand_total FROM orders WHERE id = ?').get(order.id);
+  const totalPaid = db
+    .prepare('SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE order_id = ?')
+    .get(order.id);
+  const current = db
+    .prepare('SELECT id, business_id, status, grand_total, table_id, customer_id FROM orders WHERE id = ? AND business_id = ?')
+    .get(order.id, businessId);
+  if (!current) return false;
+  if (current.status === 'closed') return true;
+  if (current.status === 'cancelled') return false;
   if (round2(totalPaid.total || 0) + 0.02 < round2(current?.grand_total || 0)) return false;
 
-  db.prepare("UPDATE orders SET status = 'closed', closed_at = datetime('now'), updated_by = ? WHERE id = ?")
-    .run(userId, order.id);
+  db.prepare("UPDATE orders SET status = 'closed', closed_at = datetime('now'), updated_by = ? WHERE id = ? AND business_id = ?")
+    .run(userId, order.id, businessId);
 
-  if (order.table_id) {
-    db.prepare("UPDATE tables SET status = 'empty', current_order_id = NULL, guest_count = 0, updated_at = datetime('now') WHERE id = ?")
-      .run(order.table_id);
+  if (current.table_id) {
+    db.prepare(
+      "UPDATE tables SET status = 'empty', current_order_id = NULL, guest_count = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ? AND current_order_id = ?",
+    ).run(current.table_id, businessId, order.id);
   }
 
-  if (order.customer_id) {
-    db.prepare("UPDATE customers SET total_orders = total_orders + 1, last_order_at = datetime('now') WHERE id = ?")
-      .run(order.customer_id);
+  if (current.customer_id) {
+    db.prepare("UPDATE customers SET total_orders = total_orders + 1, last_order_at = datetime('now') WHERE id = ? AND business_id = ?")
+      .run(current.customer_id, businessId);
   }
 
   return true;

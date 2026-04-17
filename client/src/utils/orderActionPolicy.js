@@ -26,7 +26,7 @@ export function canOpenOrderPayment(order, cartItems) {
   return Boolean(
     order
     && !hasUnsavedOrderChanges(cartItems)
-    && order.status !== 'closed'
+    && !isOrderClosedOrCancelled(order)
     && getActiveOrderItems(order).length > 0,
   );
 }

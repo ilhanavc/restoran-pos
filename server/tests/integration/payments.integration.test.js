@@ -244,6 +244,33 @@ describe('full payments', () => {
     expect(payments.c).toBe(1);
     expect(allocations.c).toBe(1);
   });
+
+  it('rejects a second payment that exceeds the remaining balance after a partial payment', async () => {
+    const { orderId } = createOrder({ quantity: 2, total: 160 });
+
+    await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 100,
+        cash_received: 100,
+      })
+      .expect(201);
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'card',
+        amount: 70,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('kalan bakiyeyi aşıyor');
+  });
 });
 
 // ── P1-04: close_order=true → sipariş kapanır + masa boşalır ─────────────────

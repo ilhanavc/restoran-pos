@@ -5,6 +5,7 @@ import { formatCurrency } from '../../constants/index.js';
 import { X, CreditCard, Banknote, ArrowLeftRight, Check, Printer, Save } from 'lucide-react';
 import SplitPaymentModal from './SplitPaymentModal.jsx';
 import { getOrderTotal, getPaidTotal, getTotalDue, isOrderFullyPaid, roundMoney } from '../../utils/orderPaymentState.js';
+import { getPrintErrorAction } from '../../utils/printErrorMessages.js';
 import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 
 const paymentTypes = [
@@ -53,6 +54,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
 
   useEffect(() => {
     setOrderState(order);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: sync only on specific order fields to avoid reset loop on unrelated re-renders
   }, [order?.id, order?.grand_total, order?.payments]);
 
   if (!orderState) return null;
@@ -103,7 +105,11 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
       return;
     }
     if (printReceipt) {
-      await api.printOrderReceipt(current.id, printerId ? { printer_id: printerId } : {});
+      const printResult = await api.printOrderReceipt(current.id, printerId ? { printer_id: printerId } : {});
+      if (printResult?.printJob?.status === 'failed' || printResult?.printJob?.error_code) {
+        const action = getPrintErrorAction(printResult.printJob?.error_code);
+        toast.warning(`Fiş kuyruğa alındı ancak yazıcıya ulaşılamadı. ${action}`);
+      }
     }
     const updated = await api.updateOrderStatus(current.id, 'closed');
     finishSuccess({ order: updated }, printReceipt ? 'Masa kapatıldı ve yazdırıldı' : 'Masa kapatıldı');
@@ -112,8 +118,13 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const printPaidOrder = async (printerId = null) => {
     setProcessing(true);
     try {
-      await api.printOrderReceipt(orderState.id, printerId ? { printer_id: printerId } : {});
-      toast.success('Yazdırma isteği gönderildi');
+      const printResult = await api.printOrderReceipt(orderState.id, printerId ? { printer_id: printerId } : {});
+      if (printResult?.printJob?.status === 'failed' || printResult?.printJob?.error_code) {
+        const action = getPrintErrorAction(printResult.printJob?.error_code);
+        toast.warning(`Fiş kuyruğa alındı ancak yazıcıya ulaşılamadı. ${action}`);
+      } else {
+        toast.success('Yazdırma isteği gönderildi');
+      }
     } catch (err) {
       toast.error(err.message || 'Yazdırma isteği gönderilemedi');
     } finally {
@@ -419,6 +430,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                         <button
                           key={action.key}
                           type="button"
+                          data-testid={`payment-action-${action.key}`}
                           className={paymentActionClass(action, selected)}
                           onClick={() => setPaymentAction(action.key)}
                           style={{ minHeight: 48, justifyContent: 'center', fontWeight: selected ? 850 : 750 }}
@@ -506,6 +518,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
           {!isFullyPaid && (
             <button
               type="button"
+              data-testid="payment-submit-button"
               className={selectedAction.tone === 'success' ? 'btn btn-success btn-lg' : 'btn btn-primary btn-lg'}
               onClick={handlePayment}
               disabled={processing}

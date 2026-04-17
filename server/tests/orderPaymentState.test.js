@@ -174,6 +174,16 @@ describe('canCloseOrder', () => {
     const order = { current_order_id: 'order-3', grand_total: 100, payments: [{ amount: 100 }] };
     expect(canCloseOrder(order)).toBe(true);
   });
+
+  it('kapalı sipariş için false döner', () => {
+    const order = { id: 'order-closed', status: 'closed', grand_total: 100, payments: [{ amount: 100 }] };
+    expect(canCloseOrder(order)).toBe(false);
+  });
+
+  it('iptal sipariş için false döner', () => {
+    const order = { id: 'order-cancelled', status: 'cancelled', grand_total: 100, payments: [{ amount: 100 }] };
+    expect(canCloseOrder(order)).toBe(false);
+  });
 });
 
 // ── getPaymentStateLabel ──────────────────────────────────────────────────────

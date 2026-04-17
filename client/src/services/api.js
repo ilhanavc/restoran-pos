@@ -162,6 +162,9 @@ class ApiService extends ApiHttpClient {
   patchAdminBusiness(body) { return this.patch('/admin/business', body); }
   getDesktopReadiness() { return this.get('/admin/desktop-readiness'); }
   completeDesktopReadiness() { return this.post('/admin/desktop-readiness/complete', {}); }
+  getAdminStoreBridgeHealth() { return this.get('/admin/storebridge/health'); }
+  getAdminStoreBridgeLogs(params = {}) { return this.get(`/admin/storebridge/logs${this.buildQuery(params)}`); }
+  getSupportBundle() { return this.get('/admin/support-bundle'); }
   getMaintenanceStatus() { return this.get('/admin/maintenance'); }
   createManualBackup() { return this.post('/admin/maintenance/backups', {}); }
   requestRestore(backupId) { return this.post('/admin/maintenance/restore-request', { backup_id: backupId }); }
@@ -175,11 +178,10 @@ class ApiService extends ApiHttpClient {
   /** Bridge erişilebilirlik kontrolü. scanState: 'ok' | 'bridge_unreachable' | 'bridge_unconfigured' | ... */
   async getBridgeStatus() {
     try {
-      const data = await this.get('/admin/printers/discovered');
-      const s = data.scanState || '';
-      const lastErrorCode = String(data.lastErrorCode || '').trim();
-      if (s === 'bridge_unconfigured' || lastErrorCode === 'bridge_not_configured') return 'unconfigured';
-      if (s === 'bridge_unreachable' || s === 'auth_error') return 'down';
+      const data = await this.getAdminStoreBridgeHealth();
+      if (data?.status === 'unconfigured') return 'unconfigured';
+      if (data?.status === 'down') return 'down';
+      if (data?.status === 'degraded') return 'degraded';
       return 'ok';
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) return null;

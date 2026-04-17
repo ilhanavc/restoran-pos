@@ -43,6 +43,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Bakım/restore sonrası uygulamayı kontrollü yeniden başlat. */
   restartApp: () => ipcRenderer.send('restart-app'),
 
+  /** Otomatik yedekleme başarısız olduğunda callback'i çağırır. */
+  onBackupFailed: (callback) => {
+    const handler = (_, info) => callback(info);
+    ipcRenderer.on('backup-failed', handler);
+    return () => ipcRenderer.removeListener('backup-failed', handler);
+  },
+
   /** Electron ortamında çalışıp çalışmadığını döner (browser'dan ayırt etmek için). */
   isElectron: true,
 });

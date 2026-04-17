@@ -113,6 +113,7 @@ function PrinterPreviewPanel({ type, lineWidth, printOptions }) {
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- printOptions is captured via printOptionsSig (JSON.stringify); adding printOptions directly would cause duplicate runs
   }, [previewKind, lineWidth, printOptionsSig]);
 
   return (
@@ -352,13 +353,6 @@ export default function PrinterDetailPage() {
     setPrintOptions((prev) => ({
       ...prev,
       kitchenGroups: { ...prev.kitchenGroups, [key]: val },
-    }));
-  };
-
-  const setOutput = (key, val) => {
-    setPrintOptions((prev) => ({
-      ...prev,
-      output: { ...prev.output, [key]: val },
     }));
   };
 

@@ -7,6 +7,7 @@ import { useSocket } from '../../context/SocketContext.jsx';
 import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import { getPaymentStateLabel, isOrderFullyPaid } from '../../utils/orderPaymentState.js';
+import { getPrintErrorMessage } from '../../utils/printErrorMessages.js';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 import {
@@ -80,7 +81,7 @@ export default function TablesScreen({
       } else if (!activeArea && data.length > 0) {
         setActiveArea(data[0].id);
       }
-    } catch (err) {
+    } catch {
       toast.error('Masalar yüklenemedi');
     } finally {
       setLoading(false);
@@ -205,7 +206,7 @@ export default function TablesScreen({
     try {
       const data = await api.getCallHistory();
       setCallHistory(data || []);
-    } catch (err) {
+    } catch {
       toast.error('Arama geçmişi yüklenemedi');
     } finally {
       setCallHistoryLoading(false);
@@ -565,6 +566,7 @@ export default function TablesScreen({
               <button
                 type="button"
                 className="btn btn-ghost tables-paket-btn"
+                data-testid="tables-new-takeaway-button"
                 onClick={onNewTakeawayOrder}
                 title="Yeni paket siparişi"
               >
@@ -614,11 +616,15 @@ export default function TablesScreen({
                   {stalePrintCount > 0 ? `${stalePrintCount} süresi geçmiş iş` : ''}
                   {pendingPrintCount > 0 ? ` · ${pendingPrintCount} bekleyen` : ''}
                 </div>
-                {firstFailedPrintJob && (
-                  <div className="print-health-alert-detail">
-                    {firstFailedPrintJob.printer_name || 'Yazıcı'} · {firstFailedPrintJob.last_error_code || 'hata'} · {firstFailedPrintJob.error_message || 'Yazdırma tamamlanamadı'}
-                  </div>
-                )}
+                {firstFailedPrintJob && (() => {
+                  const { label, action } = getPrintErrorMessage(firstFailedPrintJob.last_error_code);
+                  return (
+                    <div className="print-health-alert-detail">
+                      <span>{firstFailedPrintJob.printer_name || 'Yazıcı'} · {label}</span>
+                      <span style={{ display: 'block', marginTop: 2, color: 'var(--color-warning)' }}>{action}</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             {firstFailedPrintJob && (
@@ -712,6 +718,8 @@ export default function TablesScreen({
                   <div
                     key={table.id}
                     onClick={() => handleTableClick(table)}
+                    data-testid={`table-card-${table.id}`}
+                    data-table-status={table.status}
                     style={{
                       background: bg,
                       border: `1.5px solid ${borderColor}`,
@@ -896,6 +904,7 @@ export default function TablesScreen({
                 <div
                   key={o.id}
                   className="takeaway-order-card"
+                  data-testid={`takeaway-order-card-${o.id}`}
                   style={{
                     borderRadius: 8,
                     border: isOut ? '1px solid var(--info)' : '1px solid var(--border)',

@@ -299,7 +299,7 @@ export default function ReportsScreen() {
     }
   }, [orderFrom, orderTo, orderCustomer, orderMinAmount, orderMaxAmount, selectedDate, toast]);
 
-  useEffect(() => { loadAll(); }, [selectedDate]);
+  useEffect(() => { loadAll(); }, [selectedDate]); // eslint-disable-line react-hooks/exhaustive-deps -- loadAll is not memoized; selectedDate is the intended trigger
 
   const loadAll = async () => {
     setLoading(true);

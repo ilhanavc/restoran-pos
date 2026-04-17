@@ -74,6 +74,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
 
   useEffect(() => {
     loadState({ resetDraftPayers: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload on orderId change only; loadState is not memoized
   }, [orderId]);
 
   const itemMap = useMemo(() => {

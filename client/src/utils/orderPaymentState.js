@@ -25,6 +25,7 @@ export function isOrderFullyPaid(order) {
 }
 
 export function canCloseOrder(order) {
+  if (['closed', 'cancelled'].includes(order?.status)) return false;
   return Boolean(order?.id || order?.current_order_id) && isOrderFullyPaid(order);
 }
 

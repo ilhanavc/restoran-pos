@@ -65,6 +65,7 @@ try {
   const users = [
     { email: 'admin@demo.com', name: 'Ali Yılmaz', role: 'admin' },
     { email: 'kasiyer@demo.com', name: 'Ayşe Demir', role: 'cashier' },
+    { email: 'smoke.kasiyer@demo.com', name: 'Smoke Kasiyer', role: 'cashier' },
     { email: 'garson@demo.com', name: 'Mehmet Kaya', role: 'waiter' },
     { email: 'mutfak@demo.com', name: 'Fatma Çelik', role: 'kitchen' },
   ];
@@ -102,26 +103,54 @@ try {
   }
   console.log('   ' + tableCount + ' masa oluşturuldu');
 
-  // Kategori / ürün / modifier yok — Ayarlar > Menü tanımlarından manuel girilir
-  console.log('   Kategori ve ürün yok (manuel giriş)');
+  // Deterministic smoke fixture: en az bir aktif kategori + ürün.
+  const smokeCategoryId = uuid();
+  const smokeProductId = uuid();
+  db.prepare(`INSERT INTO categories (id, business_id, name, color, icon, sort_order, printer_target, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1)`).run(
+    smokeCategoryId,
+    businessId,
+    'Smoke Menü',
+    '#16a34a',
+    '🍔',
+    0,
+    'kitchen',
+  );
+  db.prepare(`INSERT INTO products (id, business_id, category_id, name, description, price, vat_rate, printer_target, sort_order, is_active, is_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`).run(
+    smokeProductId,
+    businessId,
+    smokeCategoryId,
+    'Smoke Köfte',
+    'Playwright smoke testi için sabit ürün',
+    120,
+    10,
+    'kitchen',
+    0,
+  );
+  console.log('   Smoke fixture kategori/ürün oluşturuldu');
 
   // Demo Customers
   const cust1 = uuid(), cust2 = uuid(), cust3 = uuid();
+  const smokeCustomer = uuid();
   
   db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust1, businessId, 'Ahmet Yıldız', 12);
   db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust2, businessId, 'Zeynep Kara', 5);
   db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(cust3, businessId, 'Mustafa Arslan', 8);
+  db.prepare(`INSERT INTO customers (id, business_id, full_name, total_orders) VALUES (?, ?, ?, ?)`).run(smokeCustomer, businessId, 'Smoke Müşteri', 0);
 
   db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)`).run(uuid(), cust1, '905321234567', '905321234567');
   db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 0, ?)`).run(uuid(), cust1, '905551234567', '905551234567');
   db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)`).run(uuid(), cust2, '905339876543', '905339876543');
   db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)`).run(uuid(), cust3, '905447654321', '905447654321');
+  db.prepare(`INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)`).run(uuid(), smokeCustomer, '905300000001', '905300000001');
 
   db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust1, 'Ev', 'Kızılay Mah. GMK Blv. No:15/3');
   db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 0)`).run(uuid(), cust1, 'İş', 'Söğütözü Cad. No:42 Çankaya');
   db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust2, 'Ev', 'Bahçelievler 7. Cadde No:8/12');
   db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), cust3, 'Ev', 'Tunalı Hilmi Cad. No:120/5');
-  console.log('   3 demo müşteri oluşturuldu');
+  db.prepare(`INSERT INTO customer_addresses (id, customer_id, title, address, is_default) VALUES (?, ?, ?, ?, 1)`).run(uuid(), smokeCustomer, 'Ev', 'Smoke Mah. Test Sok. No:1');
+  console.log('   4 demo müşteri oluşturuldu');
 
   // Mock Printers
   db.prepare(`INSERT INTO printers (id, business_id, branch_id, name, type, connection_type, ip_address)
@@ -144,6 +173,7 @@ try {
   console.log('Demo Giriş Bilgileri:');
   console.log('   Yönetici: admin@demo.com / 123456');
   console.log('   Kasiyer:  kasiyer@demo.com / 123456');
+  console.log('   Smoke Kasiyer: smoke.kasiyer@demo.com / 123456');
   console.log('   Garson:   garson@demo.com / 123456');
   console.log('   Muıtfak:   mutfak@demo.com / 123456');
 

@@ -130,7 +130,7 @@ export default function ReservationsScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleSave = (result) => {
+  const handleSave = (_result) => {
     setModalOpen(false);
     setEditingReservation(null);
     load();

@@ -49,10 +49,10 @@ export default function PrinterDeleteModal({
     return () => {
       cancelled = true;
     };
-  }, [open, printerId]);
+  }, [open, printerId, error]);
 
   const usage = el?.usage;
-  const blockers = el?.blockers || [];
+  const blockers = useMemo(() => el?.blockers || [], [el?.blockers]);
   const hasHardDeleteBlocker = !loading && !el?.canHardDelete;
   const hardDeleteHelpText = useMemo(() => {
     if (loading) return 'Silme koşulları kontrol ediliyor...';

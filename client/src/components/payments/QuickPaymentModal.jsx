@@ -26,6 +26,7 @@ export default function QuickPaymentModal({ order, onClose, onComplete }) {
 
   useEffect(() => {
     setOrderState(order);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: sync only on specific order fields to avoid reset loop on unrelated re-renders
   }, [order?.id, order?.grand_total, order?.payments]);
 
   if (!orderState) return null;

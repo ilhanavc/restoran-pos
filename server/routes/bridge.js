@@ -159,9 +159,75 @@ function getJsonSettingByBusiness(businessId, key, fallback = null) {
   }
 }
 
+function summarizePrintQueue(businessId) {
+  const rows = db
+    .prepare(`SELECT status, COUNT(*) AS count FROM print_jobs WHERE business_id = ? GROUP BY status`)
+    .all(businessId);
+  const summary = { pending: 0, printed: 0, failed: 0, cancelled: 0 };
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(summary, row.status)) {
+      summary[row.status] = Number(row.count) || 0;
+    }
+  }
+  const staleClaimed =
+    db
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM print_jobs
+         WHERE business_id = ?
+           AND status = 'pending'
+           AND claimed_until IS NOT NULL
+           AND datetime(claimed_until) <= datetime('now')`,
+      )
+      .get(businessId)?.c || 0;
+  return { ...summary, stale_claimed: Number(staleClaimed) || 0 };
+}
+
+function getLatestJobTimestamps(businessId) {
+  const latestJob = db
+    .prepare(
+      `SELECT created_at, printed_at, last_attempt_at, last_error_code
+       FROM print_jobs
+       WHERE business_id = ?
+       ORDER BY datetime(COALESCE(last_attempt_at, printed_at, created_at)) DESC
+       LIMIT 1`,
+    )
+    .get(businessId);
+  return {
+    lastJobAt: latestJob?.created_at || null,
+    lastAttemptAt: latestJob?.last_attempt_at || null,
+    lastErrorCode: latestJob?.last_error_code || null,
+  };
+}
+
 /** GET /api/bridge/health — token doğrulama */
 router.get('/health', (req, res) => {
-  res.json({ ok: true, business_id: req.businessId, time: new Date().toISOString() });
+  const discovery = getJsonSettingByBusiness(req.businessId, DISCOVERY_CACHE_KEY, null);
+  const refreshRequest = getJsonSettingByBusiness(req.businessId, DISCOVERY_REFRESH_REQUEST_KEY, null);
+  const printers = sanitizeDiscoveredPrinters(discovery?.printers);
+  const scanState = DISCOVERY_STATES.has(discovery?.scanState)
+    ? discovery.scanState
+    : printers.length > 0
+      ? 'success'
+      : 'never_scanned';
+  const queueSummary = summarizePrintQueue(req.businessId);
+  const latest = getLatestJobTimestamps(req.businessId);
+  res.json({
+    ok: true,
+    business_id: req.businessId,
+    time: new Date().toISOString(),
+    discovery: {
+      available: printers.length > 0,
+      printers,
+      scanState,
+      lastErrorCode: discovery?.lastErrorCode || null,
+      updatedAt: discovery?.updatedAt || null,
+      source: 'storebridge',
+    },
+    refreshRequest: refreshRequest || null,
+    queueSummary,
+    ...latest,
+  });
 });
 
 /**
@@ -258,7 +324,18 @@ router.post('/printers/discovered/refresh', (req, res) => {
       source: 'storebridge',
       lastErrorCode: null,
     });
-    res.json({ ok: true, requestId, scanState: 'scanning', requestedAt });
+    res.json({
+      ok: true,
+      requestId,
+      scanState: 'scanning',
+      requestedAt,
+      request: {
+        requestId,
+        requestedAt,
+        status: 'requested',
+        source: 'admin',
+      },
+    });
   } catch (err) {
     console.error('[bridge] printers/discovered/refresh POST', err);
     res.status(500).json({ error: 'Sunucu hatası' });
