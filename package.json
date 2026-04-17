@@ -11,6 +11,8 @@
     "client": "cd client && npx vite --host",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "test": "npm run test --prefix server",
+    "test:frontend": "npm run test --prefix client",
+    "test:all": "npm run test --prefix server && npm run test --prefix client",
     "test:watch": "npm run test:watch --prefix server",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
