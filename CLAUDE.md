@@ -5,7 +5,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 9.2/10** · 12 sprints completed + DB hardening in progress · **341 automated tests** · 15/15 production checklist items passed
+**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **346 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
@@ -15,9 +15,9 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | Security            | 9/10   | ±0     |
 | Performance         | 8/10   | ±0     |
 | Test Coverage       | 9/10   | ±0     |
-| Documentation       | 10/10  | +1     |
+| Documentation       | 10/10  | ±0     |
 | Deployment          | 9/10   | ±0     |
-| **Overall**         | **9.2**| **+0.1** |
+| **Overall**         | **9.3**| **+0.1** |
 
 ## Completed Sprints
 
@@ -36,8 +36,8 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | 11 | Desktop Core Hardening + Repo Cleanup | StoreBridgePage health/log/queue panel, `printErrorMessages.js` 16-code error dictionary (TR), `toast.warning` type, MaintenancePage backup staleness banner, PaymentScreen print-failure feedback, `backup-failed` IPC channel, `GET /admin/support-bundle` diagnostic endpoint, `smoke:server-health` script wired into `dist:prepare`, `dist:release` = dist:win + latest.yml, CallerID self-contained win-x64 publish (.NET 8), `printer-acceptance-checklist.md`, `code-signing-runbook.md`, ESLint 27 warnings → 0 (`lint:ci --max-warnings 0`), Playwright e2e specs (table-order-payment, takeaway), `adminBridgeObservability` integration test, **repo cleanup** (451 MB freed: old zips/artifacts/tmp), **pos-config.json removed from git** (security), 9 sprint pass docs → `docs/audit/archive/`, 33 new tests (318 total) |
 | 12 | Backup/Restore Hardening | **P1 critical gaps:** uploads folder backup + restore, backup meta.json (appVersion, schemaVersion, rowCounts, integrityCheck), open order uyarısı restore planlamadan önce (GET /maintenance/open-orders), pos-config.json snapshot backup + restore (JWT secret, bridge token). **P2 operational UX:** "Dosyadan Geri Yükle" + file picker, post-restore SHA-256+integrity-check + safety revert, "Dışa Aktar" per-backup button, disk-space pre-check warning, two-step restore modal (summary + final confirm). **P3 external protection:** SHA-256 hash in meta.json + verification on restore, Windows Task Scheduler integration (gece 03:00 robocopy, hedef klasör picker, manuel tetik, config JSON). `backup-restore-readiness-plan.md` risk matrix + runbook. 0 lint warnings. |
 | D-1 | Test + CI Kapısı | GitHub Actions CI (lint + backend tests + frontend RTL + Playwright e2e), RTL test suite (PaymentScreen, OrderScreen — 22 tests), Playwright e2e job eklendi CI'a, `db:seed` artık `app.setup` settings kaydı yazıyor (Playwright readiness yönlendirmesi engellenir). |
-| D-2 | Signing + Wizard + Update Disiplini | First-run setup wizard (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı), `setup:is-completed`/`setup:complete` IPC, `pos-config.json` `setupCompleted` flag, `UpdateNotification` expandable release notes. Kod imzası ertelendi (sertifika satın alımı gerekli). |
-| D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation → `store-bridge.old.log`), `writeBridgeLog` (info/error, timestamp prefix), `setupBridgeFileLogging` + `bridgeLogStream` cleanup on `before-quit`. Crash reporter: `writeCrashLog` → `crashes.log` JSON-line (ts/type/message/stack/version/platform/arch), `uncaughtException`/`unhandledRejection` capture. Server: `requestIdMiddleware` (`X-Request-Id` header, `crypto.randomUUID`), JSON-line access log (`[access]` prefix: method/path/status/ms/requestId, health check hariç). |
+| D-2 | Signing + Wizard + Update Disiplini | First-run setup wizard (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı), `setup:is-completed`/`setup:complete` IPC, `pos-config.json` `setupCompleted` flag, `UpdateNotification` toast + release notes modal (HTML/plain, progress bar, "Kur ve Yeniden Başlat"). **`ReleaseNotesPage.jsx`** (`/settings/release-notes`): statik changelog (RELEASES dizisi), uygulama versiyonu (`getAppVersion` IPC), "Güncelleme Ara" butonu, versiyon kopyalama. `getAppVersion` preload + `app:get-version` IPC handler eklendi. Kod imzası ertelendi (sertifika satın alımı gerekli). Son doğrulama: 346 test, `lint:ci` 0 warning. |
+| D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation), `writeBridgeLog` (info/error), crash reporter (`crashes.log` JSON-line). **Structured JSON logging (NDJSON):** `electron-main.log` her satırı geçerli JSON nesnesi — `{ts, level, msg, err?, stack?, data?}`; `buildLogEntry()` console.* args'larını parse eder; `store-bridge.log` artık `{ts, level, src:"bridge", msg}`. **Request-ID sertleştirme:** `requestIdMiddleware` UUID format regex doğrulaması (header injection koruması); 500 error response'a `requestId` eklendi (log correlation). 5 yeni unit test (`requestId.middleware.test.js`). Son doğrulama: 346/346 test, `lint:ci` 0 warning. |
 | D-4 | Monolitik Ayrıştırma | `electron/main.cjs` 301 satırlık orchestrator'a indirildi ve `electron/modules/*` altına bölündü; `server/routes/orders.js` + `payments.js` domain logic'i `orderService.js`/`paymentService.js` içine taşındı; `client/src/services/api.js` 31 satırlık facade oldu ve domain mixin modüllerine ayrıldı; `OrderScreen.jsx` için `useCatalog`, `useCart`, `ModifierModal`, `ClipboardEmpty` çıkarıldı; `PrinterDetailPage.jsx` için `usePrinterForm`, `PrinterDeviceSection`, `PrinterPreviewPanel` çıkarıldı. Son doğrulama: 318/318 test, `lint:ci` 0 warning, client build başarılı. |
 | D-5 | Ürün Eksiklerini Kapatma | D-5.1 period close / X-Z raporu ve kapalı dönem lock; D-5.2 ödeme/siparişe bağlı iade akışı; D-5.3 bahşiş modeli ve raporlama; D-5.4 rezervasyon → masa oturtma/adisyon bağlantısı tamamlandı. D-5.5 ödeme terminal SDK ve D-5.6 e-belge entegrasyonu provider/hardware/fiscal kararları gelene kadar bilinçli olarak deferred. Son doğrulama: 334/334 test, `lint:ci` 0 warning, client build başarılı. |
 | DB-1 / DB-2 | Veri Modeli Sağlamlaştırma | DB-1 migration disiplini başladı: numbered migration runner, `schema_migrations`, legacy baseline, forward-only validation. DB-2 audit trail başladı: `entity_mutations` tablosu, ödeme/iade mutasyon kayıtları, sipariş create/status/cancel mutation kayıtları. Son doğrulama: 341/341 test, `lint:ci` 0 warning, client build ve server health smoke başarılı. |
@@ -69,15 +69,16 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
   - External backup import (UI file picker) + export (save dialog) per backup
   - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- **341 automated tests** (Vitest + Supertest integration), all passing
+- **346 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
 - Customer notification sound on new order
 - electron-updater auto-update (GitHub Releases, v1.0.3+); `dist:release` generates `latest.yml`
 - **First-run setup wizard** (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı); `setup:is-completed`/`setup:complete` IPC; `pos-config.json` `setupCompleted` flag
-- `UpdateNotification`: expandable release notes ("Değişiklikleri gör/gizle"), indirme progress bar, "Kur ve Yeniden Başlat"
-- **Operasyonel görünürlük (D-3):** `userData/logs/store-bridge.log` (5 MB rotation), `crashes.log` JSON-line crash reporter (`uncaughtException`/`unhandledRejection`), `X-Request-Id` correlation header (her API request), JSON-line structured access log
+- `UpdateNotification`: toast notification (sağ alt), indirme progress bar, release notes modal (HTML/plain text), "Kur ve Yeniden Başlat" / "Sonra" CTA, hata + retry
+- **`ReleaseNotesPage`** (`/settings/release-notes`): statik changelog (RELEASES dizisi, sürüm bazlı bölümler — Yeni/İyileştirme/Düzeltme/Güvenlik badge), uygulama versiyonu `getAppVersion` IPC, "Güncelleme Ara" + kopyalama butonu; SettingsHome'a kart eklendi
+- **Operasyonel görünürlük (D-3) — TAM:** `userData/logs/store-bridge.log` (5 MB rotation), `crashes.log` JSON-line crash reporter, `X-Request-Id` correlation header (UUID format validation — header injection koruması), **NDJSON structured logging** (`electron-main.log` her satırı `{ts,level,msg,...}` geçerli JSON), `requestId` 500 error response'a dahil — log correlation
 - **D-4 monolitik ayrıştırma:** Electron main process modüllere ayrıldı; orders/payments route'ları domain service çağıran ince HTTP katmanlarına dönüştü; API client domain modüllerine bölündü; OrderScreen ve PrinterDetailPage ilk güvenli hook/component extraction dilimlerini aldı.
 - Product image upload (server/uploads/products/, /uploads static)
 - Combo menu support (product_combos table, UI in MenuProductEditorPage)
@@ -123,7 +124,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 ## Pending Tasks
 
-All backup/restore critical gaps (P1), operational visibility (D-3), monolithic decomposition (D-4), mandatory D-5 product gaps (D-5.1 through D-5.4), and DB-1 migration discipline are complete. DB-2 audit trail is in progress.
+All backup/restore critical gaps (P1), operational visibility (D-3 — tam), monolithic decomposition (D-4), mandatory D-5 product gaps (D-5.1 through D-5.4), DB-1 migration discipline, and D-2 Release Notes UI are complete. DB-2 audit trail is in progress. **Gate 1 tek engelleyicisi: Windows kod imzası (EV/OV sertifika).**
 
 ### D-5 Deferred Decisions
 D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal SDK work until a concrete provider/hardware choice exists. Do not implement e-belge work until fiscal provider, legal scope, and document flow are selected.
@@ -198,7 +199,7 @@ restoran-pos-v3/
 │       └── styles/            # global.css
 ├── server/                    # Express backend
 │   ├── config/                # DB connection, index.js
-│   ├── middleware/            # auth.js, bridgeAuth.js, validate.js
+│   ├── middleware/            # auth.js, bridgeAuth.js, validate.js, requestId.js
 │   ├── routes/                # auth, tables, products, orders, payments,
 │   │                          # customers, callerid, reports, printer,
 │   │                          # admin, bridge, reservations, stock, waiterCall, attributes
@@ -208,7 +209,7 @@ restoran-pos-v3/
 │   ├── utils/                 # helpers.js, phoneNormalize.js
 │   ├── migrations/            # run.js — idempotent schema migration
 │   ├── seeds/                 # Demo data (run.js)
-│   ├── tests/                 # 318 Vitest tests (24 files)
+│   ├── tests/                 # 346 Vitest tests (29 files)
 │   │   ├── integration/       # 10 integration test files
 │   │   └── frontend/          # storeBridgeClientMappings.test.js
 │   └── index.js               # Server entry point
@@ -243,7 +244,7 @@ restoran-pos-v3/
 ```bash
 # Development
 npm run dev             # Vite (5173) + API (3001) concurrently
-npm run test            # Run all 341 tests (from repo root; delegates to server)
+npm run test            # Run all 346 tests (from repo root; delegates to server)
 npm run test:watch      # Watch mode
 npm run lint            # ESLint with warnings (dev)
 npm run lint:ci         # ESLint --max-warnings 0 (CI gate — must stay 0)
@@ -277,7 +278,7 @@ npm run all:start       # Windows: start-all.bat (POS + Bridge + CallerID)
 - Small, safe steps — no large refactors
 - Present a summary before making changes: "What will change and why"
 - Do not touch working code unnecessarily
-- Every new feature must not break the existing **318 tests**
+- Every new feature must not break the existing **346 tests**
 - `lint:ci` must stay at 0 warnings — fix before every commit
 - Summarize what changed only when asked — do not add trailing summaries to every response
 - **Always read this file at the start of every session** before making any changes

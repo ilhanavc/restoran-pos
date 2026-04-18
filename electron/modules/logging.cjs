@@ -5,19 +5,61 @@ const fs = require('fs');
 let logStream = null;
 let bridgeLogStream = null;
 
-function formatLogArg(arg) {
-  if (arg instanceof Error) return `${arg.stack || arg.message}`;
-  if (typeof arg === 'string') return arg;
-  try { return JSON.stringify(arg); } catch { return String(arg); }
+/* ── Structured log format ────────────────────────────────────────────────
+ * Her log satırı geçerli bir JSON nesnesidir (NDJSON / JSON-line).
+ * Örnek:
+ *   {"ts":"2026-04-18T15:00:00.000Z","level":"info","msg":"[updater] Güncelleme kontrol ediliyor..."}
+ *   {"ts":"...","level":"error","msg":"Unhandled error","err":"TypeError: ...","stack":"..."}
+ *
+ * Bu format jq, Datadog, Loki, Elastic gibi araçlarla doğrudan parse edilebilir.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+/**
+ * console.* çağrısının args listesinden yapılandırılmış bir log nesnesi üretir.
+ *   - String arg'lar    → msg (birleştirilerek)
+ *   - İlk Error  arg    → err (message) + stack
+ *   - İlk plain object  → data (JSON serialize)
+ */
+function buildLogEntry(level, args) {
+  const entry = { ts: new Date().toISOString(), level };
+
+  const parts = [];
+  let extraData = null;
+  let errEntry = null;
+
+  for (const arg of args) {
+    if (arg instanceof Error) {
+      if (!errEntry) errEntry = { err: arg.message, stack: arg.stack || null };
+    } else if (
+      typeof arg === 'object' && arg !== null && !Array.isArray(arg) && extraData === null
+    ) {
+      try { extraData = JSON.parse(JSON.stringify(arg)); } catch { extraData = String(arg); }
+    } else {
+      const str = typeof arg === 'string'
+        ? arg
+        : (() => { try { return JSON.stringify(arg); } catch { return String(arg); } })();
+      parts.push(str);
+    }
+  }
+
+  if (parts.length) entry.msg = parts.join(' ');
+  if (errEntry) Object.assign(entry, errEntry);
+  if (extraData !== null) entry.data = extraData;
+
+  return entry;
+}
+
+function safeStringify(obj) {
+  try { return JSON.stringify(obj); } catch { return '{"level":"error","msg":"log serialization failed"}'; }
 }
 
 function writeCrashLog(type, err) {
   try {
     const logsDir = path.join(app.getPath('userData'), 'logs');
     fs.mkdirSync(logsDir, { recursive: true });
-    const entry = JSON.stringify({
-      ts: new Date().toISOString(), type,
-      message: err?.message || String(err),
+    const entry = safeStringify({
+      ts: new Date().toISOString(), level: 'fatal', type,
+      msg: err?.message || String(err),
       stack: err?.stack || null,
       version: app.getVersion?.() || null,
       platform: process.platform,
@@ -53,8 +95,9 @@ function setupFileLogging() {
     error: console.error.bind(console),
   };
 
+  /** JSON-line satırını log dosyasına yaz */
   const write = (level, args) => {
-    const line = `[${new Date().toISOString()}] [${level}] ${args.map(formatLogArg).join(' ')}\n`;
+    const line = safeStringify(buildLogEntry(level, args)) + '\n';
     try { logStream?.write(line); } catch { /* logging must never crash the app */ }
   };
 
@@ -75,13 +118,21 @@ function setupFileLogging() {
   setupBridgeFileLogging(logsDir);
 }
 
+/**
+ * Bridge sürecinin stdout/stderr satırlarını yapılandırılmış JSON-line olarak yazar.
+ *
+ * @param {'info'|'warn'|'error'} level
+ * @param {string} text  — tek satır veya çok satırlı metin
+ */
 function writeBridgeLog(level, text) {
   if (!bridgeLogStream) return;
   try {
     const ts = new Date().toISOString();
     const lines = String(text).split(/\r?\n/).filter(Boolean);
     for (const line of lines) {
-      bridgeLogStream.write(`[${ts}] [${level}] ${line}\n`);
+      bridgeLogStream.write(
+        safeStringify({ ts, level, src: 'bridge', msg: line }) + '\n',
+      );
     }
   } catch { /* logging must never crash the app */ }
 }

@@ -37,6 +37,7 @@ const CallerIdScreen = lazy(() => import('./components/callerid/CallerIdScreen.j
 const ReservationsScreen = lazy(() => import('./components/reservations/ReservationsScreen.jsx'));
 const StockScreen = lazy(() => import('./components/stock/StockScreen.jsx'));
 const SetupWizardPage = lazy(() => import('./components/settings/SetupWizardPage.jsx'));
+const ReleaseNotesPage = lazy(() => import('./components/settings/ReleaseNotesPage.jsx'));
 
 function getShellTitle(pathname) {
   if (pathname === '/home') return 'Anasayfa';
@@ -62,6 +63,7 @@ function getShellTitle(pathname) {
   if (pathname === '/settings/dining-areas') return 'Salon Bölgeleri';
   if (pathname === '/settings/features') return 'Özellikler';
   if (pathname === '/settings/caller-id') return 'Gelen Aramalar';
+  if (pathname === '/settings/release-notes') return 'Sürüm Notları';
   return null;
 }
 
@@ -306,6 +308,7 @@ export default function App() {
             <Route path="dining-areas" element={<DiningAreasSettingsPage />} />
             <Route path="features" element={<AttributeGroupsPage />} />
             <Route path="caller-id" element={<CallerIdScreen />} />
+            <Route path="release-notes" element={<ReleaseNotesPage />} />
           </Route>
           
           <Route path="/order/table/:id" element={

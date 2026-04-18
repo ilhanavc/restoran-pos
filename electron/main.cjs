@@ -131,6 +131,9 @@ app.whenReady().then(() => initAutoUpdater());
 
 ipcMain.on('restart-app', () => { app.relaunch(); app.quit(); });
 
+// Mevcut uygulama versiyonu — package.json'dan
+ipcMain.handle('app:get-version', () => app.getVersion());
+
 // ---------------------------------------------------------------------------
 // İlk kurulum wizard IPC
 // ---------------------------------------------------------------------------

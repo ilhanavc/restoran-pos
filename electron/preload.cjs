@@ -87,6 +87,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** İlk kurulum tamamlandı olarak işaretle; businessName opsiyonel. */
   setupComplete: (data) => ipcRenderer.invoke('setup:complete', data),
 
+  /** Mevcut uygulama versiyonunu döner — package.json version. */
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+
   /** Electron ortamında çalışıp çalışmadığını döner (browser'dan ayırt etmek için). */
   isElectron: true,
 

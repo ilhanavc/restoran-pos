@@ -33,7 +33,6 @@ import waiterCallRoutes from './routes/waiterCall.js';
 import attributesRoutes from './routes/attributes.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 
-
 const app = express();
 
 // Middleware
@@ -190,11 +189,15 @@ if (config.nodeEnv === 'production') {
   }
 }
 
-
 // Error handler (en sonda)
+// eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Beklenmeyen bir hata oluştu' });
+  const requestId = req.requestId || null;
+  console.error('Unhandled error:', err, requestId ? { requestId } : undefined);
+  res.status(500).json({
+    error: 'Beklenmeyen bir hata oluştu',
+    ...(requestId ? { requestId } : {}),
+  });
 });
 
 // Start
