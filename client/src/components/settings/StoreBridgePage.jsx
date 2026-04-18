@@ -74,17 +74,22 @@ export default function StoreBridgePage() {
   const downloadSupportBundle = useCallback(async () => {
     setDownloading(true);
     try {
-      const bundle = await api.getSupportBundle();
-      const json = JSON.stringify(bundle, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
+      const token = localStorage.getItem('token');
+      // process.env.VITE_API_URL mantığına uygun bir API prefiksi için tam path kullanılmalı
+      // Uygulamada proxy /api'ye devrettiğine göre doğrudan /api/admin/support-bundle kullanıyoruz.
+      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      const res = await fetch(`${baseUrl}/api/admin/support-bundle`, {
+        headers: { Authorization: 'Bearer ' + token }
+      });
+      if (!res.ok) throw new Error('Destek paketi alınamadı');
+      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       a.href = url;
-      a.download = `pos-support-bundle-${ts}.json`;
+      a.download = `destek-paketi-${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(a);
       a.click();
-      document.body.removeChild(a);
+      a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
       error(e.message || 'Destek paketi indirilemedi');
@@ -122,10 +127,10 @@ export default function StoreBridgePage() {
             className="btn btn-ghost btn-sm"
             onClick={downloadSupportBundle}
             disabled={loading || downloading}
-            title="Sistem bilgisi, print kuyruğu, loglar ve hata özeti içeren JSON dosyası"
+            title="Sistem bilgisi, print kuyruğu, loglar ve hata özeti içeren ZIP dosyası"
           >
             <Download size={14} />
-            {downloading ? 'İndiriliyor…' : 'Destek Paketi İndir'}
+            {downloading ? 'İndiriliyor...' : 'Destek Paketi İndir'}
           </button>
           <button
             type="button"
