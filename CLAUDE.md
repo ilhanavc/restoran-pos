@@ -5,7 +5,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 9.2/10** · 12 sprints completed · **318 automated tests** · 15/15 production checklist items passed
+**Overall score: 9.2/10** · 12 sprints completed + DB hardening in progress · **341 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
@@ -40,6 +40,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation → `store-bridge.old.log`), `writeBridgeLog` (info/error, timestamp prefix), `setupBridgeFileLogging` + `bridgeLogStream` cleanup on `before-quit`. Crash reporter: `writeCrashLog` → `crashes.log` JSON-line (ts/type/message/stack/version/platform/arch), `uncaughtException`/`unhandledRejection` capture. Server: `requestIdMiddleware` (`X-Request-Id` header, `crypto.randomUUID`), JSON-line access log (`[access]` prefix: method/path/status/ms/requestId, health check hariç). |
 | D-4 | Monolitik Ayrıştırma | `electron/main.cjs` 301 satırlık orchestrator'a indirildi ve `electron/modules/*` altına bölündü; `server/routes/orders.js` + `payments.js` domain logic'i `orderService.js`/`paymentService.js` içine taşındı; `client/src/services/api.js` 31 satırlık facade oldu ve domain mixin modüllerine ayrıldı; `OrderScreen.jsx` için `useCatalog`, `useCart`, `ModifierModal`, `ClipboardEmpty` çıkarıldı; `PrinterDetailPage.jsx` için `usePrinterForm`, `PrinterDeviceSection`, `PrinterPreviewPanel` çıkarıldı. Son doğrulama: 318/318 test, `lint:ci` 0 warning, client build başarılı. |
 | D-5 | Ürün Eksiklerini Kapatma | D-5.1 period close / X-Z raporu ve kapalı dönem lock; D-5.2 ödeme/siparişe bağlı iade akışı; D-5.3 bahşiş modeli ve raporlama; D-5.4 rezervasyon → masa oturtma/adisyon bağlantısı tamamlandı. D-5.5 ödeme terminal SDK ve D-5.6 e-belge entegrasyonu provider/hardware/fiscal kararları gelene kadar bilinçli olarak deferred. Son doğrulama: 334/334 test, `lint:ci` 0 warning, client build başarılı. |
+| DB-1 / DB-2 | Veri Modeli Sağlamlaştırma | DB-1 migration disiplini başladı: numbered migration runner, `schema_migrations`, legacy baseline, forward-only validation. DB-2 audit trail başladı: `entity_mutations` tablosu, ödeme/iade mutasyon kayıtları, sipariş create/status/cancel mutation kayıtları. Son doğrulama: 341/341 test, `lint:ci` 0 warning, client build ve server health smoke başarılı. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -68,7 +69,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
   - External backup import (UI file picker) + export (save dialog) per backup
   - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- **318 automated tests** (Vitest + Supertest integration), all passing
+- **341 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
@@ -117,10 +118,12 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Playwright e2e: `e2e/table-order-payment-close.spec.js` + `e2e/takeaway-order.spec.js`
 - `scripts/smoke-server-health.cjs`: starts server with temp DB, polls `/api/health`, verifies migration — wired into `dist:prepare`
 - Repo cleanup: 451 MB artifacts removed, 9 orphaned scripts deleted, `docs/audit/archive/` organized
+- **DB-1 migration discipline:** `schema_migrations`, `server/migrations/versions/`, legacy baseline marker, forward-only numbered migration validation.
+- **DB-2 audit trail foundation:** `entity_mutations` table with JSON before/after snapshots, actor, reason, request id, source; payment/refund/order create/status/cancel mutations are recorded.
 
 ## Pending Tasks
 
-All backup/restore critical gaps (P1), operational visibility (D-3), monolithic decomposition (D-4), and mandatory D-5 product gaps (D-5.1 through D-5.4) are complete.
+All backup/restore critical gaps (P1), operational visibility (D-3), monolithic decomposition (D-4), mandatory D-5 product gaps (D-5.1 through D-5.4), and DB-1 migration discipline are complete. DB-2 audit trail is in progress.
 
 ### D-5 Deferred Decisions
 D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal SDK work until a concrete provider/hardware choice exists. Do not implement e-belge work until fiscal provider, legal scope, and document flow are selected.
@@ -129,6 +132,12 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
 - Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
 - `server/routes/orders.js` inline status enum → import from `server/constants/orderStatus.js`.
+
+### DB-2 Audit Trail (in progress)
+- Continue wiring `entity_mutations` to menu/product price changes and product delete/archive flows.
+- Add audit coverage for order item updates, customer assignment changes, stock movements, printer/admin configuration mutations.
+- Add admin-only audit log viewer after backend mutation coverage is broad enough.
+- Do not start DB-3 integer minor unit migration until DB-2 audit trail coverage is complete.
 
 ### Print queue UI (P2)
 - Print queue summary panel in Admin UI (pending/failed/stale counts)
@@ -234,7 +243,7 @@ restoran-pos-v3/
 ```bash
 # Development
 npm run dev             # Vite (5173) + API (3001) concurrently
-npm run test            # Run all 318 tests (from repo root; delegates to server)
+npm run test            # Run all 341 tests (from repo root; delegates to server)
 npm run test:watch      # Watch mode
 npm run lint            # ESLint with warnings (dev)
 npm run lint:ci         # ESLint --max-warnings 0 (CI gate — must stay 0)
