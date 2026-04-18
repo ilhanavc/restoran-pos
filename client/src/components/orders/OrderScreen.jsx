@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import { useCatalog } from './hooks/useCatalog.js';
+import { useCart } from './hooks/useCart.js';
 import { formatCurrency, ORDER_ITEM_LINE_STATUS } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
@@ -55,17 +57,20 @@ export default function OrderScreen({
   onQuickPayment,
   onNavigateToTables,
 }) {
-  const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [activeCat, setActiveCat] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [cartItems, setCartItems] = useState([]);
+  const {
+    categories, products, activeCat, searchQuery, categoriesLoading,
+    loadCategories, handleCategorySelect, handleSearch,
+  } = useCatalog();
+  const {
+    cartItems, setCartItems,
+    addItemToCart, updateQuantity, removeItem: removeCartItem,
+    getCartQtyForProduct, decrementProductInCart, applyCartLineEdit,
+  } = useCart();
   const [existingOrder, setExistingOrder] = useState(null);
   const [modifierModal, setModifierModal] = useState(null); // { product, groups, pendingLine? }
   /** Satır düzenleme: gridden açılmaz */
   const [lineDetailModal, setLineDetailModal] = useState(null); // { kind: 'cart', index } | { kind: 'existing', itemId }
   const [saving, setSaving] = useState(false);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [emptyTables, setEmptyTables] = useState([]);
   const [takeawayPhone, setTakeawayPhone] = useState('');
@@ -134,57 +139,12 @@ export default function OrderScreen({
     return [];
   };
 
-  const loadCategories = async () => {
-    setCategoriesLoading(true);
-    try {
-      const cats = await api.getCategories();
-      setCategories(cats);
-      if (cats.length > 0) {
-        setActiveCat(cats[0].id);
-        loadProducts(cats[0].id);
-      }
-    } catch { toast.error('Kategoriler yüklenemedi'); }
-    finally { setCategoriesLoading(false); }
-  };
-
-  const loadProducts = async (catId) => {
-    try {
-      const prods = catId === '__all__'
-        ? await api.getProducts({})
-        : await api.getProducts({ category_id: catId });
-      setProducts(prods);
-    } catch { toast.error('Ürünler yüklenemedi'); }
-  };
-
   const loadExistingOrder = async (orderId) => {
     try {
       const order = await api.getOrder(orderId);
       setExistingOrder(order);
     } catch {
       /* sipariş yok veya ağ hatası */
-    }
-  };
-
-  const handleCategorySelect = (catId) => {
-    setActiveCat(catId);
-    setSearchQuery('');
-    loadProducts(catId);
-  };
-
-  const handleSearch = async (q) => {
-    setSearchQuery(q);
-    if (q.length >= 2) {
-      try {
-        const prods = await api.getProducts({ search: q });
-        setProducts(prods);
-        setActiveCat(null);
-      } catch {}
-    } else if (q === '') {
-      const catId = activeCat || categories[0]?.id;
-      if (catId) {
-        setActiveCat(catId);
-        loadProducts(catId);
-      }
     }
   };
 
@@ -215,26 +175,6 @@ export default function OrderScreen({
     } catch (e) {
       toast.error(e.message || 'Ürün eklenemedi');
     }
-  };
-
-  const applyCartLineEdit = (index, { quantity, note, effectiveProduct, portion_id, portion_label, selected_attributes, attrExtraPrice }) => {
-    setCartItems((prev) => {
-      const ci = prev[index];
-      if (!ci) return prev;
-      const modDelta = (ci.modifiers || []).reduce((s, m) => s + (m.price_delta || 0), 0);
-      const extraAttr = attrExtraPrice != null ? attrExtraPrice : (ci.selected_attributes || []).reduce((s, a) => s + (a.extra_price || 0), 0);
-      const updated = {
-        ...ci,
-        quantity,
-        note,
-        portion_id: portion_id ?? null,
-        portion_label: portion_label ?? null,
-        unit_price: Number(effectiveProduct.price) + modDelta + extraAttr,
-        base_price: Number(effectiveProduct.price),
-        selected_attributes: selected_attributes !== undefined ? selected_attributes : (ci.selected_attributes || []),
-      };
-      return prev.map((c, i) => (i === index ? updated : c));
-    });
   };
 
   const saveExistingLineFromModal = async (itemId, { quantity, note, portion_id }) => {
@@ -277,58 +217,6 @@ export default function OrderScreen({
     saveExistingLineFromModal(ctx.itemId, payload);
   };
 
-  const addItemToCart = (product, modifiers, options = {}) => {
-    const quantity = options.quantity != null ? Math.max(1, Math.floor(Number(options.quantity)) || 1) : 1;
-    const note = options.note != null ? String(options.note) : '';
-    const portion_id = options.portion_id != null ? options.portion_id : null;
-    const portion_label = options.portion_label != null ? options.portion_label : null;
-    const selected_attributes = options.selected_attributes || [];
-    const attrExtraPrice = options.attrExtraPrice || 0;
-
-    const modDelta = modifiers.reduce((sum, m) => sum + (m.price_delta || 0), 0);
-    // Ürünleri attribute seçimleri farklıysa ayrı satır olarak ekle
-    const attrKey = JSON.stringify(selected_attributes);
-    const existing = cartItems.findIndex(
-      (ci) =>
-        ci.product_id === product.id &&
-        (ci.portion_id || null) === (portion_id || null) &&
-        JSON.stringify(ci.modifiers || []) === JSON.stringify(modifiers) &&
-        JSON.stringify(ci.selected_attributes || []) === attrKey &&
-        (ci.note || '') === (note || ''),
-    );
-
-    if (existing >= 0) {
-      setCartItems((prev) =>
-        prev.map((ci, i) => (i === existing ? { ...ci, quantity: ci.quantity + quantity } : ci)),
-      );
-    } else {
-      setCartItems((prev) => [
-        ...prev,
-        {
-          product_id: product.id,
-          product_name: product.name,
-          unit_price: product.price + modDelta + attrExtraPrice,
-          base_price: product.price,
-          quantity,
-          modifiers,
-          selected_attributes,
-          note,
-          category_name: product.category_name,
-          portion_id,
-          portion_label,
-        },
-      ]);
-    }
-  };
-
-  const updateQuantity = (index, delta) => {
-    setCartItems(prev => prev.map((ci, i) => {
-      if (i !== index) return ci;
-      const newQty = ci.quantity + delta;
-      return newQty <= 0 ? null : { ...ci, quantity: newQty };
-    }).filter(Boolean));
-  };
-
   const removeItem = (index) => {
     setLineDetailModal((m) => {
       if (!m || m.kind !== 'cart') return m;
@@ -336,32 +224,7 @@ export default function OrderScreen({
       if (m.index > index) return { ...m, index: m.index - 1 };
       return m;
     });
-    setCartItems((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  const getCartQtyForProduct = (productId) =>
-    cartItems
-      .filter((ci) => ci.product_id === productId)
-      .reduce((sum, ci) => sum + ci.quantity, 0);
-
-  const decrementProductInCart = (productId) => {
-    setCartItems((prev) => {
-      const simpleIdx = prev.findIndex(
-        (ci) => ci.product_id === productId &&
-          JSON.stringify(ci.modifiers || []) === JSON.stringify([]) &&
-          !ci.note &&
-          !ci.portion_id,
-      );
-      const idx = simpleIdx >= 0 ? simpleIdx : prev.findIndex((ci) => ci.product_id === productId);
-      if (idx < 0) return prev;
-      return prev
-        .map((ci, i) => {
-          if (i !== idx) return ci;
-          const newQty = ci.quantity - 1;
-          return newQty <= 0 ? null : { ...ci, quantity: newQty };
-        })
-        .filter(Boolean);
-    });
+    removeCartItem(index);
   };
 
   const handleSaveOrder = async ({ skipNavigate = false } = {}) => {
