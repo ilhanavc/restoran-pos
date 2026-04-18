@@ -21,6 +21,8 @@ import {
   CreditCard, X, ArrowRightLeft, Phone, User, ChevronLeft,
 } from 'lucide-react';
 import OrderProductDetailModal from './OrderProductDetailModal.jsx';
+import ModifierModal from './ModifierModal.jsx';
+import ClipboardEmpty from './ClipboardEmpty.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 
 function toOrderAttributePayload(selectedAttributes = []) {
@@ -1389,80 +1391,5 @@ export default function OrderScreen({
         </div>
       )}
     </div>
-  );
-}
-
-function ModifierModal({ product, groups, onConfirm, onClose }) {
-  const [selected, setSelected] = useState({});
-
-  const toggle = (groupName, mod) => {
-    setSelected(prev => {
-      const current = prev[groupName] || [];
-      const exists = current.find(m => m.id === mod.id);
-      if (exists) return { ...prev, [groupName]: current.filter(m => m.id !== mod.id) };
-      return { ...prev, [groupName]: [...current, mod] };
-    });
-  };
-
-  const allSelected = Object.values(selected).flat();
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h2>{product.name}</h2>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Seçenekleri belirleyin</div>
-          </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          {Object.entries(groups).map(([groupName, mods]) => (
-            <div key={groupName} style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                {groupName}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {mods.map(mod => {
-                  const isSelected = (selected[groupName] || []).find(m => m.id === mod.id);
-                  return (
-                    <button key={mod.id} onClick={() => toggle(groupName, mod)}
-                      style={{
-                        padding: '8px 14px', borderRadius: 'var(--radius-sm)',
-                        border: `1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
-                        background: isSelected ? 'var(--accent-muted)' : 'var(--bg-tertiary)',
-                        color: isSelected ? 'var(--accent)' : 'var(--text-secondary)',
-                        cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-                      }}>
-                      {mod.name}
-                      {mod.price_delta !== 0 && (
-                        <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.7 }}>
-                          {mod.price_delta > 0 ? '+' : ''}{formatCurrency(mod.price_delta)}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Vazgeç</button>
-          <button className="btn btn-primary" onClick={() => onConfirm(allSelected)}>
-            Ekle {allSelected.length > 0 && `(${allSelected.length})`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ClipboardEmpty() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="empty-state-icon">
-      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-    </svg>
   );
 }
