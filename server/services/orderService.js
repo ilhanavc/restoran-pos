@@ -9,6 +9,7 @@ import {
 } from './printJobs.js';
 import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
 import { linkCallLogToOrder } from './callerIdService.js';
+import { assertPeriodOpenForMutation } from './periodCloseService.js';
 
 export function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -308,6 +309,7 @@ export function createOrder(businessId, branchId, userId, orderData) {
     delivery_address, delivery_note, courier_note } = orderData;
 
   const resolvedType = order_type || 'dine_in';
+  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
   if (resolvedType === 'takeaway' && table_id) {
     const err = new Error('Paket siparişlerde masa kimliği (table_id) gönderilemez');
     err.isBadRequest = true;
@@ -426,6 +428,7 @@ export function addItemsToOrder(businessId, orderId, userId, items) {
     err.isBadRequest = true;
     throw err;
   }
+  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
 
   let newItemIds = [];
   db.transaction(() => {
@@ -704,6 +707,7 @@ export function updateTakeawayDelivery(businessId, orderId, userId, action) {
     err.isBadRequest = true;
     throw err;
   }
+  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
   if (o.takeaway_delivered_at) {
     if (action === 'out_for_delivery') {
       const err = new Error('Teslim edilmiş sipariş teslimata çıkarılamaz');

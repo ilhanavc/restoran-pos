@@ -7,6 +7,8 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency } from '../../constants/index.js';
 import { BarChart3, TrendingUp, CreditCard, ShoppingBag, Award, Calendar, Receipt, Clock, Search, ChevronDown, Download, Printer } from 'lucide-react';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 
 // ── Export yardımcıları ──────────────────────────────────────────────────────
 
@@ -269,7 +271,11 @@ export default function ReportsScreen() {
   const [analyticsTo, setAnalyticsTo] = useState(new Date().toISOString().slice(0, 10));
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [periodReport, setPeriodReport] = useState(null);
+  const [periodStatus, setPeriodStatus] = useState(null);
+  const [periodClosing, setPeriodClosing] = useState(false);
   const toast = useToast();
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const exportOrders = useCallback(async (format) => {
     setExportingOrders(true);
@@ -308,14 +314,17 @@ export default function ReportsScreen() {
       const from = trendDates[0];
       const to = trendDates[trendDates.length - 1];
 
-      const [data, closed, hourly, range] = await Promise.all([
+      const [data, closed, hourly, range, period] = await Promise.all([
         api.getDailyReport(selectedDate),
         api.getClosedOrders({ date: selectedDate, limit: 50, page: 1 }),
         api.getHourlyReport(selectedDate),
         api.getRangeReport(from, to),
+        api.getPeriodXReport(selectedDate),
       ]);
 
       setReport(data);
+      setPeriodReport(period);
+      setPeriodStatus({ status: period.period_status, period: period.closed_at ? { closed_at: period.closed_at } : null });
       setClosedOrders(closed.orders || []);
       setClosedOrdersTotal(closed.total ?? (closed.orders || []).length);
       setClosedOrdersHasMore(closed.has_more ?? false);
@@ -389,6 +398,47 @@ export default function ReportsScreen() {
   };
 
   const paymentLabel = { cash: 'Nakit', card: 'Kart', mixed: 'Karışık', other: 'Diğer' };
+  const periodPaymentLabel = { ...paymentLabel, system_takeaway_delivery: 'Paket Teslimat' };
+
+  const closeSelectedPeriod = useCallback(async () => {
+    setPeriodClosing(true);
+    try {
+      const result = await api.closePeriodZ({ date: selectedDate });
+      setPeriodReport(result.report);
+      setPeriodStatus({ status: 'closed', period: result.period });
+      toast.success('Z raporu alındı ve dönem kapatıldı');
+    } catch (err) {
+      const openOrders = err?.data?.open_orders || err?.open_orders;
+      if (openOrders?.length) {
+        toast.error(`Z kapatılamadı: ${openOrders.length} açık adisyon var`);
+      } else {
+        toast.error(err?.data?.error || err?.message || 'Z kapatma başarısız');
+      }
+    } finally {
+      setPeriodClosing(false);
+    }
+  }, [selectedDate, toast]);
+
+  const refreshPeriodReport = useCallback(async () => {
+    try {
+      const period = await api.getPeriodXReport(selectedDate);
+      setPeriodReport(period);
+      setPeriodStatus({ status: period.period_status, period: period.closed_at ? { closed_at: period.closed_at } : null });
+      toast.success('X raporu güncellendi');
+    } catch {
+      toast.error('X raporu alınamadı');
+    }
+  }, [selectedDate, toast]);
+
+  const requestPeriodClose = () => {
+    requestConfirm({
+      title: 'Z raporu alınsın mı?',
+      body: `${selectedDate} dönemi kalıcı olarak kapatılacak. Bu güne yeni sipariş veya ödeme yazılamaz.`,
+      confirmLabel: 'Z Kapat',
+      tone: 'danger',
+      onConfirm: closeSelectedPeriod,
+    });
+  };
 
   const loadAnalytics = async () => {
     if (!analyticsFrom || !analyticsTo) return;
@@ -413,6 +463,7 @@ export default function ReportsScreen() {
     .reverse();
 
   return (
+    <>
     <div className="page-container">
       <div className="page-header">
         <div className="page-header-main page-title-line">
@@ -454,6 +505,116 @@ export default function ReportsScreen() {
         <div className="empty-state">Yükleniyor...</div>
       ) : report ? (
         <>
+          <div className="card card-padded" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <Receipt size={15} /> Gün Sonu / X-Z Raporu
+                </h3>
+                <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                  {periodStatus?.status === 'closed'
+                    ? `Kapanmış dönem${periodStatus?.period?.closed_at ? ` · ${periodStatus.period.closed_at}` : ''}`
+                    : 'Açık dönem'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={refreshPeriodReport} disabled={!periodReport}>
+                  X Raporu Gör
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  onClick={requestPeriodClose}
+                  disabled={periodClosing || periodReport?.period_status === 'closed' || (periodReport?.open_orders?.length || 0) > 0}
+                  title={(periodReport?.open_orders?.length || 0) > 0 ? 'Açık adisyonlar kapatılmalı' : 'Z raporu al'}
+                >
+                  {periodClosing ? 'Kapatılıyor...' : 'Z Kapat'}
+                </button>
+              </div>
+            </div>
+
+            {periodReport && (
+              <>
+                <div className="stat-grid" style={{ marginTop: 14 }}>
+                  <div className="stat-card">
+                    <div className="stat-card-label">Tahsilat</div>
+                    <div className="stat-card-value" style={{ color: 'var(--success)' }}>{formatCurrency(periodReport.summary?.total_revenue)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-card-label">Kapalı Sipariş</div>
+                    <div className="stat-card-value">{periodReport.summary?.closed_order_count || 0}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-card-label">Açık Adisyon</div>
+                    <div className="stat-card-value" style={{ color: (periodReport.summary?.open_order_count || 0) > 0 ? 'var(--warning)' : 'var(--success)' }}>
+                      {periodReport.summary?.open_order_count || 0}
+                    </div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-card-label">İndirim</div>
+                    <div className="stat-card-value">{formatCurrency(periodReport.summary?.total_discounts)}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 14 }}>
+                  <div>
+                    <h4 style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)' }}>ÖDEME KIRILIMI</h4>
+                    {periodReport.payment_breakdown?.length ? (
+                      <table className="data-table">
+                        <thead><tr><th>Tip</th><th>Adet</th><th className="text-right">Tutar</th></tr></thead>
+                        <tbody>
+                          {periodReport.payment_breakdown.map(p => (
+                            <tr key={p.payment_type}>
+                              <td>{periodPaymentLabel[p.payment_type] || p.payment_type}</td>
+                              <td>{p.count}</td>
+                              <td className="text-right" style={{ fontWeight: 600 }}>{formatCurrency(p.total)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : <div className="empty-state" style={{ padding: 16 }}>Ödeme yok</div>}
+                  </div>
+                  <div>
+                    <h4 style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: 'var(--text-muted)' }}>KASİYER TAHSİLATI</h4>
+                    {periodReport.cashier_breakdown?.length ? (
+                      <table className="data-table">
+                        <thead><tr><th>Kullanıcı</th><th>Adet</th><th className="text-right">Tutar</th></tr></thead>
+                        <tbody>
+                          {periodReport.cashier_breakdown.map(u => (
+                            <tr key={u.user_id || u.full_name}>
+                              <td>{u.full_name}</td>
+                              <td>{u.payment_count}</td>
+                              <td className="text-right" style={{ fontWeight: 600 }}>{formatCurrency(u.total_collected)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : <div className="empty-state" style={{ padding: 16 }}>Tahsilat yok</div>}
+                  </div>
+                </div>
+
+                {periodReport.open_orders?.length > 0 && (
+                  <div style={{ marginTop: 14 }}>
+                    <h4 style={{ fontSize: 12, fontWeight: 700, marginBottom: 8, color: 'var(--warning)' }}>Z KAPATMA İÇİN AÇIK ADİSYONLAR KAPATILMALI</h4>
+                    <table className="data-table">
+                      <thead><tr><th>No</th><th>Masa / Tür</th><th>Durum</th><th className="text-right">Tutar</th></tr></thead>
+                      <tbody>
+                        {periodReport.open_orders.map(o => (
+                          <tr key={o.id}>
+                            <td>#{o.order_no}</td>
+                            <td>{o.table_name || (o.order_type === 'takeaway' ? 'Paket' : '-')}</td>
+                            <td><span className="badge badge-warning">{o.status}</span></td>
+                            <td className="text-right" style={{ fontWeight: 600 }}>{formatCurrency(o.grand_total)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
           {/* Stat Cards */}
           <div className="stat-grid">
             <div className="stat-card">
@@ -855,5 +1016,15 @@ export default function ReportsScreen() {
         <div className="empty-state">Rapor verisi bulunamadı</div>
       )}
     </div>
+    <ConfirmDialog
+      open={!!confirmDialog}
+      title={confirmDialog?.title}
+      body={confirmDialog?.body}
+      confirmLabel={confirmDialog?.confirmLabel}
+      tone={confirmDialog?.tone}
+      onCancel={cancelConfirm}
+      onConfirm={acceptConfirm}
+    />
+    </>
   );
 }

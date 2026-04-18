@@ -273,6 +273,23 @@ export const migrations = [
     created_at TEXT DEFAULT (datetime('now'))
   )`,
 
+  // ── Period Close / X-Z Reports ──
+  `CREATE TABLE IF NOT EXISTS period_closes (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    branch_id TEXT REFERENCES branches(id),
+    period_date TEXT NOT NULL,
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,
+    closed_by TEXT REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+    x_snapshot_json TEXT,
+    z_snapshot_json TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(business_id, period_date)
+  )`,
+
   // ── Printers ──
   `CREATE TABLE IF NOT EXISTS printers (
     id TEXT PRIMARY KEY,
@@ -380,6 +397,8 @@ export const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_period_closes_business_date ON period_closes(business_id, period_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_period_closes_business_status ON period_closes(business_id, status)`,
   `CREATE INDEX IF NOT EXISTS idx_incoming_calls_phone ON incoming_calls(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_business ON audit_logs(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`,

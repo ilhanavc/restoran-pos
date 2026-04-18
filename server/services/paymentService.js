@@ -2,6 +2,7 @@ import db from '../config/database.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { enqueueReceiptJobForClosedOrder, processPendingJobsSync } from './printJobs.js';
 import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
+import { assertPeriodOpenForMutation } from './periodCloseService.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -201,6 +202,7 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
     err.isBadRequest = true;
     throw err;
   }
+  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
 
   const paymentId = genId();
   const cashIn = cash_received != null ? cash_received : amount;
@@ -299,6 +301,7 @@ export function createSplitPayment(businessId, userId, paymentData, idempotencyK
     err.isBadRequest = true;
     throw err;
   }
+  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
 
   const paymentId = genId();
   let createdPayment = null;

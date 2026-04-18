@@ -76,6 +76,7 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
     res.status(201).json(result);
   } catch (err) {
     console.error('Payment error:', err);
+    if (err.status === 409) return res.status(409).json({ error: err.message });
     if (err.isNotFound) return res.status(404).json({ error: err.message });
     if (err.isBadRequest || err.status === 400) return res.status(400).json({ error: err.message });
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -92,6 +93,7 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
     res.status(201).json(result);
   } catch (err) {
     console.error('Split payment error:', err);
+    if (err.status === 409) return res.status(409).json({ error: err.message });
     if (err.isNotFound) return res.status(404).json({ error: err.message });
     if (err.isBadRequest || err.status === 400) return res.status(400).json({ error: err.message });
     res.status(500).json({ error: 'Sunucu hatası' });
