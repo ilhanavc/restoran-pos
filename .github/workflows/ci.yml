@@ -21,7 +21,7 @@ jobs:
           cache-dependency-path: client/package-lock.json
 
       - name: Install client dependencies
-        run: npm ci --prefix client
+        run: npm ci --prefix client --legacy-peer-deps
 
       - name: Run ESLint (0 warnings)
         run: npm run lint:ci --prefix client

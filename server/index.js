@@ -1,4 +1,3 @@
-import * as Sentry from '@sentry/node';
 import { createServer } from 'http';
 import express from 'express';
 import path from 'path';
@@ -32,21 +31,6 @@ import waiterCallRoutes from './routes/waiterCall.js';
 import attributesRoutes from './routes/attributes.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 
-if (process.env.SENTRY_DSN) {
-  try {
-    Sentry.init({
-      dsn: process.env.SENTRY_DSN,
-      environment: process.env.NODE_ENV === 'development' ? 'development' : 'production',
-      beforeSend(event) {
-        delete event.user;
-        return event;
-      },
-    });
-    console.log('[sentry] server crash reporter active');
-  } catch (e) {
-    console.warn('[sentry] server init failed:', e?.message);
-  }
-}
 
 const app = express();
 
@@ -202,10 +186,6 @@ if (config.nodeEnv === 'production') {
   }
 }
 
-// Sentry error handler — route'lardan sonra, custom error handler'dan önce
-if (process.env.SENTRY_DSN) {
-  Sentry.setupExpressErrorHandler(app);
-}
 
 // Error handler (en sonda)
 app.use((err, req, res, next) => {
