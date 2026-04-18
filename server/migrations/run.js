@@ -290,6 +290,18 @@ export const migrations = [
     UNIQUE(business_id, period_date)
   )`,
 
+  `CREATE TABLE IF NOT EXISTS refunds (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    order_id TEXT NOT NULL REFERENCES orders(id),
+    payment_id TEXT NOT NULL REFERENCES payments(id),
+    amount REAL NOT NULL CHECK(amount > 0),
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed','voided')),
+    created_at TEXT DEFAULT (datetime('now')),
+    created_by TEXT REFERENCES users(id)
+  )`,
+
   // ── Printers ──
   `CREATE TABLE IF NOT EXISTS printers (
     id TEXT PRIMARY KEY,
@@ -399,6 +411,9 @@ export const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`,
   `CREATE INDEX IF NOT EXISTS idx_period_closes_business_date ON period_closes(business_id, period_date)`,
   `CREATE INDEX IF NOT EXISTS idx_period_closes_business_status ON period_closes(business_id, status)`,
+  `CREATE INDEX IF NOT EXISTS idx_refunds_business_created ON refunds(business_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_refunds_payment ON refunds(payment_id)`,
   `CREATE INDEX IF NOT EXISTS idx_incoming_calls_phone ON incoming_calls(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_business ON audit_logs(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`,

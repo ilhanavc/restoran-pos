@@ -121,12 +121,22 @@ export function buildPeriodReport(businessId, date) {
     WHERE business_id = ? AND created_at >= ? AND created_at < ?
   `).get(businessId, startAt, endAt);
 
+  const refundRows = db.prepare(`
+    SELECT r.*, COALESCE(u.full_name, 'Bilinmeyen') AS cashier_name
+    FROM refunds r
+    LEFT JOIN users u ON u.id = r.created_by
+    WHERE r.business_id = ? AND r.status = 'completed' AND r.created_at >= ? AND r.created_at < ?
+    ORDER BY r.created_at, r.id
+  `).all(businessId, startAt, endAt);
+  const refundTotal = round2(refundRows.reduce((sum, refund) => sum + Number(refund.amount || 0), 0));
+
   const closedOrders = db.prepare(`
     SELECT o.id, o.order_no, o.order_type, o.status, o.grand_total, o.discount_amount,
       o.created_at, o.closed_at,
       COALESCE(o.table_name_snapshot, t.name) AS table_name,
       COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
-      COALESCE(o.user_name_snapshot, u.full_name) AS user_name
+      COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
+      COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) AS refunded_total
     FROM orders o
     LEFT JOIN tables t ON t.id = o.table_id
     LEFT JOIN customers c ON c.id = o.customer_id
@@ -181,12 +191,16 @@ export function buildPeriodReport(businessId, date) {
       total_orders: Number(orderStats.total_orders) || 0,
       gross_sales: round2(orderStats.gross_sales),
       total_discounts: round2(orderStats.total_discounts),
+      refund_total: refundTotal,
+      refund_count: refundRows.length,
+      net_revenue: round2(totalRevenue - refundTotal),
       dine_in_count: Number(orderStats.dine_in_count) || 0,
       takeaway_count: Number(orderStats.takeaway_count) || 0,
     },
     payment_breakdown: Array.from(paymentBuckets.values()),
     cashier_breakdown: Array.from(cashierBuckets.values()),
     order_type_breakdown: orderTypeBreakdown,
+    refunds: refundRows,
     closed_orders: closedOrders,
     cancelled_orders: cancelledOrders,
     open_orders: openOrders,

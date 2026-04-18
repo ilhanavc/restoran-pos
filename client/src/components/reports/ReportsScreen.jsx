@@ -440,6 +440,25 @@ export default function ReportsScreen() {
     });
   };
 
+  const requestFullRefund = (order) => {
+    const remaining = Math.max(0, Number(order.grand_total || 0) - Number(order.refunded_total || 0));
+    requestConfirm({
+      title: 'Sipariş iade edilsin mi?',
+      body: `#${order.order_no} için ${formatCurrency(remaining)} tutarında tam iade kaydı oluşturulacak.`,
+      confirmLabel: 'İade Et',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.refundOrderFull(order.id, { reason: 'Rapor ekranından tam iade' });
+          toast.success('İade kaydı oluşturuldu');
+          loadAll();
+        } catch (err) {
+          toast.error(err?.message || 'İade oluşturulamadı');
+        }
+      },
+    });
+  };
+
   const loadAnalytics = async () => {
     if (!analyticsFrom || !analyticsTo) return;
     setAnalyticsLoading(true);
@@ -551,8 +570,12 @@ export default function ReportsScreen() {
                     </div>
                   </div>
                   <div className="stat-card">
-                    <div className="stat-card-label">İndirim</div>
-                    <div className="stat-card-value">{formatCurrency(periodReport.summary?.total_discounts)}</div>
+                    <div className="stat-card-label">İade</div>
+                    <div className="stat-card-value" style={{ color: 'var(--danger)' }}>{formatCurrency(periodReport.summary?.refund_total)}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-card-label">Net Tahsilat</div>
+                    <div className="stat-card-value">{formatCurrency(periodReport.summary?.net_revenue)}</div>
                   </div>
                 </div>
 
@@ -942,7 +965,9 @@ export default function ReportsScreen() {
                       <th>Müşteri</th>
                       <th>Personel</th>
                       <th>Ödeme</th>
+                      <th className="text-right">İade</th>
                       <th className="text-right">Tutar</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -953,7 +978,18 @@ export default function ReportsScreen() {
                         <td>{o.customer_name || '—'}</td>
                         <td>{o.user_name || '—'}</td>
                         <td>{paymentLabel[o.payment_type] || o.payment_type || '—'}</td>
+                        <td className="text-right">{o.refunded_total ? formatCurrency(o.refunded_total) : '—'}</td>
                         <td className="text-right" style={{ fontWeight: 600 }}>{formatCurrency(o.grand_total)}</td>
+                        <td className="text-right">
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => requestFullRefund(o)}
+                            disabled={Number(o.refunded_total || 0) + 0.02 >= Number(o.grand_total || 0)}
+                          >
+                            İade
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

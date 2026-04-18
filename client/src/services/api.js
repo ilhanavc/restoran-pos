@@ -4,6 +4,7 @@ import { tablesMixin } from './api/tables.js';
 import { productsMixin } from './api/products.js';
 import { ordersMixin } from './api/orders.js';
 import { paymentsMixin } from './api/payments.js';
+import { refundsMixin } from './api/refunds.js';
 import { customersMixin } from './api/customers.js';
 import { calleridMixin } from './api/callerid.js';
 import { reportsMixin } from './api/reports.js';
@@ -21,6 +22,7 @@ Object.assign(
   productsMixin,
   ordersMixin,
   paymentsMixin,
+  refundsMixin,
   customersMixin,
   calleridMixin,
   reportsMixin,

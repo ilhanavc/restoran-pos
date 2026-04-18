@@ -31,6 +31,12 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
       WHERE business_id = ? AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
 
+    const refundSummary = db.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total
+      FROM refunds
+      WHERE business_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?
+    `).get(req.businessId, startAt, endAt);
+
     const orderStats = db.prepare(`
       SELECT COUNT(*) as total_orders,
         SUM(CASE WHEN order_type = 'dine_in' THEN 1 ELSE 0 END) as dine_in_count,
@@ -109,6 +115,9 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
     res.json({
       date: targetDate,
       revenue: revenue.total,
+      refundTotal: refundSummary.total,
+      refundCount: refundSummary.count,
+      netRevenue: revenue.total - refundSummary.total,
       orderStats,
       paymentBreakdown,
       topProducts,
@@ -178,6 +187,7 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
         COALESCE(o.table_name_snapshot, t.name) AS table_name,
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
+        COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) AS refunded_total,
         (SELECT CASE
             WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
             ELSE p.payment_type
@@ -246,6 +256,7 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
         COALESCE(o.table_name_snapshot, t.name) AS table_name,
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
+        COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) AS refunded_total,
         (SELECT CASE
             WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
             ELSE p.payment_type
