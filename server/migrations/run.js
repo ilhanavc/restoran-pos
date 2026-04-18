@@ -1,6 +1,15 @@
 import db from '../config/database.js';
 import { normalizePhoneDigits } from '../utils/phoneNormalize.js';
 import { genId } from '../utils/helpers.js';
+import { BASELINE_SCHEMA_VERSION, versionedMigrations } from './versions/index.js';
+
+export const SCHEMA_MIGRATIONS_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    version TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )
+`;
 
 export const migrations = [
   // ── Businesses & Branches ──
@@ -573,29 +582,29 @@ function migrateVatInclusivePricingOnce() {
 }
 
 /** Aynı kategori için birden fazla printer_routing satırını temizler; benzersiz indeks ekler. */
-function ensurePrinterRoutingUniqueIndex() {
+function ensurePrinterRoutingUniqueIndex(database = db) {
   try {
-    const hasIdx = db
+    const hasIdx = database
       .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_printer_routing_business_category'`)
       .get();
     if (hasIdx) return;
 
-    const dupGroups = db
+    const dupGroups = database
       .prepare(
         `SELECT business_id, category_id FROM printer_routing GROUP BY business_id, category_id HAVING COUNT(*) > 1`,
       )
       .all();
     for (const g of dupGroups) {
-      const rows = db
+      const rows = database
         .prepare(
           `SELECT id FROM printer_routing WHERE business_id = ? AND category_id = ? ORDER BY datetime(created_at), id`,
         )
         .all(g.business_id, g.category_id);
       for (let i = 1; i < rows.length; i++) {
-        db.prepare('DELETE FROM printer_routing WHERE id = ?').run(rows[i].id);
+        database.prepare('DELETE FROM printer_routing WHERE id = ?').run(rows[i].id);
       }
     }
-    db.exec(
+    database.exec(
       `CREATE UNIQUE INDEX IF NOT EXISTS idx_printer_routing_business_category ON printer_routing(business_id, category_id)`,
     );
   } catch (e) {
@@ -603,9 +612,9 @@ function ensurePrinterRoutingUniqueIndex() {
   }
 }
 
-function ensureActiveDineInTableGuard() {
+function ensureActiveDineInTableGuard(database = db) {
   try {
-    db.exec(`
+    database.exec(`
       UPDATE tables
       SET status = 'empty',
           current_order_id = NULL,
@@ -621,7 +630,7 @@ function ensureActiveDineInTableGuard() {
         )
     `);
 
-    const dup = db.prepare(`
+    const dup = database.prepare(`
       SELECT business_id, table_id, COUNT(*) AS c
       FROM orders
       WHERE order_type = 'dine_in'
@@ -638,7 +647,7 @@ function ensureActiveDineInTableGuard() {
       return;
     }
 
-    db.exec(`
+    database.exec(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_active_dine_in_table_unique
       ON orders(business_id, table_id)
       WHERE order_type = 'dine_in'
@@ -650,63 +659,63 @@ function ensureActiveDineInTableGuard() {
   }
 }
 
-function ensureColumnMigrations() {
-  const diningCols = db.prepare('PRAGMA table_info(dining_areas)').all();
+function ensureColumnMigrations(database = db) {
+  const diningCols = database.prepare('PRAGMA table_info(dining_areas)').all();
   if (!diningCols.some((c) => c.name === 'target_table_count')) {
-    db.prepare('ALTER TABLE dining_areas ADD COLUMN target_table_count INTEGER').run();
+    database.prepare('ALTER TABLE dining_areas ADD COLUMN target_table_count INTEGER').run();
   }
-  const orderCols = db.prepare('PRAGMA table_info(orders)').all();
+  const orderCols = database.prepare('PRAGMA table_info(orders)').all();
   if (!orderCols.some((c) => c.name === 'takeaway_out_at')) {
-    db.prepare('ALTER TABLE orders ADD COLUMN takeaway_out_at TEXT').run();
+    database.prepare('ALTER TABLE orders ADD COLUMN takeaway_out_at TEXT').run();
   }
   if (!orderCols.some((c) => c.name === 'takeaway_delivered_at')) {
-    db.prepare('ALTER TABLE orders ADD COLUMN takeaway_delivered_at TEXT').run();
+    database.prepare('ALTER TABLE orders ADD COLUMN takeaway_delivered_at TEXT').run();
   }
-  const orderColsAfterTakeaway = db.prepare('PRAGMA table_info(orders)').all();
+  const orderColsAfterTakeaway = database.prepare('PRAGMA table_info(orders)').all();
   if (!orderColsAfterTakeaway.some((c) => c.name === 'table_name_snapshot')) {
-    db.prepare('ALTER TABLE orders ADD COLUMN table_name_snapshot TEXT').run();
+    database.prepare('ALTER TABLE orders ADD COLUMN table_name_snapshot TEXT').run();
   }
   if (!orderColsAfterTakeaway.some((c) => c.name === 'customer_name_snapshot')) {
-    db.prepare('ALTER TABLE orders ADD COLUMN customer_name_snapshot TEXT').run();
+    database.prepare('ALTER TABLE orders ADD COLUMN customer_name_snapshot TEXT').run();
   }
   if (!orderColsAfterTakeaway.some((c) => c.name === 'user_name_snapshot')) {
-    db.prepare('ALTER TABLE orders ADD COLUMN user_name_snapshot TEXT').run();
+    database.prepare('ALTER TABLE orders ADD COLUMN user_name_snapshot TEXT').run();
   }
 
-  const cpCols = db.prepare('PRAGMA table_info(customer_phones)').all();
+  const cpCols = database.prepare('PRAGMA table_info(customer_phones)').all();
   if (cpCols.length && !cpCols.some((c) => c.name === 'normalized_phone')) {
-    db.prepare('ALTER TABLE customer_phones ADD COLUMN normalized_phone TEXT').run();
+    database.prepare('ALTER TABLE customer_phones ADD COLUMN normalized_phone TEXT').run();
   }
 
-  const customerCols = db.prepare('PRAGMA table_info(customers)').all();
+  const customerCols = database.prepare('PRAGMA table_info(customers)').all();
   if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_no')) {
-    db.prepare('ALTER TABLE customers ADD COLUMN legacy_no TEXT').run();
+    database.prepare('ALTER TABLE customers ADD COLUMN legacy_no TEXT').run();
   }
   if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_balance')) {
-    db.prepare('ALTER TABLE customers ADD COLUMN legacy_balance REAL DEFAULT 0').run();
+    database.prepare('ALTER TABLE customers ADD COLUMN legacy_balance REAL DEFAULT 0').run();
   }
   if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_total_amount')) {
-    db.prepare('ALTER TABLE customers ADD COLUMN legacy_total_amount REAL DEFAULT 0').run();
+    database.prepare('ALTER TABLE customers ADD COLUMN legacy_total_amount REAL DEFAULT 0').run();
   }
   if (customerCols.length && !customerCols.some((c) => c.name === 'legacy_discount_amount')) {
-    db.prepare('ALTER TABLE customers ADD COLUMN legacy_discount_amount REAL DEFAULT 0').run();
+    database.prepare('ALTER TABLE customers ADD COLUMN legacy_discount_amount REAL DEFAULT 0').run();
   }
 
-  const printerCols = db.prepare('PRAGMA table_info(printers)').all();
+  const printerCols = database.prepare('PRAGMA table_info(printers)').all();
   if (printerCols.length && !printerCols.some((c) => c.name === 'print_options')) {
-    db.prepare('ALTER TABLE printers ADD COLUMN print_options TEXT').run();
+    database.prepare('ALTER TABLE printers ADD COLUMN print_options TEXT').run();
   }
   if (printerCols.length && !printerCols.some((c) => c.name === 'line_width')) {
-    db.prepare('ALTER TABLE printers ADD COLUMN line_width INTEGER').run();
+    database.prepare('ALTER TABLE printers ADD COLUMN line_width INTEGER').run();
   }
   if (printerCols.length) {
-    db.prepare('UPDATE printers SET line_width = 42 WHERE line_width IS NOT NULL AND line_width > 42').run();
-    db.prepare('UPDATE printers SET line_width = NULL WHERE line_width IS NOT NULL AND line_width < 32').run();
+    database.prepare('UPDATE printers SET line_width = 42 WHERE line_width IS NOT NULL AND line_width > 42').run();
+    database.prepare('UPDATE printers SET line_width = NULL WHERE line_width IS NOT NULL AND line_width < 32').run();
 
-    const printerOptionRows = db
+    const printerOptionRows = database
       .prepare('SELECT id, type, print_options FROM printers WHERE print_options IS NOT NULL AND print_options != ?')
       .all('');
-    const updatePrinterOptions = db.prepare('UPDATE printers SET print_options = ? WHERE id = ?');
+    const updatePrinterOptions = database.prepare('UPDATE printers SET print_options = ? WHERE id = ?');
     for (const row of printerOptionRows) {
       try {
         const parsed = JSON.parse(row.print_options);
@@ -737,57 +746,57 @@ function ensureColumnMigrations() {
     }
   }
 
-  let pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  let pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_at')) {
-    db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_at TEXT').run();
+    database.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_at TEXT').run();
   }
-  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_by')) {
-    db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_by TEXT').run();
+    database.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_by TEXT').run();
   }
-  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'claimed_until')) {
-    db.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_until TEXT').run();
+    database.prepare('ALTER TABLE print_jobs ADD COLUMN claimed_until TEXT').run();
   }
-  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'attempt_count')) {
-    db.prepare('ALTER TABLE print_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0').run();
+    database.prepare('ALTER TABLE print_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0').run();
   }
-  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'last_attempt_at')) {
-    db.prepare('ALTER TABLE print_jobs ADD COLUMN last_attempt_at TEXT').run();
+    database.prepare('ALTER TABLE print_jobs ADD COLUMN last_attempt_at TEXT').run();
   }
-  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   if (pjCols.length && !pjCols.some((c) => c.name === 'last_error_code')) {
-    db.prepare('ALTER TABLE print_jobs ADD COLUMN last_error_code TEXT').run();
+    database.prepare('ALTER TABLE print_jobs ADD COLUMN last_error_code TEXT').run();
   }
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_claimed ON print_jobs(business_id, status, claimed_at, created_at)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_lease ON print_jobs(business_id, status, claimed_until, created_at)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_claimed ON print_jobs(business_id, status, claimed_at, created_at)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_lease ON print_jobs(business_id, status, claimed_until, created_at)`);
 
-  const paymentCols = db.prepare('PRAGMA table_info(payments)').all();
+  const paymentCols = database.prepare('PRAGMA table_info(payments)').all();
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'payment_scope')) {
-    db.prepare(
+    database.prepare(
       `ALTER TABLE payments ADD COLUMN payment_scope TEXT NOT NULL DEFAULT 'full_order' CHECK(payment_scope IN ('full_order','split_item'))`,
     ).run();
   }
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'payer_no')) {
-    db.prepare('ALTER TABLE payments ADD COLUMN payer_no INTEGER').run();
+    database.prepare('ALTER TABLE payments ADD COLUMN payer_no INTEGER').run();
   }
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'payer_label')) {
-    db.prepare('ALTER TABLE payments ADD COLUMN payer_label TEXT').run();
+    database.prepare('ALTER TABLE payments ADD COLUMN payer_label TEXT').run();
   }
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'idempotency_key')) {
-    db.prepare('ALTER TABLE payments ADD COLUMN idempotency_key TEXT').run();
+    database.prepare('ALTER TABLE payments ADD COLUMN idempotency_key TEXT').run();
   }
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'source')) {
-    db.prepare("ALTER TABLE payments ADD COLUMN source TEXT DEFAULT 'manual'").run();
+    database.prepare("ALTER TABLE payments ADD COLUMN source TEXT DEFAULT 'manual'").run();
   }
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'tip_amount')) {
-    db.prepare('ALTER TABLE payments ADD COLUMN tip_amount REAL DEFAULT 0 CHECK(tip_amount >= 0)').run();
+    database.prepare('ALTER TABLE payments ADD COLUMN tip_amount REAL DEFAULT 0 CHECK(tip_amount >= 0)').run();
   }
-  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(business_id, order_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
+  database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(business_id, order_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
 
-  db.exec(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS payment_allocations (
       id TEXT PRIMARY KEY,
       business_id TEXT NOT NULL REFERENCES businesses(id),
@@ -802,11 +811,11 @@ function ensureColumnMigrations() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`);
 
-  db.exec(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS tips (
       id TEXT PRIMARY KEY,
       business_id TEXT NOT NULL REFERENCES businesses(id),
@@ -817,16 +826,16 @@ function ensureColumnMigrations() {
       created_by TEXT REFERENCES users(id)
     )
   `);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tips_business_created ON tips(business_id, created_at)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tips_order ON tips(order_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_tips_payment ON tips(payment_id)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_tips_business_created ON tips(business_id, created_at)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_tips_order ON tips(order_id)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_tips_payment ON tips(payment_id)`);
 
   // order_id NOT NULL → nullable (test job'ları için gerekli; SQLite tablo recreation gerektirir)
-  pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
+  pjCols = database.prepare('PRAGMA table_info(print_jobs)').all();
   const pjOrderIdCol = pjCols.find((c) => c.name === 'order_id');
   if (pjOrderIdCol && pjOrderIdCol.notnull === 1) {
     const colNames = pjCols.map((c) => c.name).join(', ');
-    db.exec(`CREATE TABLE print_jobs_new (
+    database.exec(`CREATE TABLE print_jobs_new (
       id TEXT PRIMARY KEY,
       business_id TEXT NOT NULL REFERENCES businesses(id),
       order_id TEXT REFERENCES orders(id),
@@ -845,17 +854,17 @@ function ensureColumnMigrations() {
       last_attempt_at TEXT,
       last_error_code TEXT
     )`);
-    db.exec(`INSERT INTO print_jobs_new (${colNames}) SELECT ${colNames} FROM print_jobs`);
-    db.exec(`DROP TABLE print_jobs`);
-    db.exec(`ALTER TABLE print_jobs_new RENAME TO print_jobs`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`);
+    database.exec(`INSERT INTO print_jobs_new (${colNames}) SELECT ${colNames} FROM print_jobs`);
+    database.exec(`DROP TABLE print_jobs`);
+    database.exec(`ALTER TABLE print_jobs_new RENAME TO print_jobs`);
+    database.exec(`CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`);
     console.log('✅ print_jobs.order_id NOT NULL kısıtı kaldırıldı (nullable yapıldı)');
   }
 
-  ensurePrinterRoutingUniqueIndex();
-  ensureActiveDineInTableGuard();
+  ensurePrinterRoutingUniqueIndex(database);
+  ensureActiveDineInTableGuard(database);
 
-  db.exec(`
+  database.exec(`
     CREATE TABLE IF NOT EXISTS call_logs (
       id TEXT PRIMARY KEY,
       business_id TEXT NOT NULL REFERENCES businesses(id),
@@ -870,48 +879,48 @@ function ensureColumnMigrations() {
       created_at TEXT DEFAULT (datetime('now'))
     )
   `);
-  const callLogCols = db.prepare('PRAGMA table_info(call_logs)').all();
+  const callLogCols = database.prepare('PRAGMA table_info(call_logs)').all();
   if (callLogCols.length && !callLogCols.some((c) => c.name === 'order_id')) {
-    db.prepare('ALTER TABLE call_logs ADD COLUMN order_id TEXT REFERENCES orders(id)').run();
+    database.prepare('ALTER TABLE call_logs ADD COLUMN order_id TEXT REFERENCES orders(id)').run();
   }
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_customer_phones_normalized ON customer_phones(normalized_phone)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_business_created ON call_logs(business_id, created_at DESC)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_normalized ON call_logs(normalized_phone)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_customer_phones_normalized ON customer_phones(normalized_phone)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_business_created ON call_logs(business_id, created_at DESC)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_call_logs_normalized ON call_logs(normalized_phone)`);
 
-  let oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+  let oiColsPragma = database.prepare('PRAGMA table_info(order_items)').all();
   if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'portion_id')) {
-    db.prepare('ALTER TABLE order_items ADD COLUMN portion_id TEXT').run();
-    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+    database.prepare('ALTER TABLE order_items ADD COLUMN portion_id TEXT').run();
+    oiColsPragma = database.prepare('PRAGMA table_info(order_items)').all();
   }
   if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'portion_label')) {
-    db.prepare('ALTER TABLE order_items ADD COLUMN portion_label TEXT').run();
-    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+    database.prepare('ALTER TABLE order_items ADD COLUMN portion_label TEXT').run();
+    oiColsPragma = database.prepare('PRAGMA table_info(order_items)').all();
   }
   if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'category_id_snapshot')) {
-    db.prepare('ALTER TABLE order_items ADD COLUMN category_id_snapshot TEXT').run();
-    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+    database.prepare('ALTER TABLE order_items ADD COLUMN category_id_snapshot TEXT').run();
+    oiColsPragma = database.prepare('PRAGMA table_info(order_items)').all();
   }
   if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'category_name_snapshot')) {
-    db.prepare('ALTER TABLE order_items ADD COLUMN category_name_snapshot TEXT').run();
-    oiColsPragma = db.prepare('PRAGMA table_info(order_items)').all();
+    database.prepare('ALTER TABLE order_items ADD COLUMN category_name_snapshot TEXT').run();
+    oiColsPragma = database.prepare('PRAGMA table_info(order_items)').all();
   }
   if (oiColsPragma.length && !oiColsPragma.some((c) => c.name === 'printer_target_snapshot')) {
-    db.prepare('ALTER TABLE order_items ADD COLUMN printer_target_snapshot TEXT').run();
+    database.prepare('ALTER TABLE order_items ADD COLUMN printer_target_snapshot TEXT').run();
   }
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_order_items_category_snapshot ON order_items(category_id_snapshot)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_order_items_category_snapshot ON order_items(category_id_snapshot)`);
 
   // Özellik seçimleri snapshot (attributes modülü)
-  const oiColsFinal = db.prepare('PRAGMA table_info(order_items)').all();
+  const oiColsFinal = database.prepare('PRAGMA table_info(order_items)').all();
   if (oiColsFinal.length && !oiColsFinal.some((c) => c.name === 'selected_attributes')) {
-    db.prepare("ALTER TABLE order_items ADD COLUMN selected_attributes TEXT DEFAULT '[]'").run();
+    database.prepare("ALTER TABLE order_items ADD COLUMN selected_attributes TEXT DEFAULT '[]'").run();
   }
 
-  const reservationCols = db.prepare('PRAGMA table_info(reservations)').all();
+  const reservationCols = database.prepare('PRAGMA table_info(reservations)').all();
   if (reservationCols.length && !reservationCols.some((c) => c.name === 'arrived_at')) {
-    db.prepare('ALTER TABLE reservations ADD COLUMN arrived_at TEXT').run();
+    database.prepare('ALTER TABLE reservations ADD COLUMN arrived_at TEXT').run();
   }
   if (reservationCols.length && !reservationCols.some((c) => c.name === 'seated_order_id')) {
-    db.prepare('ALTER TABLE reservations ADD COLUMN seated_order_id TEXT REFERENCES orders(id)').run();
+    database.prepare('ALTER TABLE reservations ADD COLUMN seated_order_id TEXT REFERENCES orders(id)').run();
   }
 }
 
@@ -1011,15 +1020,65 @@ function backfillOrderHeaderSnapshots() {
   }
 }
 
-export function runMigrations() {
-  console.log('🔄 Running migrations...');
-  const migrate = db.transaction(() => {
+export function ensureSchemaMigrationsTable(database = db) {
+  database.exec(SCHEMA_MIGRATIONS_TABLE_SQL);
+}
+
+function hasLegacyBaselineSchema(database = db) {
+  const requiredTables = ['businesses', 'orders', 'payments', 'print_jobs'];
+  const existingTables = database
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN (${requiredTables.map(() => '?').join(',')})`)
+    .all(...requiredTables)
+    .map((row) => row.name);
+
+  return requiredTables.every((table) => existingTables.includes(table));
+}
+
+export function applyLegacyMigrations(database = db) {
+  const migrate = database.transaction(() => {
     for (const sql of migrations) {
-      db.exec(sql);
+      database.exec(sql);
     }
-    ensureColumnMigrations();
+    ensureColumnMigrations(database);
   });
   migrate();
+}
+
+export function applyVersionedMigrations(database = db) {
+  ensureSchemaMigrationsTable(database);
+
+  const applied = new Set(
+    database
+      .prepare('SELECT version FROM schema_migrations')
+      .all()
+      .map((row) => row.version),
+  );
+
+  const orderedMigrations = [...versionedMigrations].sort((a, b) => a.version.localeCompare(b.version));
+  for (const migration of orderedMigrations) {
+    if (applied.has(migration.version)) continue;
+    if (migration.version === BASELINE_SCHEMA_VERSION && !hasLegacyBaselineSchema(database)) {
+      throw new Error('Legacy schema baseline cannot be recorded before core schema exists.');
+    }
+
+    const migrate = database.transaction(() => {
+      migration.up?.(database);
+      database
+        .prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)')
+        .run(migration.version, migration.name);
+    });
+    migrate();
+  }
+}
+
+export function migrateDatabase(database = db) {
+  applyLegacyMigrations(database);
+  applyVersionedMigrations(database);
+}
+
+export function runMigrations() {
+  console.log('🔄 Running migrations...');
+  migrateDatabase(db);
   migrateVatInclusivePricingOnce();
   ensureProductPortionsSeed();
   backfillCustomerPhoneNormalized();

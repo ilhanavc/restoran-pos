@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { migrations } from '../migrations/run.js';
+import { BASELINE_SCHEMA_VERSION } from '../migrations/versions/index.js';
+import { migrateDatabase, migrations } from '../migrations/run.js';
 
 /**
  * Migration idempotency testleri.
@@ -10,12 +11,7 @@ import { migrations } from '../migrations/run.js';
 
 /** migrations dizisini in-memory DB üzerinde çalıştırır */
 function applyMigrations(db) {
-  const migrate = db.transaction(() => {
-    for (const sql of migrations) {
-      db.exec(sql);
-    }
-  });
-  migrate();
+  migrateDatabase(db);
 }
 
 // ── Temel tablolar oluştu mu? ─────────────────────────────────────────────────
@@ -44,6 +40,7 @@ describe('Migrations — fresh DB', () => {
       'businesses', 'users', 'roles', 'dining_areas', 'tables',
       'categories', 'products', 'orders', 'order_items',
       'payments', 'printers', 'print_jobs', 'customers', 'audit_logs',
+      'schema_migrations',
     ];
 
     for (const t of required) {
@@ -80,6 +77,17 @@ describe('Migrations — fresh DB', () => {
 
     const cols = db.prepare(`PRAGMA table_info(orders)`).all().map(c => c.name);
     expect(cols).toContain('order_type');
+    db.close();
+  });
+
+  it('schema_migrations baseline kaydını içeriyor', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    const row = db.prepare(`SELECT version, name, applied_at FROM schema_migrations WHERE version = ?`).get(BASELINE_SCHEMA_VERSION);
+    expect(row).toBeDefined();
+    expect(row.name).toBe('Legacy schema baseline');
+    expect(row.applied_at).toBeTruthy();
     db.close();
   });
 });
@@ -127,6 +135,16 @@ describe('Migrations — idempotency (iki kez çalıştırma)', () => {
     const row = db.prepare(`SELECT * FROM businesses WHERE id = 'biz1'`).get();
     expect(row).not.toBeNull();
     expect(row.name).toBe('Test Restoran');
+    db.close();
+  });
+
+  it('baseline migration kaydı iki kez çalıştırmada tek kalır', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    applyMigrations(db);
+
+    const row = db.prepare(`SELECT COUNT(*) as c FROM schema_migrations WHERE version = ?`).get(BASELINE_SCHEMA_VERSION);
+    expect(row.c).toBe(1);
     db.close();
   });
 });

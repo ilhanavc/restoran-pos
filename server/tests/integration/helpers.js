@@ -10,7 +10,7 @@
  *   // Ardından routes/app import et.
  */
 import Database from 'better-sqlite3';
-import { migrations } from '../../migrations/run.js';
+import { migrateDatabase } from '../../migrations/run.js';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -31,57 +31,7 @@ export const testConfig = {
  */
 export function createTestDb() {
   const db = new Database(':memory:');
-  db.transaction(() => {
-    for (const sql of migrations) db.exec(sql);
-  })();
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS call_logs (
-      id TEXT PRIMARY KEY,
-      business_id TEXT NOT NULL REFERENCES businesses(id),
-      phone TEXT NOT NULL,
-      normalized_phone TEXT NOT NULL,
-      customer_id TEXT REFERENCES customers(id),
-      order_id TEXT REFERENCES orders(id),
-      customer_name_snapshot TEXT,
-      address_snapshot TEXT,
-      source_type TEXT DEFAULT 'http',
-      status TEXT NOT NULL DEFAULT 'ringing' CHECK(status IN ('ringing','dismissed','opened_order','completed')),
-      created_at TEXT DEFAULT (datetime('now'))
-    )
-  `);
-
-  // ensureColumnMigrations() tarafından sonradan eklenen kolonları da uygula
-  const addColumnIfMissing = (table, column, definition) => {
-    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-    if (cols.length && !cols.some(c => c.name === column)) {
-      db.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`).run();
-    }
-  };
-
-  addColumnIfMissing('order_items', 'portion_id', 'TEXT');
-  addColumnIfMissing('order_items', 'portion_label', 'TEXT');
-  addColumnIfMissing('dining_areas', 'target_table_count', 'INTEGER');
-  addColumnIfMissing('orders', 'takeaway_out_at', 'TEXT');
-  addColumnIfMissing('orders', 'takeaway_delivered_at', 'TEXT');
-  addColumnIfMissing('customer_phones', 'normalized_phone', 'TEXT');
-  addColumnIfMissing('customers', 'legacy_no', 'TEXT');
-  addColumnIfMissing('customers', 'legacy_balance', 'REAL DEFAULT 0');
-  addColumnIfMissing('customers', 'legacy_total_amount', 'REAL DEFAULT 0');
-  addColumnIfMissing('customers', 'legacy_discount_amount', 'REAL DEFAULT 0');
-  addColumnIfMissing('printers', 'print_options', 'TEXT');
-  addColumnIfMissing('printers', 'line_width', 'INTEGER');
-  addColumnIfMissing('print_jobs', 'claimed_at', 'TEXT');
-  addColumnIfMissing('print_jobs', 'claimed_by', 'TEXT');
-  addColumnIfMissing('print_jobs', 'claimed_until', 'TEXT');
-  addColumnIfMissing('print_jobs', 'attempt_count', 'INTEGER NOT NULL DEFAULT 0');
-  addColumnIfMissing('print_jobs', 'last_attempt_at', 'TEXT');
-  addColumnIfMissing('print_jobs', 'last_error_code', 'TEXT');
-  addColumnIfMissing('call_logs', 'order_id', 'TEXT');
-  addColumnIfMissing('order_items', 'selected_attributes', "TEXT DEFAULT '[]'");
-  addColumnIfMissing('reservations', 'arrived_at', 'TEXT');
-  addColumnIfMissing('reservations', 'seated_order_id', 'TEXT');
-
+  migrateDatabase(db);
   return db;
 }
 
