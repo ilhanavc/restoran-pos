@@ -76,6 +76,30 @@ async function createOrder(overrides = {}) {
 
 // ── POST /api/orders/:id/items ────────────────────────────────────────────────
 describe('POST /api/orders/:id/items — mevcut siparişe ürün ekleme', () => {
+  it('sipariş oluşturunca entity_mutations kaydı yazar', async () => {
+    const created = await createOrder({ note: 'Audit notu' });
+    expect(created.status).toBe(201);
+
+    const mutation = dbRef.current.prepare(`
+      SELECT * FROM entity_mutations WHERE entity_table = 'orders' AND entity_id = ?
+    `).get(created.body.id);
+
+    expect(mutation).toMatchObject({
+      business_id: seeds.businessId,
+      action: 'create',
+      actor_user_id: seeds.userId,
+      reason: 'Audit notu',
+      source: 'api.orders.create',
+    });
+    const after = JSON.parse(mutation.after_json);
+    expect(after).toMatchObject({
+      id: created.body.id,
+      order_type: 'dine_in',
+      status: 'in_kitchen',
+    });
+    expect(after.items).toHaveLength(1);
+  });
+
   it('var olan siparişe ürün ekler, grand_total güncellenir', async () => {
     const created = await createOrder();
     expect(created.status).toBe(201);
@@ -159,6 +183,20 @@ describe('PATCH /api/orders/:id/status — sipariş iptali', () => {
     // Tüm kalemler de iptal edilmeli
     const items = dbRef.current.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
     items.forEach(item => expect(item.status).toBe('cancelled'));
+
+    const mutation = dbRef.current.prepare(`
+      SELECT * FROM entity_mutations
+      WHERE entity_table = 'orders' AND entity_id = ? AND action = 'status_change'
+      ORDER BY created_at DESC LIMIT 1
+    `).get(orderId);
+    expect(mutation).toMatchObject({
+      business_id: seeds.businessId,
+      actor_user_id: seeds.userId,
+      reason: 'cancelled',
+      source: 'api.orders.status',
+    });
+    expect(JSON.parse(mutation.before_json)).toMatchObject({ id: orderId, status: 'in_kitchen' });
+    expect(JSON.parse(mutation.after_json)).toMatchObject({ id: orderId, status: 'cancelled' });
   });
 
   it('ödeme kaydı olan sipariş iptal edilemez → 400', async () => {
@@ -222,6 +260,15 @@ describe('PATCH /api/orders/:id/status — sipariş kapanması', () => {
     const table = dbRef.current.prepare('SELECT * FROM tables WHERE id = ?').get(seeds.tableId);
     expect(table.status).toBe('empty');
     expect(table.current_order_id).toBeNull();
+
+    const mutation = dbRef.current.prepare(`
+      SELECT * FROM entity_mutations
+      WHERE entity_table = 'orders' AND entity_id = ? AND action = 'status_change'
+      ORDER BY created_at DESC LIMIT 1
+    `).get(orderId);
+    expect(mutation.reason).toBe('closed');
+    expect(mutation.source).toBe('api.orders.status');
+    expect(JSON.parse(mutation.after_json)).toMatchObject({ id: orderId, status: 'closed' });
   });
 
   it('kısmen ödenmiş sipariş kapatılamaz → 400', async () => {

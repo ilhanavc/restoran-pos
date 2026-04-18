@@ -10,6 +10,7 @@ import {
 import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
 import { linkCallLogToOrder } from './callerIdService.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
+import { recordEntityMutation } from './entityMutationService.js';
 
 export function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
@@ -304,7 +305,7 @@ export function autoCancelOrderIfNoActiveItems(orderId, businessId, userId) {
 // Domain operations (transactions + side effects)
 // ---------------------------------------------------------------------------
 
-export function createOrder(businessId, branchId, userId, orderData) {
+export function createOrder(businessId, branchId, userId, orderData, auditContext = {}) {
   const { table_id, order_type, customer_id, call_log_id, items, note, guest_count,
     delivery_address, delivery_note, courier_note } = orderData;
 
@@ -406,6 +407,20 @@ export function createOrder(businessId, branchId, userId, orderData) {
         ? AUTO_PRINT_EVENTS.KITCHEN_TAKEAWAY_ORDER_CREATE
         : AUTO_PRINT_EVENTS.KITCHEN_TABLE_ORDER_CREATE,
     });
+
+    const insertedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    const insertedItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY created_at').all(orderId);
+    recordEntityMutation({
+      businessId,
+      entityTable: 'orders',
+      entityId: orderId,
+      action: 'create',
+      after: { ...insertedOrder, items: insertedItems },
+      actorUserId: userId,
+      reason: note || null,
+      requestId: auditContext.requestId || null,
+      source: 'api.orders.create',
+    });
   })();
 
   processPendingJobsSync(businessId, userId);
@@ -482,7 +497,7 @@ export function addItemsToOrder(businessId, orderId, userId, items) {
   return updated;
 }
 
-export function updateOrderStatus(businessId, orderId, userId, status, user) {
+export function updateOrderStatus(businessId, orderId, userId, status, user, auditContext = {}) {
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(orderId, businessId);
   if (!order) {
     const err = new Error('Sipariş bulunamadı');
@@ -517,6 +532,20 @@ export function updateOrderStatus(businessId, orderId, userId, status, user) {
          WHERE business_id = ? AND current_order_id = ?`,
       ).run(businessId, orderId);
       db.prepare(`UPDATE order_items SET status = 'cancelled' WHERE order_id = ?`).run(orderId);
+      const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+      const updatedItems = db.prepare('SELECT * FROM order_items WHERE order_id = ? ORDER BY created_at').all(orderId);
+      recordEntityMutation({
+        businessId,
+        entityTable: 'orders',
+        entityId: orderId,
+        action: 'status_change',
+        before: order,
+        after: { ...updatedOrder, items: updatedItems },
+        actorUserId: userId,
+        reason: 'cancelled',
+        requestId: auditContext.requestId || null,
+        source: 'api.orders.status',
+      });
     })();
     auditLog(businessId, userId, 'order_cancelled', 'order', orderId);
     const updated = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
@@ -580,6 +609,19 @@ export function updateOrderStatus(businessId, orderId, userId, status, user) {
         "UPDATE customers SET total_orders = total_orders + 1, last_order_at = datetime('now') WHERE id = ?",
       ).run(order.customer_id);
     }
+    const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    recordEntityMutation({
+      businessId,
+      entityTable: 'orders',
+      entityId: orderId,
+      action: 'status_change',
+      before: order,
+      after: updatedOrder,
+      actorUserId: userId,
+      reason: status,
+      requestId: auditContext.requestId || null,
+      source: 'api.orders.status',
+    });
   })();
 
   auditLog(businessId, userId, `order_${status}`, 'order', orderId);

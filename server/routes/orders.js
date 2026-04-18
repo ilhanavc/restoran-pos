@@ -385,7 +385,9 @@ router.patch('/:id/customer', staff, (req, res) => {
 // POST /api/orders
 router.post('/', staff, validate(createOrderSchema), (req, res) => {
   try {
-    const order = createOrder(req.businessId, req.branchId, req.user.id, req.body);
+    const order = createOrder(req.businessId, req.branchId, req.user.id, req.body, {
+      requestId: req.requestId || req.get('x-request-id') || null,
+    });
     emitToRoom(req.businessId, 'order:created', { order });
     res.status(201).json(order);
   } catch (err) {
@@ -411,7 +413,9 @@ router.post('/:id/items', staff, validate(addItemsSchema), (req, res) => {
 // PATCH /api/orders/:id/status
 router.patch('/:id/status', staffAndKitchen, validate(updateOrderStatusSchema), (req, res) => {
   try {
-    const updated = updateOrderStatus(req.businessId, req.params.id, req.user.id, req.body.status, req.user);
+    const updated = updateOrderStatus(req.businessId, req.params.id, req.user.id, req.body.status, req.user, {
+      requestId: req.requestId || req.get('x-request-id') || null,
+    });
     emitToRoom(req.businessId, 'order:updated', { order: updated });
     res.json(updated);
   } catch (err) {
