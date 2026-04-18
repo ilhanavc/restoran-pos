@@ -132,7 +132,6 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 ### Remaining Architectural Debt (after D-5, low risk)
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
 - Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
-- `server/routes/orders.js` inline status enum → import from `server/constants/orderStatus.js`.
 
 ### DB-2 Audit Trail (in progress)
 - Continue wiring `entity_mutations` to menu/product price changes and product delete/archive flows.
