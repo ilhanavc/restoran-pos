@@ -38,6 +38,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | D-1 | Test + CI Kapısı | GitHub Actions CI (lint + backend tests + frontend RTL + Playwright e2e), RTL test suite (PaymentScreen, OrderScreen — 22 tests), Playwright e2e job eklendi CI'a, `db:seed` artık `app.setup` settings kaydı yazıyor (Playwright readiness yönlendirmesi engellenir). |
 | D-2 | Signing + Wizard + Update Disiplini | First-run setup wizard (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı), `setup:is-completed`/`setup:complete` IPC, `pos-config.json` `setupCompleted` flag, `UpdateNotification` expandable release notes. Kod imzası ertelendi (sertifika satın alımı gerekli). |
 | D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation → `store-bridge.old.log`), `writeBridgeLog` (info/error, timestamp prefix), `setupBridgeFileLogging` + `bridgeLogStream` cleanup on `before-quit`. Crash reporter: `writeCrashLog` → `crashes.log` JSON-line (ts/type/message/stack/version/platform/arch), `uncaughtException`/`unhandledRejection` capture. Server: `requestIdMiddleware` (`X-Request-Id` header, `crypto.randomUUID`), JSON-line access log (`[access]` prefix: method/path/status/ms/requestId, health check hariç). |
+| D-4 | Monolitik Ayrıştırma | `electron/main.cjs` 301 satırlık orchestrator'a indirildi ve `electron/modules/*` altına bölündü; `server/routes/orders.js` + `payments.js` domain logic'i `orderService.js`/`paymentService.js` içine taşındı; `client/src/services/api.js` 31 satırlık facade oldu ve domain mixin modüllerine ayrıldı; `OrderScreen.jsx` için `useCatalog`, `useCart`, `ModifierModal`, `ClipboardEmpty` çıkarıldı; `PrinterDetailPage.jsx` için `usePrinterForm`, `PrinterDeviceSection`, `PrinterPreviewPanel` çıkarıldı. Son doğrulama: 318/318 test, `lint:ci` 0 warning, client build başarılı. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -73,6 +74,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - **First-run setup wizard** (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı); `setup:is-completed`/`setup:complete` IPC; `pos-config.json` `setupCompleted` flag
 - `UpdateNotification`: expandable release notes ("Değişiklikleri gör/gizle"), indirme progress bar, "Kur ve Yeniden Başlat"
 - **Operasyonel görünürlük (D-3):** `userData/logs/store-bridge.log` (5 MB rotation), `crashes.log` JSON-line crash reporter (`uncaughtException`/`unhandledRejection`), `X-Request-Id` correlation header (her API request), JSON-line structured access log
+- **D-4 monolitik ayrıştırma:** Electron main process modüllere ayrıldı; orders/payments route'ları domain service çağıran ince HTTP katmanlarına dönüştü; API client domain modüllerine bölündü; OrderScreen ve PrinterDetailPage ilk güvenli hook/component extraction dilimlerini aldı.
 - Product image upload (server/uploads/products/, /uploads static)
 - Combo menu support (product_combos table, UI in MenuProductEditorPage)
 - Customer 360 profile (total spend, order count, last visit, top 3 products)
@@ -115,18 +117,22 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 ## Pending Tasks
 
-All backup/restore critical gaps (P1) and operational (P2) items completed as of Sprint 12.
-Long-term roadmap items deferred pending production testing period.
+All backup/restore critical gaps (P1), operational visibility (D-3), and monolithic decomposition (D-4) are complete.
 
+### Next Required Roadmap Step — D-5 Product Gaps
+Follow the audit report dependency order. Do not start DB-1/O-1/mobile/cloud work until D-5 is either completed or explicitly deferred by the user.
 
-### Remaining architectural debt (do next, low risk)
-- `OrderScreen.jsx` (1428 lines) — extract catalog/cart/customer/action hooks separately; do NOT refactor in one pass
-- `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components
-- `PrinterDetailPage.jsx` (972 lines) — extract form model to hook, preview to separate component
-- `electron/main.cjs` (~860 lines) — extract `config`, `serverProcess`, `bridgeProcess`, `callerIdProcess`, `sqliteMigration` sub-modules
-- `server/routes/orders.js` + `payments.js` — extract domain services; route files should only handle HTTP validation + service calls
-- API client domain split: `api/core.js` started; continue splitting `api.js` into domain modules (orders, tables, payments, etc.)
-- `server/routes/orders.js` inline status enum → import from `server/constants/orderStatus.js`
+1. **D-5.1 Period close / X-Z report** — add day/shift close model, X preview, Z close, closed-period lock behavior, and reports UI.
+2. **D-5.2 Refund / return flow** — add post-payment refund records tied to original payments/orders, protect closed periods, and surface refund totals in reports.
+3. **D-5.3 Tip / bahşiş model** — add tip capture and reporting after the refund foundation is in place.
+4. **D-5.4 Reservation → table seating** — connect reservations to table occupancy/open-order flow with arrived/no-show guardrails.
+5. **D-5.5 Payment terminal SDK** — optional; keep deferred unless hardware/provider is chosen.
+6. **D-5.6 e-belge integration** — optional; keep deferred until fiscal provider and legal scope are chosen.
+
+### Remaining Architectural Debt (after D-5, low risk)
+- `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
+- Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
+- `server/routes/orders.js` inline status enum → import from `server/constants/orderStatus.js`.
 
 ### Print queue UI (P2)
 - Print queue summary panel in Admin UI (pending/failed/stale counts)
@@ -180,7 +186,7 @@ restoran-pos-v3/
 │       │                      # ManualPrintSelectorModal
 │       ├── context/           # Auth, Toast (w/ warning), IncomingCall, Socket
 │       ├── services/          # API service layer
-│       │   └── api/           # api/core.js (HTTP core, separated from api.js)
+│       │   └── api/           # HTTP core + domain mixins; api.js is thin facade
 │       ├── utils/             # orderActionPolicy.js, orderPaymentState.js,
 │       │                      # printErrorMessages.js, tableUtils.js, displayTheme.js
 │       ├── constants/         # Constants, formatters, menuUi
@@ -202,7 +208,8 @@ restoran-pos-v3/
 │   │   └── frontend/          # storeBridgeClientMappings.test.js
 │   └── index.js               # Server entry point
 ├── electron/
-│   ├── main.cjs               # Electron main process (logs → userData/logs/)
+│   ├── main.cjs               # Thin Electron orchestrator (logs → userData/logs/)
+│   ├── modules/               # config, logging, process, backup, bridge, callerId, window modules
 │   └── preload.cjs            # IPC bridge (contextBridge)
 ├── store-bridge/              # Local printer bridge; hardware CID (HID/clipboard)
 │   ├── printers/
