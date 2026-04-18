@@ -18,6 +18,11 @@ import {
   updateOrderItem,
   updateTakeawayDelivery,
 } from '../services/orderService.js';
+import {
+  ORDER_STATUSES_CLOSED,
+  ORDER_STATUSES_ALL,
+  ORDER_ITEM_STATUSES_ALL,
+} from '../constants/orderStatus.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -64,8 +69,9 @@ const addItemsSchema = {
   }),
 };
 
-const orderStatuses = ['new', 'saved', 'in_kitchen', 'preparing', 'ready', 'served', 'cancelled', 'closed'];
-const orderItemStatuses = ['new', 'sent', 'preparing', 'ready', 'served', 'cancelled', 'comped'];
+// Status enums — canonical kaynaklar server/constants/orderStatus.js
+const orderStatuses = ORDER_STATUSES_ALL;
+const orderItemStatuses = ORDER_ITEM_STATUSES_ALL;
 
 const updateOrderStatusSchema = {
   body: z.object({
@@ -228,7 +234,7 @@ router.post('/:id/takeaway/print-label', staff, (req, res) => {
     if (order.order_type !== 'takeaway') {
       return res.status(400).json({ error: 'Sadece paket sipariş yazdırılabilir' });
     }
-    if (['closed', 'cancelled'].includes(order.status) || order.takeaway_delivered_at) {
+    if (ORDER_STATUSES_CLOSED.includes(order.status) || order.takeaway_delivered_at) {
       return res.status(400).json({ error: 'Kapalı veya teslim edilmiş sipariş yazdırılamaz' });
     }
 
@@ -343,7 +349,7 @@ router.patch('/:id/customer', staff, (req, res) => {
     const { customer_id } = req.body || {};
     const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
-    if (['closed', 'cancelled'].includes(order.status)) {
+    if (ORDER_STATUSES_CLOSED.includes(order.status)) {
       return res.status(400).json({ error: 'Kapalı siparişte müşteri değiştirilemez' });
     }
     if (order.order_type !== 'dine_in') {
