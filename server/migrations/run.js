@@ -444,12 +444,15 @@ export const migrations = [
     reservation_time TEXT NOT NULL,
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'confirmed',
+    arrived_at TEXT,
+    seated_order_id TEXT REFERENCES orders(id),
     created_by TEXT REFERENCES users(id),
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
   )`,
   `CREATE INDEX IF NOT EXISTS idx_reservations_business_date ON reservations(business_id, reservation_date)`,
   `CREATE INDEX IF NOT EXISTS idx_reservations_table ON reservations(table_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_reservations_seated_order ON reservations(seated_order_id)`,
 
   // ── Stok ──
   `CREATE TABLE IF NOT EXISTS stock_items (
@@ -901,6 +904,14 @@ function ensureColumnMigrations() {
   const oiColsFinal = db.prepare('PRAGMA table_info(order_items)').all();
   if (oiColsFinal.length && !oiColsFinal.some((c) => c.name === 'selected_attributes')) {
     db.prepare("ALTER TABLE order_items ADD COLUMN selected_attributes TEXT DEFAULT '[]'").run();
+  }
+
+  const reservationCols = db.prepare('PRAGMA table_info(reservations)').all();
+  if (reservationCols.length && !reservationCols.some((c) => c.name === 'arrived_at')) {
+    db.prepare('ALTER TABLE reservations ADD COLUMN arrived_at TEXT').run();
+  }
+  if (reservationCols.length && !reservationCols.some((c) => c.name === 'seated_order_id')) {
+    db.prepare('ALTER TABLE reservations ADD COLUMN seated_order_id TEXT REFERENCES orders(id)').run();
   }
 }
 

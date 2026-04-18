@@ -160,6 +160,28 @@ export default function ReservationsScreen() {
     } catch (err) { toast.error(err.message); }
   };
 
+  const handleSeatReservation = async (reservation) => {
+    if (!reservation.table_id) {
+      toast.error('Önce rezervasyona masa seçin');
+      return;
+    }
+    requestConfirm({
+      title: 'Masaya oturtulsun mu?',
+      body: `${reservation.customer_name} için ${reservation.table_name || 'seçili masa'} üzerinde adisyon açılacak.`,
+      confirmLabel: 'Oturt',
+      tone: 'primary',
+      onConfirm: async () => {
+        try {
+          await api.seatReservation(reservation.id, { table_id: reservation.table_id });
+          toast.success('Rezervasyon masaya oturtuldu');
+          load();
+        } catch (err) {
+          toast.error(err.message || 'Masaya oturtulamadı');
+        }
+      },
+    });
+  };
+
   const grouped = reservations.reduce((acc, r) => {
     const h = r.reservation_time.slice(0, 2);
     (acc[h] = acc[h] || []).push(r);
@@ -225,6 +247,14 @@ export default function ReservationsScreen() {
                           <button className="btn btn-success btn-sm" onClick={() => handleStatusQuick(r.id, 'arrived')}>
                             <Check size={12} /> Geldi
                           </button>
+                        )}
+                        {['confirmed', 'arrived'].includes(r.status) && !r.seated_order_id && (
+                          <button className="btn btn-primary btn-sm" onClick={() => handleSeatReservation(r)} disabled={!r.table_id}>
+                            Masaya Oturt
+                          </button>
+                        )}
+                        {r.seated_order_id && (
+                          <span className="badge badge-success">Adisyon açıldı</span>
                         )}
                         {r.status !== 'cancelled' && r.status !== 'no_show' && (
                           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleStatusQuick(r.id, 'cancelled')}>

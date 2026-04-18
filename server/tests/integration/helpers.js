@@ -79,6 +79,8 @@ export function createTestDb() {
   addColumnIfMissing('print_jobs', 'last_error_code', 'TEXT');
   addColumnIfMissing('call_logs', 'order_id', 'TEXT');
   addColumnIfMissing('order_items', 'selected_attributes', "TEXT DEFAULT '[]'");
+  addColumnIfMissing('reservations', 'arrived_at', 'TEXT');
+  addColumnIfMissing('reservations', 'seated_order_id', 'TEXT');
 
   return db;
 }
