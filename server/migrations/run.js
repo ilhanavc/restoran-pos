@@ -11,6 +11,8 @@ export const SCHEMA_MIGRATIONS_TABLE_SQL = `
   )
 `;
 
+const MIGRATION_VERSION_PATTERN = /^\d{4}_[a-z0-9_]+$/;
+
 export const migrations = [
   // ── Businesses & Branches ──
   `CREATE TABLE IF NOT EXISTS businesses (
@@ -1046,6 +1048,7 @@ export function applyLegacyMigrations(database = db) {
 
 export function applyVersionedMigrations(database = db) {
   ensureSchemaMigrationsTable(database);
+  validateVersionedMigrations(versionedMigrations);
 
   const applied = new Set(
     database
@@ -1068,6 +1071,30 @@ export function applyVersionedMigrations(database = db) {
         .run(migration.version, migration.name);
     });
     migrate();
+  }
+}
+
+export function validateVersionedMigrations(migrationsToValidate = versionedMigrations) {
+  const seen = new Set();
+
+  for (const migration of migrationsToValidate) {
+    if (!MIGRATION_VERSION_PATTERN.test(migration?.version || '')) {
+      throw new Error(`Invalid migration version: ${migration?.version || '<missing>'}`);
+    }
+    if (seen.has(migration.version)) {
+      throw new Error(`Duplicate migration version: ${migration.version}`);
+    }
+    if (!migration.name || typeof migration.name !== 'string') {
+      throw new Error(`Migration ${migration.version} must define a name.`);
+    }
+    if (typeof migration.up !== 'function') {
+      throw new Error(`Migration ${migration.version} must define an up() function.`);
+    }
+    if ('down' in migration) {
+      throw new Error(`Migration ${migration.version} defines down(); migrations are forward-only.`);
+    }
+
+    seen.add(migration.version);
   }
 }
 

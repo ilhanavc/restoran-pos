@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { BASELINE_SCHEMA_VERSION } from '../migrations/versions/index.js';
-import { migrateDatabase, migrations } from '../migrations/run.js';
+import { migrateDatabase, migrations, validateVersionedMigrations } from '../migrations/run.js';
 
 /**
  * Migration idempotency testleri.
@@ -146,5 +146,41 @@ describe('Migrations — idempotency (iki kez çalıştırma)', () => {
     const row = db.prepare(`SELECT COUNT(*) as c FROM schema_migrations WHERE version = ?`).get(BASELINE_SCHEMA_VERSION);
     expect(row.c).toBe(1);
     db.close();
+  });
+});
+
+describe('Migrations — forward-only discipline', () => {
+  it('numbered migration dosyaları up-only formatını takip eder', () => {
+    expect(() =>
+      validateVersionedMigrations([
+        {
+          version: '0001_test_migration',
+          name: 'Test migration',
+          up() {},
+        },
+      ]),
+    ).not.toThrow();
+  });
+
+  it('rollback/down export edilen migration reddedilir', () => {
+    expect(() =>
+      validateVersionedMigrations([
+        {
+          version: '0001_bad_rollback',
+          name: 'Bad rollback',
+          up() {},
+          down() {},
+        },
+      ]),
+    ).toThrow(/forward-only/);
+  });
+
+  it('duplicate version reddedilir', () => {
+    expect(() =>
+      validateVersionedMigrations([
+        { version: '0001_duplicate', name: 'First', up() {} },
+        { version: '0001_duplicate', name: 'Second', up() {} },
+      ]),
+    ).toThrow(/Duplicate migration version/);
   });
 });
