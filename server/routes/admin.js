@@ -9,6 +9,7 @@ import db from '../config/database.js';
 import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
 import { ORDER_STATUSES_CLOSED } from '../constants/orderStatus.js';
 
 const router = Router();
@@ -399,7 +400,7 @@ function getUserRoleSlug(userId) {
 }
 
 function latestBackupInfo() {
-  const userDataPath = process.env.USER_DATA_PATH || '';
+  const userDataPath = getUserDataPath();
   if (!userDataPath) {
     return {
       configured: false,
@@ -442,7 +443,7 @@ function latestBackupInfo() {
 }
 
 function getUserDataPath() {
-  return process.env.USER_DATA_PATH || '';
+  return config.userDataPath || process.env.USER_DATA_PATH || '';
 }
 
 function getBackupsDir() {
@@ -1102,6 +1103,9 @@ router.patch('/business', (req, res) => {
     if (tax.length < 5 || !/^[\dA-Za-z]+$/.test(tax)) {
       return res.status(400).json({ error: 'Vergi numarası en az 5 karakter ve yalnızca harf/rakam olmalıdır' });
     }
+    const beforeBusiness = db.prepare(
+      `SELECT id, name, address, tax_id, receipt_header, phone, receipt_footer FROM businesses WHERE id = ?`,
+    ).get(req.businessId);
     db.prepare(
       `UPDATE businesses SET name = ?, address = ?, tax_id = ?, receipt_header = ?, phone = ?, receipt_footer = ?, updated_at = datetime('now')
        WHERE id = ?`,
@@ -1118,6 +1122,16 @@ router.patch('/business', (req, res) => {
     const b = db.prepare(
       `SELECT id, name, address, tax_id, receipt_header, phone, tax_office, receipt_footer FROM businesses WHERE id = ?`,
     ).get(req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'businesses',
+      entityId: req.businessId,
+      action: 'update',
+      before: beforeBusiness,
+      after: b,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ business: b, message: 'İşletme bilgileri kaydedildi' });
   } catch (err) {
     console.error('[admin:business:update]', err);
@@ -1359,6 +1373,15 @@ router.post('/printers', (req, res) => {
     const row = db
       .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
       .get(id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printers',
+      entityId: id,
+      action: 'create',
+      after: mapPrinterRow(row),
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json({ printer: mapPrinterRow(row), message: 'Yazıcı oluşturuldu' });
   } catch (err) {
     console.error('[admin:printers:create]', err);
@@ -1485,6 +1508,16 @@ router.patch('/printers/:id', (req, res) => {
     const row = db
       .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
       .get(req.params.id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printers',
+      entityId: req.params.id,
+      action: 'update',
+      before: mapPrinterRow(existing),
+      after: mapPrinterRow(row),
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ printer: mapPrinterRow(row), message: responseMessage });
   } catch (err) {
     console.error('[admin:printers:update]', err);
@@ -1496,6 +1529,9 @@ router.delete('/printers/:id', (req, res) => {
   try {
     const el = getPrinterDeleteEligibility(req.businessId, req.params.id);
     if (!el) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+    const printerBeforeDelete = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
     if (!el.canHardDelete) {
       return res.status(400).json({
         error: 'Bu yazıcı şu an kalıcı olarak silinemez.',
@@ -1523,6 +1559,15 @@ router.delete('/printers/:id', (req, res) => {
     })();
 
     auditLog(req.businessId, req.user.id, 'delete_printer', 'printer', req.params.id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printers',
+      entityId: req.params.id,
+      action: 'delete',
+      before: printerBeforeDelete ? mapPrinterRow(printerBeforeDelete) : null,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ message: 'Yazıcı kalıcı olarak silindi' });
   } catch (err) {
     console.error('[admin:printers:delete]', err);
@@ -1656,11 +1701,22 @@ router.patch('/printer-routing', (req, res) => {
       }
     });
 
+    const beforeRouting = db.prepare(`SELECT category_id, printer_id FROM printer_routing WHERE business_id = ?`).all(req.businessId);
     run();
     auditLog(req.businessId, req.user.id, 'update_printer_routing', 'settings', 'printer_routing');
 
     const routingRows = db.prepare(`SELECT id, category_id, printer_id FROM printer_routing WHERE business_id = ?`).all(req.businessId);
     const assignmentsOut = routingRows.map((r) => ({ category_id: r.category_id, printer_id: r.printer_id }));
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printer_routing',
+      entityId: 'printer_routing',
+      action: 'update',
+      before: { assignments: beforeRouting },
+      after: { assignments: assignmentsOut },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ assignments: assignmentsOut, message: 'Yazıcı yönlendirmesi kaydedildi' });
   } catch (err) {
     if (err.status === 400) {
@@ -1787,6 +1843,15 @@ router.post('/users', (req, res) => {
          FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
       )
       .get(id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'users',
+      entityId: id,
+      action: 'create',
+      after: u,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json({ user: u, message: 'Kullanıcı oluşturuldu' });
   } catch (err) {
     console.error('[admin:users:create]', err);
@@ -1857,6 +1922,17 @@ router.patch('/users/:id', (req, res) => {
          FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
       )
       .get(userId);
+    const { password_hash: _ph, ...rowSnapshot } = row;
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'users',
+      entityId: userId,
+      action: 'update',
+      before: rowSnapshot,
+      after: u,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ user: u, message: 'Kullanıcı güncellendi' });
   } catch (err) {
     console.error('[admin:users:delete]', err);
@@ -1874,11 +1950,22 @@ router.delete('/users/:id', (req, res) => {
     if (getUserRoleSlug(userId) === 'admin' && countActiveAdmins(req.businessId) <= 1) {
       return res.status(400).json({ error: 'Son yönetici kaldırılamaz' });
     }
+    const { password_hash: _dph, ...deactivatedSnapshot } = row;
     db.prepare(`UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?`).run(
       userId,
       req.businessId,
     );
     auditLog(req.businessId, req.user.id, 'deactivate_user', 'user', userId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'users',
+      entityId: userId,
+      action: 'deactivate',
+      before: deactivatedSnapshot,
+      after: { ...deactivatedSnapshot, is_active: 0 },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ message: 'Kullanıcı pasifleştirildi' });
   } catch (err) {
     console.error('[admin:dining-areas:list]', err);
@@ -2269,6 +2356,47 @@ router.get('/support-bundle', (req, res) => {
   } catch (err) {
     console.error('[admin:support-bundle]', err);
     res.status(500).json({ error: 'Destek paketi oluşturulamadı' });
+  }
+});
+
+// ── Audit log viewer ──
+router.get('/entity-mutations', (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
+    const entityTable = req.query.entity_table || null;
+    const action = req.query.action || null;
+    const actorUserId = req.query.actor_user_id || null;
+
+    let where = 'WHERE m.business_id = ?';
+    const params = [req.businessId];
+    if (entityTable) { where += ' AND m.entity_table = ?'; params.push(entityTable); }
+    if (action) { where += ' AND m.action = ?'; params.push(action); }
+    if (actorUserId) { where += ' AND m.actor_user_id = ?'; params.push(actorUserId); }
+
+    const rows = db.prepare(`
+      SELECT m.id, m.entity_table, m.entity_id, m.action,
+             m.before_json, m.after_json, m.reason, m.request_id, m.source,
+             m.created_at, u.full_name AS actor_name
+      FROM entity_mutations m
+      LEFT JOIN users u ON m.actor_user_id = u.id
+      ${where}
+      ORDER BY m.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    const total = db.prepare(`SELECT COUNT(*) as c FROM entity_mutations m ${where}`).get(...params).c;
+
+    const mutations = rows.map((r) => ({
+      ...r,
+      before_json: r.before_json ? JSON.parse(r.before_json) : null,
+      after_json: r.after_json ? JSON.parse(r.after_json) : null,
+    }));
+
+    res.json({ mutations, total, limit, offset });
+  } catch (err) {
+    console.error('[admin:entity-mutations:list]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 

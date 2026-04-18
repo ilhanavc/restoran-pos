@@ -11,9 +11,35 @@ import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
 import { linkCallLogToOrder } from './callerIdService.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
 import { recordEntityMutation } from './entityMutationService.js';
+import { toCents } from '../utils/money.js';
 
 export function round2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function getMenuPricingPolicyVersion(businessId) {
+  return db.prepare(
+    'SELECT MAX(updated_at) as v FROM products WHERE business_id = ?',
+  ).get(businessId)?.v || null;
+}
+
+function getJsonSetting(businessId, key, defaultValue) {
+  const row = db.prepare('SELECT value FROM settings WHERE business_id = ? AND key = ?').get(businessId, key);
+  if (!row?.value) return defaultValue;
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return defaultValue;
+  }
+}
+
+function getBusinessServiceChargeRate(businessId) {
+  const setting = getJsonSetting(businessId, 'business.service_charge', 0);
+  const rawRate = typeof setting === 'object' && setting !== null
+    ? setting.rate ?? setting.value ?? setting.service_charge_rate ?? 0
+    : setting;
+  const rate = Number(rawRate);
+  return Number.isFinite(rate) && rate > 0 ? rate : 0;
 }
 
 export function normalizeSelectedAttributes(selectedAttributes = []) {
@@ -140,9 +166,10 @@ export function recordTakeawayDeliveryPaymentIfNeeded(order, businessId, userId)
   if (existing) return existing.id;
 
   db.prepare(`INSERT INTO payments (
-    id, business_id, order_id, payment_type, amount, cash_received, change_amount, note, idempotency_key, source, created_by
-  ) VALUES (?, ?, ?, 'other', ?, ?, 0, ?, ?, 'system_takeaway_delivery', ?)`).run(
-    paymentId, businessId, order.id, due, due,
+    id, business_id, order_id, payment_type, amount, cash_received, change_amount,
+    amount_cents, change_cents, tip_cents, note, idempotency_key, source, created_by
+  ) VALUES (?, ?, ?, 'other', ?, ?, 0, ?, 0, 0, ?, ?, 'system_takeaway_delivery', ?)`).run(
+    paymentId, businessId, order.id, due, due, toCents(due),
     'Paket teslim edildiğinde otomatik ödendi olarak işlendi',
     idempotencyKey, userId,
   );
@@ -274,8 +301,17 @@ export function recalcOrderTotals(orderId) {
   const order = db.prepare('SELECT discount_amount FROM orders WHERE id = ?').get(orderId);
   const grandTotal = subtotal - (order?.discount_amount || 0);
   db.prepare(
-    "UPDATE orders SET subtotal = ?, vat_total = 0, grand_total = ?, updated_at = datetime('now') WHERE id = ?",
-  ).run(subtotal, grandTotal, orderId);
+    `UPDATE orders SET subtotal = ?, subtotal_cents = ?, vat_total = 0,
+     grand_total = ?, grand_total_cents = ?, discount_cents = ?,
+     updated_at = datetime('now') WHERE id = ?`,
+  ).run(
+    subtotal,
+    toCents(subtotal),
+    grandTotal,
+    toCents(grandTotal),
+    toCents(order?.discount_amount || 0),
+    orderId,
+  );
 }
 
 export function autoCancelOrderIfNoActiveItems(orderId, businessId, userId) {
@@ -351,17 +387,24 @@ export function createOrder(businessId, branchId, userId, orderData, auditContex
     }
 
     const grandTotal = subtotal;
+    const menuVersion = getMenuPricingPolicyVersion(businessId);
+    const serviceChargeRate = getBusinessServiceChargeRate(businessId);
+    const serviceChargeAmount = grandTotal * serviceChargeRate;
     const headerSnapshot = orderHeaderSnapshot({
       tableId: table_id || null, customerId: customer_id || null, userId, businessId,
     });
 
     db.prepare(`INSERT INTO orders (id, business_id, branch_id, order_no, order_type, table_id, customer_id, user_id,
-      subtotal, vat_total, grand_total, note, delivery_address, delivery_note, courier_note, guest_count,
+      subtotal, subtotal_cents, discount_cents, vat_total, grand_total, grand_total_cents,
+      pricing_policy_version, service_charge_rate, service_charge_amount, service_charge_cents,
+      note, delivery_address, delivery_note, courier_note, guest_count,
       table_name_snapshot, customer_name_snapshot, user_name_snapshot, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)`).run(
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)`).run(
       orderId, businessId, branchId, orderNo, resolvedType,
       table_id || null, customer_id || null, userId,
-      subtotal, 0, grandTotal, note || null,
+      subtotal, toCents(subtotal), grandTotal, toCents(grandTotal),
+      menuVersion, serviceChargeRate, serviceChargeAmount, toCents(serviceChargeAmount),
+      note || null,
       delivery_address || null, delivery_note || null, courier_note || null,
       guest_count || 0,
       headerSnapshot.table_name_snapshot, headerSnapshot.customer_name_snapshot, headerSnapshot.user_name_snapshot,
@@ -369,10 +412,11 @@ export function createOrder(businessId, branchId, userId, orderData, auditContex
     );
 
     const insertItem = db.prepare(`INSERT INTO order_items (
-      id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate,
+      id, order_id, product_id, product_name, quantity, unit_price, unit_price_cents, subtotal_cents, modifiers, note, vat_rate,
+      vat_rate_snapshot,
       category_id_snapshot, category_name_snapshot, printer_target_snapshot,
       created_by, portion_id, portion_label, selected_attributes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
     createdItemIds = [];
     for (const line of lines) {
@@ -380,7 +424,8 @@ export function createOrder(businessId, branchId, userId, orderData, auditContex
       createdItemIds.push(itemId);
       insertItem.run(
         itemId, orderId, line.product.id, line.product.name, line.qty, line.itemPrice,
-        JSON.stringify(line.resolved), line.note, 0,
+        toCents(line.itemPrice), toCents(line.itemPrice * line.qty),
+        JSON.stringify(line.resolved), line.note, 0, 0,
         line.snapshot.category_id_snapshot, line.snapshot.category_name_snapshot, line.snapshot.printer_target_snapshot,
         userId, line.portion_id || null, line.portion_label || null,
         JSON.stringify(line.resolvedAttrs || []),
@@ -469,21 +514,27 @@ export function addItemsToOrder(businessId, orderId, userId, items) {
       newItemIds.push(itemId);
       const snapshot = orderItemSnapshot(product);
       db.prepare(`INSERT INTO order_items (
-        id, order_id, product_id, product_name, quantity, unit_price, modifiers, note, vat_rate,
+        id, order_id, product_id, product_name, quantity, unit_price, unit_price_cents, subtotal_cents, modifiers, note, vat_rate,
+        vat_rate_snapshot,
         category_id_snapshot, category_name_snapshot, printer_target_snapshot,
         created_by, portion_id, portion_label, selected_attributes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         itemId, orderId, product.id, product.name, qty, finalItemPrice,
-        JSON.stringify(resolved), item.note || null, 0,
+        toCents(finalItemPrice), toCents(finalItemPrice * qty),
+        JSON.stringify(resolved), item.note || null, 0, 0,
         snapshot.category_id_snapshot, snapshot.category_name_snapshot, snapshot.printer_target_snapshot,
         userId, item.portion_id || null, portionLabel,
         JSON.stringify(resolvedAttrs || []),
       );
     }
     db.prepare(
-      `UPDATE orders SET subtotal = subtotal + ?, vat_total = 0,
-       grand_total = grand_total + ?, updated_at = datetime('now'), updated_by = ? WHERE id = ?`,
-    ).run(addedSubtotal, addedSubtotal, userId, orderId);
+      `UPDATE orders SET subtotal = subtotal + ?,
+       subtotal_cents = COALESCE(subtotal_cents, ROUND(subtotal * 100)) + ?,
+       vat_total = 0,
+       grand_total = grand_total + ?,
+       grand_total_cents = COALESCE(grand_total_cents, ROUND(grand_total * 100)) + ?,
+       updated_at = datetime('now'), updated_by = ? WHERE id = ?`,
+    ).run(addedSubtotal, toCents(addedSubtotal), addedSubtotal, toCents(addedSubtotal), userId, orderId);
 
     queueKitchenForNewItems(businessId, orderId, newItemIds, userId, {
       eventType: AUTO_PRINT_EVENTS.KITCHEN_ORDER_ADJUSTMENT,
@@ -697,9 +748,19 @@ export function updateOrderItem(businessId, orderId, itemId, userId, updates) {
       product, modifiersInput, businessId, portionIdBody || null,
     );
     sets.push('unit_price = ?'); params.push(itemPrice);
+    sets.push('unit_price_cents = ?'); params.push(toCents(itemPrice));
     sets.push('modifiers = ?'); params.push(JSON.stringify(resolved));
     sets.push('portion_id = ?'); params.push(portionIdBody || null);
     sets.push('portion_label = ?'); params.push(portionLabel);
+  }
+
+  if (quantity !== undefined || portionIdBody !== undefined) {
+    const nextUnitPrice = portionIdBody !== undefined
+      ? params[sets.indexOf('unit_price = ?')]
+      : Number(item.unit_price || 0);
+    const nextQuantity = quantity !== undefined ? Number(quantity) : Number(item.quantity || 0);
+    const lineSubtotal = Math.max(0, nextUnitPrice * nextQuantity - Number(item.discount_amount || 0));
+    sets.push('subtotal_cents = ?'); params.push(toCents(lineSubtotal));
   }
 
   const shouldEnqueueCancel = status === 'cancelled' && prevStatus !== 'cancelled';

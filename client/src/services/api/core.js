@@ -1,6 +1,9 @@
-// Her zaman göreli /api — Vite dev/preview proxy'si 3001'e yönlendirir.
-// Doğrudan localhost:3001 kullanmak HTML/502 yanıtlarına ve "geçersiz yanıt" hatasına yol açabiliyordu.
-export const API_BASE = '/api';
+export const BASE_URL = (
+  window.electronConfig?.apiBaseUrl ||
+  import.meta.env.VITE_API_URL ||
+  'http://localhost:3001'
+).replace(/\/$/, '');
+export const API_BASE = BASE_URL.endsWith('/api') ? BASE_URL : `${BASE_URL}/api`;
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 
 export class ApiHttpClient {

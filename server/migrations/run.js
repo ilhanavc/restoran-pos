@@ -463,7 +463,6 @@ export const migrations = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_reservations_business_date ON reservations(business_id, reservation_date)`,
   `CREATE INDEX IF NOT EXISTS idx_reservations_table ON reservations(table_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_reservations_seated_order ON reservations(seated_order_id)`,
 
   // ── Stok ──
   `CREATE TABLE IF NOT EXISTS stock_items (
@@ -924,6 +923,7 @@ function ensureColumnMigrations(database = db) {
   if (reservationCols.length && !reservationCols.some((c) => c.name === 'seated_order_id')) {
     database.prepare('ALTER TABLE reservations ADD COLUMN seated_order_id TEXT REFERENCES orders(id)').run();
   }
+  database.exec('CREATE INDEX IF NOT EXISTS idx_reservations_seated_order ON reservations(seated_order_id)');
 }
 
 /** Mevcut ürünler için varsayılan Tam porsiyonu (ürün başına bir kez). */

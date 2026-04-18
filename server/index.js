@@ -2,10 +2,8 @@ import { createServer } from 'http';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import cors from 'cors';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import config from './config/index.js';
@@ -37,20 +35,13 @@ const app = express();
 
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
-// CORS_ORIGINS: virgülle ayrılmış ek origin'ler (LAN tablet/cihaz erişimi için)
-// Örnek: CORS_ORIGINS=http://192.168.1.50:3001,http://192.168.1.51:3001
-const extraOrigins = process.env.CORS_ORIGINS
-  ? process.env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
-  : [];
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3001',
-    'http://127.0.0.1:3001',
-    ...extraOrigins,
-  ],
+  origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
@@ -123,9 +114,7 @@ const waiterCallLimiter = rateLimit({
 });
 
 // Ürün görselleri — kimlik doğrulama gerektirmez (img src ile erişilir)
-const uploadsDir = process.env.USER_DATA_PATH
-  ? path.join(process.env.USER_DATA_PATH, 'uploads')
-  : path.join(__dirname, 'uploads');
+const uploadsDir = path.join(config.userDataPath, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
 app.use('/uploads', express.static(uploadsDir));
 
@@ -206,10 +195,11 @@ runMigrations();
 const httpServer = createServer(app);
 initSocket(httpServer);
 
-httpServer.listen(config.port, () => {
+httpServer.listen(config.port, config.host, () => {
   console.log(`
   ╔══════════════════════════════════════╗
   ║   🍽️  Restoran POS Server           ║
+  ║   Host: ${config.host}                 ║
   ║   Port: ${config.port}                        ║
   ║   Env:  ${config.nodeEnv}               ║
   ╚══════════════════════════════════════╝

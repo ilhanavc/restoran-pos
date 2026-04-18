@@ -4,6 +4,7 @@ import { enqueueReceiptJobForClosedOrder, processPendingJobsSync } from './print
 import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
 import { recordEntityMutation } from './entityMutationService.js';
+import { toCents } from '../utils/money.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -231,10 +232,12 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey, a
       throw err;
     }
     db.prepare(`INSERT INTO payments (
-      id, business_id, order_id, payment_type, amount, cash_received, change_amount, note,
+      id, business_id, order_id, payment_type, amount, cash_received, change_amount,
+      amount_cents, change_cents, tip_cents, note,
       idempotency_key, source, tip_amount, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)`).run(
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)`).run(
       paymentId, businessId, order_id, payment_type, amount, cashIn, changeAmount,
+      toCents(amount), toCents(changeAmount), toCents(tipAmount),
       note || null, idempotencyKey, tipAmount, userId,
     );
     const insertedPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
@@ -409,10 +412,12 @@ export function createSplitPayment(businessId, userId, paymentData, idempotencyK
 
     db.prepare(`INSERT INTO payments (
       id, business_id, order_id, payment_type, payment_scope, payer_no, payer_label,
-      amount, cash_received, change_amount, note, idempotency_key, source, tip_amount, created_by
-    ) VALUES (?, ?, ?, ?, 'split_item', ?, ?, ?, ?, ?, ?, ?, 'manual_split', ?, ?)`).run(
+      amount, cash_received, change_amount, amount_cents, change_cents, tip_cents,
+      note, idempotency_key, source, tip_amount, created_by
+    ) VALUES (?, ?, ?, ?, 'split_item', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual_split', ?, ?)`).run(
       paymentId, businessId, order.id, payment_type,
       payerNo, payerLabel, amount, cashIn, changeAmount,
+      toCents(amount), toCents(changeAmount), toCents(tipAmount),
       note || null, idempotencyKey, tipAmount, userId,
     );
     if (tipAmount > 0) {

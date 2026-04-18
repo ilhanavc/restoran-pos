@@ -5,6 +5,15 @@
  */
 const { contextBridge, ipcRenderer } = require('electron');
 
+let electronConfig = { apiBaseUrl: null };
+try {
+  electronConfig = ipcRenderer.sendSync('config:get-electron-config') || electronConfig;
+} catch {
+  electronConfig = { apiBaseUrl: null };
+}
+
+contextBridge.exposeInMainWorld('electronConfig', electronConfig);
+
 contextBridge.exposeInMainWorld('electronAPI', {
   /** Güncelleme mevcut olduğunda callback'i çağırır. Dönen fonksiyon ile dinleyici kaldırılır. */
   onUpdateAvailable: (callback) => {

@@ -19,7 +19,7 @@ let bridgeRestartCount = 0;
 
 function getBridgeProcess() { return bridgeProcess; }
 
-function startStoreBridge(port) {
+function startStoreBridge(port, apiBaseUrl = null) {
   const posConfig = getPosConfig();
   const bridgeRoot = getStoreBridgeRoot();
   const bridgeEntry = path.join(bridgeRoot, 'index.js');
@@ -40,7 +40,7 @@ function startStoreBridge(port) {
     return;
   }
 
-  const env = buildBridgeEnv(port);
+  const env = buildBridgeEnv(port, apiBaseUrl);
   const useElectronAsNode = app.isPackaged;
   const spawnCmd = useElectronAsNode ? process.execPath : 'node';
   const childEnv = useElectronAsNode ? { ...env, ELECTRON_RUN_AS_NODE: '1' } : env;
@@ -67,19 +67,19 @@ function startStoreBridge(port) {
   child.on('exit', (code) => {
     bridgeProcess = null;
     console.log(`[electron] Store Bridge kapandı (kod: ${code ?? 'null'})`);
-    if (!bridgeStopped) scheduleBridgeRestart(port, restartMs);
+    if (!bridgeStopped) scheduleBridgeRestart(port, restartMs, apiBaseUrl);
   });
   child.on('error', (err) => {
     console.error('[electron] Store Bridge başlatılamadı:', err.message);
     bridgeProcess = null;
-    if (!bridgeStopped) scheduleBridgeRestart(port, restartMs);
+    if (!bridgeStopped) scheduleBridgeRestart(port, restartMs, apiBaseUrl);
   });
 
   bridgeRestartCount = 0;
-  console.log(`[electron] Store Bridge başlatıldı pid=${child.pid} api=http://127.0.0.1:${port}/api`);
+  console.log(`[electron] Store Bridge başlatıldı pid=${child.pid} api=${env.API_BASE}`);
 }
 
-function scheduleBridgeRestart(port, restartMs) {
+function scheduleBridgeRestart(port, restartMs, apiBaseUrl = null) {
   if (bridgeStopped) return;
 
   bridgeRestartCount += 1;
@@ -97,7 +97,7 @@ function scheduleBridgeRestart(port, restartMs) {
   );
   bridgeRestartTimer = setTimeout(() => {
     bridgeRestartTimer = null;
-    startStoreBridge(port);
+    startStoreBridge(port, apiBaseUrl);
   }, restartMs);
   bridgeRestartTimer.unref?.();
 }

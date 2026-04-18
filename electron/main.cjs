@@ -9,7 +9,7 @@ const fs = require('fs');
 
 const { setupFileLogging, initSentry, closeLogs } = require('./modules/logging.cjs');
 const {
-  loadPosConfig, getPosConfig, readPosConfig, getPosConfigPath, ensureJwtSecret,
+  loadPosConfig, getPosConfig, getCloudServerUrl, readPosConfig, getPosConfigPath, ensureJwtSecret,
   getCodeRoot, getPackagedServerRoot,
 } = require('./modules/config.cjs');
 const { copyLegacySqliteToUserDataIfNeeded } = require('./modules/sqliteMigration.cjs');
@@ -34,10 +34,11 @@ app.whenReady().then(async () => {
   const posConfig = getPosConfig();
   ensureJwtSecret();
   initSentry(posConfig.sentryDsn || process.env.SENTRY_DSN, app.getVersion());
+  const cloudServerUrl = getCloudServerUrl();
 
   const codeRoot = getCodeRoot();
   const distIndex = path.join(codeRoot, 'client', 'dist', 'index.html');
-  if (!fs.existsSync(distIndex)) {
+  if (!cloudServerUrl && !fs.existsSync(distIndex)) {
     dialog.showErrorBox(
       'Eksik build',
       'client/dist bulunamadı. Önce proje kökünde "npm run build" çalıştırın, ardından Electron\'u yeniden başlatın.',
@@ -52,6 +53,15 @@ app.whenReady().then(async () => {
     : path.join(codeRoot, 'server', 'data', 'pos.db');
 
   try {
+    if (cloudServerUrl) {
+      console.log('[electron] Cloud server URL yapılandırıldı; local POS API başlatılmıyor:', cloudServerUrl);
+      createWindow(null, cloudServerUrl);
+      startStoreBridge(null, cloudServerUrl);
+      const cidTimer = setTimeout(() => startCallerIdHelper(null, cloudServerUrl), 3000);
+      cidTimer.unref?.();
+      return;
+    }
+
     copyLegacySqliteToUserDataIfNeeded(userDataDbPath, legacyDbMain);
     await applyPendingRestoreIfAny(userDataDbPath);
     const port = await startServerAndWaitForHealth(userDataDbPath);
@@ -133,6 +143,12 @@ ipcMain.on('restart-app', () => { app.relaunch(); app.quit(); });
 
 // Mevcut uygulama versiyonu — package.json'dan
 ipcMain.handle('app:get-version', () => app.getVersion());
+
+ipcMain.on('config:get-electron-config', (event) => {
+  event.returnValue = {
+    apiBaseUrl: getCloudServerUrl(),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // İlk kurulum wizard IPC

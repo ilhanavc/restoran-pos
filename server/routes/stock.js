@@ -4,6 +4,7 @@ import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { genId } from '../utils/helpers.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -45,7 +46,17 @@ router.post('/', authorize('admin'), validate({ body: stockItemSchema }), (req, 
       INSERT INTO stock_items (id, business_id, name, unit, quantity, min_quantity, cost_price)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(id, req.businessId, name, unit, quantity, min_quantity, cost_price);
-    res.status(201).json(db.prepare('SELECT * FROM stock_items WHERE id = ?').get(id));
+    const created = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'stock_items',
+      entityId: id,
+      action: 'create',
+      after: created,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
+    res.status(201).json(created);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -65,7 +76,18 @@ router.patch('/:id', authorize('admin'), (req, res) => {
 
     const sets = fields.map(f => `${f} = ?`).join(', ');
     db.prepare(`UPDATE stock_items SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...fields.map(f => req.body[f]), id);
-    res.json(db.prepare('SELECT * FROM stock_items WHERE id = ?').get(id));
+    const updatedItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'stock_items',
+      entityId: id,
+      action: 'update',
+      before: item,
+      after: updatedItem,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
+    res.json(updatedItem);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -78,7 +100,17 @@ router.delete('/:id', authorize('admin'), (req, res) => {
     const { id } = req.params;
     const item = db.prepare('SELECT id FROM stock_items WHERE id = ? AND business_id = ?').get(id, req.businessId);
     if (!item) return res.status(404).json({ error: 'Stok kalemi bulunamadı' });
+    const deletedItem = db.prepare('SELECT * FROM stock_items WHERE id = ?').get(id);
     db.prepare(`UPDATE stock_items SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run(id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'stock_items',
+      entityId: id,
+      action: 'delete',
+      before: deletedItem,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ success: true });
   } catch (err) {
     console.error(err);
@@ -112,16 +144,26 @@ router.post('/movements', authorize('admin', 'cashier'), validate({ body: moveme
 
     const delta = (movement_type === 'out' || movement_type === 'waste') ? -quantity : quantity;
 
+    let movementId;
     db.transaction(() => {
-      const id = genId();
+      movementId = genId();
       db.prepare(`
         INSERT INTO stock_movements (id, business_id, stock_item_id, movement_type, quantity, notes, created_by)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(id, req.businessId, stock_item_id, movement_type, quantity, notes || null, req.user.id);
+      `).run(movementId, req.businessId, stock_item_id, movement_type, quantity, notes || null, req.user.id);
 
       db.prepare(`UPDATE stock_items SET quantity = quantity + ?, updated_at = datetime('now') WHERE id = ?`).run(delta, stock_item_id);
     })();
 
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'stock_movements',
+      entityId: movementId,
+      action: 'create',
+      after: { stock_item_id, movement_type, quantity, delta, notes: notes || null },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json(db.prepare('SELECT * FROM stock_items WHERE id = ?').get(stock_item_id));
   } catch (err) {
     console.error(err);

@@ -19,6 +19,14 @@ function rangeBounds(from, to) {
   return [`${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`];
 }
 
+const paymentAmountCents = 'COALESCE(amount_cents, ROUND(amount * 100))';
+const paymentTipCents = 'COALESCE(tip_cents, ROUND(COALESCE(tip_amount, 0) * 100))';
+const refundAmountCents = 'COALESCE(amount_cents, ROUND(amount * 100))';
+const orderGrandTotalCents = 'COALESCE(grand_total_cents, ROUND(grand_total * 100))';
+const orderGrandTotalCentsO = 'COALESCE(o.grand_total_cents, ROUND(o.grand_total * 100))';
+const orderDiscountCents = 'COALESCE(discount_cents, ROUND(COALESCE(discount_amount, 0) * 100))';
+const orderItemSubtotalCents = 'COALESCE(oi.subtotal_cents, ROUND((oi.unit_price * oi.quantity) * 100))';
+
 // GET /api/reports/daily
 router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
   try {
@@ -27,19 +35,19 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
     const [startAt, endAt] = dayBounds(targetDate);
 
     const revenue = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total FROM payments 
+      SELECT COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total FROM payments
       WHERE business_id = ? AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
 
     const refundSummary = db.prepare(`
-      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total
+      SELECT COUNT(*) as count, COALESCE(SUM(${refundAmountCents}), 0) / 100.0 as total
       FROM refunds
       WHERE business_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
     const tipSummary = db.prepare(`
-      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total
-      FROM tips
-      WHERE business_id = ? AND created_at >= ? AND created_at < ?
+      SELECT COUNT(*) as count, COALESCE(SUM(${paymentTipCents}), 0) / 100.0 as total
+      FROM payments
+      WHERE business_id = ? AND ${paymentTipCents} > 0 AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
 
     const orderStats = db.prepare(`
@@ -47,8 +55,8 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
         SUM(CASE WHEN order_type = 'dine_in' THEN 1 ELSE 0 END) as dine_in_count,
         SUM(CASE WHEN order_type = 'takeaway' THEN 1 ELSE 0 END) as takeaway_count,
         SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count,
-        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN grand_total ELSE 0 END), 0) as total_sales,
-        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN discount_amount ELSE 0 END), 0) as total_discounts
+        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN ${orderGrandTotalCents} ELSE 0 END), 0) / 100.0 as total_sales,
+        COALESCE(SUM(CASE WHEN status != 'cancelled' THEN ${orderDiscountCents} ELSE 0 END), 0) / 100.0 as total_discounts
       FROM orders WHERE business_id = ? AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
 
@@ -59,7 +67,7 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
           ELSE payment_type
         END AS payment_type,
         COUNT(*) as count,
-        COALESCE(SUM(amount), 0) as total
+        COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total
       FROM payments
       WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY CASE
@@ -69,7 +77,7 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
     `).all(req.businessId, startAt, endAt);
 
     const topProducts = db.prepare(`
-      SELECT oi.product_name, SUM(oi.quantity) as total_qty, SUM(oi.unit_price * oi.quantity) as total_revenue
+      SELECT oi.product_name, SUM(oi.quantity) as total_qty, COALESCE(SUM(${orderItemSubtotalCents}), 0) / 100.0 as total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       WHERE o.business_id = ? AND o.created_at >= ? AND o.created_at < ? AND oi.status != 'cancelled'
@@ -80,7 +88,7 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
       SELECT COALESCE(oi.category_name_snapshot, 'Kategorisiz') as category_name,
              oi.category_id_snapshot as category_id,
              SUM(oi.quantity) as total_qty,
-             SUM(oi.unit_price * oi.quantity) as total_revenue
+             COALESCE(SUM(${orderItemSubtotalCents}), 0) / 100.0 as total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       WHERE o.business_id = ? AND o.created_at >= ? AND o.created_at < ? AND oi.status != 'cancelled'
@@ -89,7 +97,7 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
     `).all(req.businessId, startAt, endAt);
 
     const userSales = db.prepare(`
-      SELECT u.full_name, COUNT(DISTINCT o.id) as order_count, COALESCE(SUM(p.amount), 0) as total_collected
+      SELECT u.full_name, COUNT(DISTINCT o.id) as order_count, COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total_collected
       FROM payments p
       JOIN orders o ON p.order_id = o.id
       JOIN users u ON p.created_by = u.id
@@ -172,11 +180,11 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
       params.push(`%${customer.trim()}%`);
     }
     if (min_amount !== undefined && min_amount !== '') {
-      whereParts.push('o.grand_total >= ?');
+      whereParts.push(`(${orderGrandTotalCentsO}) / 100.0 >= ?`);
       params.push(Number(min_amount));
     }
     if (max_amount !== undefined && max_amount !== '') {
-      whereParts.push('o.grand_total <= ?');
+      whereParts.push(`(${orderGrandTotalCentsO}) / 100.0 <= ?`);
       params.push(Number(max_amount));
     }
 
@@ -194,7 +202,7 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
         COALESCE(o.table_name_snapshot, t.name) AS table_name,
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
-        COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) AS refunded_total,
+        COALESCE((SELECT SUM(COALESCE(r.amount_cents, ROUND(r.amount * 100))) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) / 100.0 AS refunded_total,
         (SELECT CASE
             WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
             ELSE p.payment_type
@@ -248,11 +256,11 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
       params.push(`%${customer.trim()}%`);
     }
     if (min_amount !== undefined && min_amount !== '') {
-      whereParts.push('o.grand_total >= ?');
+      whereParts.push(`(${orderGrandTotalCentsO}) / 100.0 >= ?`);
       params.push(Number(min_amount));
     }
     if (max_amount !== undefined && max_amount !== '') {
-      whereParts.push('o.grand_total <= ?');
+      whereParts.push(`(${orderGrandTotalCentsO}) / 100.0 <= ?`);
       params.push(Number(max_amount));
     }
 
@@ -263,7 +271,7 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
         COALESCE(o.table_name_snapshot, t.name) AS table_name,
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
-        COALESCE((SELECT SUM(r.amount) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) AS refunded_total,
+        COALESCE((SELECT SUM(COALESCE(r.amount_cents, ROUND(r.amount * 100))) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) / 100.0 AS refunded_total,
         (SELECT CASE
             WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
             ELSE p.payment_type
@@ -296,13 +304,13 @@ router.get('/range', authorize('admin', 'cashier'), (req, res) => {
     const [startAt, endAt] = rangeBounds(from, to);
 
     const revenue = db.prepare(`
-      SELECT date(created_at) as date, COALESCE(SUM(amount), 0) as total
+      SELECT date(created_at) as date, COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total
       FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY date(created_at) ORDER BY date
     `).all(req.businessId, startAt, endAt);
 
     const summary = db.prepare(`
-      SELECT COALESCE(SUM(amount), 0) as total_revenue, COUNT(*) as total_payments
+      SELECT COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total_revenue, COUNT(*) as total_payments
       FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
 
@@ -327,7 +335,7 @@ router.get('/hourly', authorize('admin', 'cashier'), (req, res) => {
     const rows = db.prepare(`
       SELECT strftime('%H', created_at) as hour,
              COUNT(*) as order_count,
-             COALESCE(SUM(amount), 0) as revenue
+             COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as revenue
       FROM payments
       WHERE business_id = ? AND created_at >= ? AND created_at < ?
       GROUP BY hour ORDER BY hour
@@ -358,7 +366,7 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
 
     // Top 10 ürün (adet bazlı)
     const topProducts = db.prepare(`
-      SELECT oi.product_name, SUM(oi.quantity) AS total_qty, SUM(oi.unit_price * oi.quantity) AS total_revenue
+      SELECT oi.product_name, SUM(oi.quantity) AS total_qty, COALESCE(SUM(${orderItemSubtotalCents}), 0) / 100.0 AS total_revenue
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       WHERE o.business_id = ? AND o.closed_at >= ? AND o.closed_at < ?
@@ -372,7 +380,7 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
     const hourlyRows = db.prepare(`
       SELECT strftime('%H', p.created_at) AS hour,
              COUNT(*) AS order_count,
-             COALESCE(SUM(p.amount), 0) AS revenue
+             COALESCE(SUM(COALESCE(p.amount_cents, ROUND(p.amount * 100))), 0) / 100.0 AS revenue
       FROM payments p
       JOIN orders o ON p.order_id = o.id
       WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
@@ -387,7 +395,7 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
 
     // Günlük ciro (seçilen dönem)
     const dailyRevenue = db.prepare(`
-      SELECT date(p.created_at) AS date, COALESCE(SUM(p.amount), 0) AS revenue, COUNT(*) AS order_count
+      SELECT date(p.created_at) AS date, COALESCE(SUM(COALESCE(p.amount_cents, ROUND(p.amount * 100))), 0) / 100.0 AS revenue, COUNT(*) AS order_count
       FROM payments p
       WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
       GROUP BY date(p.created_at) ORDER BY date
@@ -395,7 +403,7 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
 
     // Dönem özeti
     const summary = db.prepare(`
-      SELECT COALESCE(SUM(p.amount), 0) AS total_revenue, COUNT(*) AS total_orders
+      SELECT COALESCE(SUM(COALESCE(p.amount_cents, ROUND(p.amount * 100))), 0) / 100.0 AS total_revenue, COUNT(*) AS total_orders
       FROM payments p
       WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
     `).get(req.businessId, startAt, endAt);

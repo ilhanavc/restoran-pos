@@ -2,6 +2,7 @@ import db from '../config/database.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
 import { recordEntityMutation } from './entityMutationService.js';
+import { toCents } from '../utils/money.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -66,9 +67,9 @@ export function createRefundForPayment(businessId, userId, { payment_id, amount,
   const refundId = genId();
   db.transaction(() => {
     db.prepare(`
-      INSERT INTO refunds (id, business_id, order_id, payment_id, amount, reason, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
-    `).run(refundId, businessId, payment.order_id, payment.id, refundAmount, reason || null, userId);
+      INSERT INTO refunds (id, business_id, order_id, payment_id, amount, amount_cents, reason, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)
+    `).run(refundId, businessId, payment.order_id, payment.id, refundAmount, toCents(refundAmount), reason || null, userId);
     const insertedRefund = db.prepare('SELECT * FROM refunds WHERE id = ?').get(refundId);
     recordEntityMutation({
       businessId,
@@ -112,8 +113,8 @@ export function createFullRefundForOrder(businessId, userId, orderId, reason, au
   const refunds = db.transaction(() => {
     const created = [];
     const insert = db.prepare(`
-      INSERT INTO refunds (id, business_id, order_id, payment_id, amount, reason, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+      INSERT INTO refunds (id, business_id, order_id, payment_id, amount, amount_cents, reason, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?)
     `);
     for (const payment of refundablePayments) {
       const refundId = genId();
@@ -123,6 +124,7 @@ export function createFullRefundForOrder(businessId, userId, orderId, reason, au
         orderId,
         payment.id,
         payment.refundable_amount,
+        toCents(payment.refundable_amount),
         reason || 'Tam sipariş iadesi',
         userId,
       );

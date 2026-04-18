@@ -2,6 +2,7 @@ import { Router } from 'express';
 import db from '../config/database.js';
 import { authenticate, businessScope } from '../middleware/auth.js';
 import { genId, normalizePhone } from '../utils/helpers.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
 import { normalizePhoneDigits } from '../utils/phoneNormalize.js';
 
 const router = Router();
@@ -517,6 +518,15 @@ router.post('/', (req, res) => {
     const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
     customer.phones = db.prepare('SELECT * FROM customer_phones WHERE customer_id = ?').all(customerId);
     customer.addresses = db.prepare('SELECT * FROM customer_addresses WHERE customer_id = ?').all(customerId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'customers',
+      entityId: customerId,
+      action: 'create',
+      after: customer,
+      actorUserId: req.user?.id || null,
+      requestId: req.requestId,
+    });
     res.status(201).json(customer);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -527,12 +537,24 @@ router.post('/', (req, res) => {
 router.patch('/:id', (req, res) => {
   try {
     const { full_name, note } = req.body;
+    const before = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!before) return res.status(404).json({ error: 'Müşteri bulunamadı' });
     db.prepare("UPDATE customers SET full_name = COALESCE(?, full_name), note = COALESCE(?, note), updated_at = datetime('now') WHERE id = ? AND business_id = ?")
       .run(full_name, note, req.params.id, req.businessId);
-    
+
     const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
     customer.phones = db.prepare('SELECT * FROM customer_phones WHERE customer_id = ?').all(customer.id);
     customer.addresses = db.prepare('SELECT * FROM customer_addresses WHERE customer_id = ?').all(customer.id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'customers',
+      entityId: req.params.id,
+      action: 'update',
+      before,
+      after: customer,
+      actorUserId: req.user?.id || null,
+      requestId: req.requestId,
+    });
     res.json(customer);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });

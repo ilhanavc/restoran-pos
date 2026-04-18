@@ -87,4 +87,11 @@ export const adminMixin = {
   removeAttributeFromProduct(productId, groupId) {
     return this.delete(`/attributes/product/${productId}/${groupId}`);
   },
+  getEntityMutations({ limit = 50, offset = 0, entity_table, action, actor_user_id } = {}) {
+    const params = new URLSearchParams({ limit, offset });
+    if (entity_table) params.set('entity_table', entity_table);
+    if (action) params.set('action', action);
+    if (actor_user_id) params.set('actor_user_id', actor_user_id);
+    return this.get(`/admin/entity-mutations?${params}`);
+  },
 };

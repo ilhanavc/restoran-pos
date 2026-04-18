@@ -8,7 +8,7 @@ let mainWindow = null;
 
 function getMainWindow() { return mainWindow; }
 
-function createWindow(port) {
+function createWindow(port, cloudServerUrl = null) {
   const preloadPath = app.isPackaged
     ? path.join(app.getAppPath(), 'electron', 'preload.cjs')
     : path.join(__dirname, '..', 'preload.cjs');
@@ -24,7 +24,7 @@ function createWindow(port) {
     },
   });
 
-  const url = `http://${HEALTH_HOST}:${port}/`;
+  const url = cloudServerUrl || `http://${HEALTH_HOST}:${port}/`;
   mainWindow.loadURL(url).catch((err) => {
     dialog.showErrorBox('Yükleme hatası', `Sayfa açılamadı: ${err.message}`);
   });

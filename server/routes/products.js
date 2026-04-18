@@ -1,16 +1,16 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import multer from 'multer';
+import config from '../config/index.js';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog, normalizeTurkishSearch } from '../utils/helpers.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
+import { toCents } from '../utils/money.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = process.env.USER_DATA_PATH
-  ? path.join(process.env.USER_DATA_PATH, 'uploads', 'products')
-  : path.join(__dirname, '..', 'uploads', 'products');
+const userDataPath = config.userDataPath || process.env.USER_DATA_PATH || path.join(process.cwd(), 'data');
+const UPLOADS_DIR = path.join(userDataPath, 'uploads', 'products');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -95,12 +95,12 @@ function assertCategoryExists(categoryId, businessId) {
 function replaceProductPortions(businessId, productId, list) {
   db.prepare('DELETE FROM product_portions WHERE product_id = ? AND business_id = ?').run(productId, businessId);
   const ins = db.prepare(
-    `INSERT INTO product_portions (id, business_id, product_id, label, price, sort_order, is_default)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO product_portions (id, business_id, product_id, label, price, price_cents, sort_order, is_default)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (let i = 0; i < list.length; i++) {
     const p = list[i];
-    ins.run(genId(), businessId, productId, p.label, p.price, i, p.is_default ? 1 : 0);
+    ins.run(genId(), businessId, productId, p.label, p.price, toCents(p.price), i, p.is_default ? 1 : 0);
   }
 }
 
@@ -156,13 +156,14 @@ router.post('/', staffMenu, (req, res) => {
     const id = genId();
 
     db.transaction(() => {
-      db.prepare(`INSERT INTO products (id, business_id, category_id, name, price, description, barcode, vat_rate, printer_target)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      db.prepare(`INSERT INTO products (id, business_id, category_id, name, price, price_cents, description, barcode, vat_rate, printer_target)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         id,
         req.businessId,
         category_id,
         name,
         salePrice,
+        toCents(salePrice),
         description || '',
         barcode || '',
         0,
@@ -177,6 +178,15 @@ router.post('/', staffMenu, (req, res) => {
         `SELECT * FROM product_portions WHERE product_id = ? AND business_id = ? ORDER BY sort_order, label`,
       )
       .all(id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'products',
+      entityId: id,
+      action: 'create',
+      after: { ...product, portions: portionRows },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json({ ...product, portions: portionRows });
   } catch (err) {
     if (err.status === 400) return res.status(400).json({ error: err.message });
@@ -273,11 +283,12 @@ router.patch('/:id', staffMenu, (req, res) => {
           )
           .get(req.params.id, req.businessId);
         if (defRow) {
-          db.prepare(`UPDATE product_portions SET price = ? WHERE id = ?`).run(Number(price), defRow.id);
+          db.prepare(`UPDATE product_portions SET price = ?, price_cents = ? WHERE id = ?`)
+            .run(Number(price), toCents(price), defRow.id);
         }
       }
       db.prepare(`UPDATE products SET 
-      name = COALESCE(?, name), price = COALESCE(?, price), category_id = COALESCE(?, category_id),
+      name = COALESCE(?, name), price = COALESCE(?, price), price_cents = COALESCE(?, price_cents), category_id = COALESCE(?, category_id),
       description = COALESCE(?, description), is_active = COALESCE(?, is_active),
       barcode = COALESCE(?, barcode),
       printer_target = COALESCE(?, printer_target),
@@ -287,6 +298,7 @@ router.patch('/:id', staffMenu, (req, res) => {
         .run(
           name ?? null,
           priceCoalesce,
+          priceCoalesce != null ? toCents(priceCoalesce) : null,
           category_id ?? null,
           description ?? null,
           is_active !== undefined ? (is_active ? 1 : 0) : null,
@@ -306,6 +318,16 @@ router.patch('/:id', staffMenu, (req, res) => {
         `SELECT * FROM product_portions WHERE product_id = ? AND business_id = ? ORDER BY sort_order, label`,
       )
       .all(req.params.id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'products',
+      entityId: req.params.id,
+      action: 'update',
+      before: product,
+      after: { ...updated, portions: portionRows },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ ...updated, portions: portionRows });
   } catch (err) {
     if (err.status === 400) return res.status(400).json({ error: err.message });
@@ -417,6 +439,15 @@ router.delete('/:id', staffMenu, (req, res) => {
       WHERE id = ? AND business_id = ?`).run(req.params.id, req.businessId);
 
     auditLog(req.businessId, req.user.id, 'product_delete', 'product', req.params.id, {});
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'products',
+      entityId: req.params.id,
+      action: 'delete',
+      before: product,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ success: true });
   } catch (err) {
     console.error('Product delete:', err);

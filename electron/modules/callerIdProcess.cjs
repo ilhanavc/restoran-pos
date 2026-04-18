@@ -12,7 +12,7 @@ let callerIdHelperProcess = null;
 let callerIdHelperRestartTimer = null;
 let callerIdHelperStopped = false;
 
-function startCallerIdHelper(port) {
+function startCallerIdHelper(port, apiBaseUrl = null) {
   if (callerIdHelperStopped) return;
 
   const posConfig = getPosConfig();
@@ -40,6 +40,9 @@ function startCallerIdHelper(port) {
     5000,
     parseInt(String(posConfig.callerIdHelperRestartMs || process.env.CALLER_ID_RESTART_MS || '15000'), 10) || 15000,
   );
+  const apiBase = apiBaseUrl
+    ? `${String(apiBaseUrl).replace(/\/$/, '')}/api`
+    : `http://127.0.0.1:${port}/api`;
 
   let cmd, args, spawnCwd;
   if (isPackaged) {
@@ -48,7 +51,7 @@ function startCallerIdHelper(port) {
     args = [
       '--bridge-token', token,
       '--post-enabled', 'true',
-      '--api-base', `http://127.0.0.1:${port}/api`,
+      '--api-base', apiBase,
       '--dll-path', dllPath,
     ];
     spawnCwd = helperDir;
@@ -58,7 +61,7 @@ function startCallerIdHelper(port) {
       'run', '--project', csprojPath, '--',
       '--bridge-token', token,
       '--post-enabled', 'true',
-      '--api-base', `http://127.0.0.1:${port}/api`,
+      '--api-base', apiBase,
     ];
     spawnCwd = helperDir;
   }
@@ -79,25 +82,25 @@ function startCallerIdHelper(port) {
   child.on('error', (err) => {
     console.error('[electron] CallerIdSdkHelper başlatılamadı:', err.message);
     callerIdHelperProcess = null;
-    scheduleCallerIdHelperRestart(port, restartMs);
+    scheduleCallerIdHelperRestart(port, restartMs, apiBaseUrl);
   });
 
   child.on('exit', (code) => {
     callerIdHelperProcess = null;
     console.log(`[electron] CallerIdSdkHelper kapandı (kod: ${code ?? 'null'})`);
-    if (!callerIdHelperStopped) scheduleCallerIdHelperRestart(port, restartMs);
+    if (!callerIdHelperStopped) scheduleCallerIdHelperRestart(port, restartMs, apiBaseUrl);
   });
 
   console.log(`[electron] CallerIdSdkHelper başlatıldı pid=${child.pid}`);
 }
 
-function scheduleCallerIdHelperRestart(port, restartMs) {
+function scheduleCallerIdHelperRestart(port, restartMs, apiBaseUrl = null) {
   if (callerIdHelperStopped) return;
   if (callerIdHelperRestartTimer) clearTimeout(callerIdHelperRestartTimer);
   console.log(`[electron] CallerIdSdkHelper ${restartMs / 1000} s sonra yeniden başlatılacak...`);
   callerIdHelperRestartTimer = setTimeout(() => {
     callerIdHelperRestartTimer = null;
-    startCallerIdHelper(port);
+    startCallerIdHelper(port, apiBaseUrl);
   }, restartMs);
   callerIdHelperRestartTimer.unref?.();
 }

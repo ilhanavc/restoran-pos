@@ -2,6 +2,7 @@
   "_talimat": "Bu dosyayı 'pos-config.json' olarak kopyalayın ve değerleri doldurun. Electron açılışında otomatik okunur.",
 
   "port": 3001,
+  "cloudServerUrl": "",
   "jwtSecret": "GIZLI_JWT_ANAHTARI_BURAYA_DEGISTIRIN",
 
   "_corsAciklama": "LAN'dan erişen tablet/cihaz origin'lerini buraya ekleyin. Boş bırakılırsa sadece localhost kabul edilir.",

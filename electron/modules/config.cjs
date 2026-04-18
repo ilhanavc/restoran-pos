@@ -38,6 +38,13 @@ function getPosConfig() {
   return posConfig;
 }
 
+function getCloudServerUrl() {
+  const raw = posConfig.cloudServerUrl || process.env.CLOUD_SERVER_URL || process.env.POS_CLOUD_SERVER_URL;
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim().replace(/\/$/, '');
+  return trimmed || null;
+}
+
 function ensureJwtSecret() {
   const isPlaceholder = !posConfig.jwtSecret || posConfig.jwtSecret === PLACEHOLDER_JWT;
   if (!isPlaceholder) return;
@@ -125,10 +132,12 @@ function buildChildEnv(port, absoluteDbPath, codeRoot) {
   return env;
 }
 
-function buildBridgeEnv(port) {
+function buildBridgeEnv(port, apiBaseUrl = null) {
   const env = { ...process.env };
   env.NODE_ENV = 'production';
-  env.API_BASE = `http://127.0.0.1:${port}/api`;
+  env.API_BASE = apiBaseUrl
+    ? `${String(apiBaseUrl).replace(/\/$/, '')}/api`
+    : `http://127.0.0.1:${port}/api`;
 
   const b = posConfig.bridge || {};
   if (b.token) env.BRIDGE_TOKEN = String(b.token);
@@ -162,7 +171,7 @@ function buildBridgeEnv(port) {
 }
 
 module.exports = {
-  getPosConfigPath, readPosConfig, loadPosConfig, getPosConfig, ensureJwtSecret,
+  getPosConfigPath, readPosConfig, loadPosConfig, getPosConfig, getCloudServerUrl, ensureJwtSecret,
   getCodeRoot, getPackagedServerRoot, getStoreBridgeRoot, getToolsRoot,
   getServerEntryPath, getServerSpawnCwd, getTargetPort,
   buildChildEnv, buildBridgeEnv,

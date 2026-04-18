@@ -5,7 +5,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **346 automated tests** · 15/15 production checklist items passed
+**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **352 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
@@ -41,6 +41,10 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | D-4 | Monolitik Ayrıştırma | `electron/main.cjs` 301 satırlık orchestrator'a indirildi ve `electron/modules/*` altına bölündü; `server/routes/orders.js` + `payments.js` domain logic'i `orderService.js`/`paymentService.js` içine taşındı; `client/src/services/api.js` 31 satırlık facade oldu ve domain mixin modüllerine ayrıldı; `OrderScreen.jsx` için `useCatalog`, `useCart`, `ModifierModal`, `ClipboardEmpty` çıkarıldı; `PrinterDetailPage.jsx` için `usePrinterForm`, `PrinterDeviceSection`, `PrinterPreviewPanel` çıkarıldı. Son doğrulama: 318/318 test, `lint:ci` 0 warning, client build başarılı. |
 | D-5 | Ürün Eksiklerini Kapatma | D-5.1 period close / X-Z raporu ve kapalı dönem lock; D-5.2 ödeme/siparişe bağlı iade akışı; D-5.3 bahşiş modeli ve raporlama; D-5.4 rezervasyon → masa oturtma/adisyon bağlantısı tamamlandı. D-5.5 ödeme terminal SDK ve D-5.6 e-belge entegrasyonu provider/hardware/fiscal kararları gelene kadar bilinçli olarak deferred. Son doğrulama: 334/334 test, `lint:ci` 0 warning, client build başarılı. |
 | DB-1 / DB-2 | Veri Modeli Sağlamlaştırma | DB-1 migration disiplini başladı: numbered migration runner, `schema_migrations`, legacy baseline, forward-only validation. DB-2 audit trail başladı: `entity_mutations` tablosu, ödeme/iade mutasyon kayıtları, sipariş create/status/cancel mutation kayıtları. Son doğrulama: 341/341 test, `lint:ci` 0 warning, client build ve server health smoke başarılı. |
+| DB-2 (tam) | Audit Trail Tamamlandı | `entity_mutations` tüm mutation endpoint'lerine bağlandı: ürün create/update/delete, stok kalemi CRUD + stok hareketi, müşteri create/update, işletme/yazıcı/printer-routing/kullanıcı konfigürasyonları. `GET /api/admin/entity-mutations` endpoint (sayfalandırmalı, filtrelenebilir). `AuditLogPage` (`/settings/audit-log`) — tablo/işlem filtresi, before/after JSON diff görünümü. Son doğrulama: 346/346 test, `lint:ci` 0 warning. |
+| DB-3 | Integer Minor Unit Migration | `server/utils/money.js` (`toCents`, `fromCents`). `0002_add_cents_columns` migration: `orders`, `order_items`, `payments`, `refunds`, `products`, `product_portions` tablolarına `_cents` shadow kolonları + backfill. Dual-write: `orderService`, `paymentService`, `refundService`, `products.js` her mutation'da hem REAL hem `_cents` yazar. Reports read-path: COALESCE template'leri (`paymentAmountCents`, `orderGrandTotalCents` vb.) — REAL sütunlar korunuyor. `money.utils.test.js` (floating-point edge case dahil). Son doğrulama: 349/349 test, `lint:ci` 0 warning. |
+| DB-4 | Snapshot Tamamlama | `0003_snapshot_columns` migration: `orders` tablosuna `pricing_policy_version` (sipariş anındaki ürün MAX updated_at), `service_charge_rate/amount/cents` snapshot alanları; `order_items` tablosuna `vat_rate_snapshot` eklendi. `orderService.js` dual-write: her sipariş oluşturulurken menu versiyonu, servis ücreti oranı ve kalem vat_rate snapshot'ı yazılıyor. `grand_total` hesabı değiştirilmedi. `snapshot.test.js` (pricing_policy_version, vat_rate_snapshot, idempotency). Son doğrulama: 352/352 test, `lint:ci` 0 warning. |
+| C-1 | Railway Cloud Deployment | `railway.json` (NIXPACKS builder, `start:server`, `/api/health` healthcheck 30s); `server/config/index.js` merkezi `HOST`/`PORT`/`USER_DATA_PATH` (env-driven, absolute path desteği); `CORS_ORIGINS` env'den split; `server/.env.example` commit edilebilir şablon; Electron cloud modu: `pos-config.json`'da `cloudServerUrl` set edilirse local Express subprocess başlatılmaz, cloud URL kullanılır; `preload.cjs` `config:get-electron-config` IPC ile `apiBaseUrl` renderer'a expose edilir; `client/src/services/api/core.js` `electronConfig?.apiBaseUrl → VITE_API_URL → localhost:3001` önceliği. Son doğrulama: 352/352 test, `lint:ci` 0 warning. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -69,7 +73,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
   - External backup import (UI file picker) + export (save dialog) per backup
   - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- **346 automated tests** (Vitest + Supertest integration), all passing
+- **352 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
@@ -120,11 +124,13 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - `scripts/smoke-server-health.cjs`: starts server with temp DB, polls `/api/health`, verifies migration — wired into `dist:prepare`
 - Repo cleanup: 451 MB artifacts removed, 9 orphaned scripts deleted, `docs/audit/archive/` organized
 - **DB-1 migration discipline:** `schema_migrations`, `server/migrations/versions/`, legacy baseline marker, forward-only numbered migration validation.
-- **DB-2 audit trail foundation:** `entity_mutations` table with JSON before/after snapshots, actor, reason, request id, source; payment/refund/order create/status/cancel mutations are recorded.
+- **DB-2 audit trail — TAM:** `entity_mutations` tablosu; ürün/stok/müşteri/işletme/yazıcı/kullanıcı tüm mutation endpoint'lerinde before/after JSON snapshot kaydı. `GET /api/admin/entity-mutations` + `AuditLogPage` (`/settings/audit-log`).
+- **DB-3 integer minor unit — TAM:** `server/utils/money.js` (`toCents`/`fromCents`); `0002_add_cents_columns` migration + backfill; dual-write tüm mutation path'larında; reports COALESCE fallback read-path. REAL sütunlar korunuyor (geriye dönük uyumluluk).
+- **DB-4 snapshot tamamlama — TAM:** `0003_snapshot_columns` migration; `orders.pricing_policy_version`, `orders.service_charge_*`, `order_items.vat_rate_snapshot`; `orderService.js` her sipariş oluşturulurken snapshot yazar. **O-1 tamamlandı.**
 
 ## Pending Tasks
 
-All backup/restore critical gaps (P1), operational visibility (D-3 — tam), monolithic decomposition (D-4), mandatory D-5 product gaps (D-5.1 through D-5.4), DB-1 migration discipline, and D-2 Release Notes UI are complete. DB-2 audit trail is in progress. **Gate 1 tek engelleyicisi: Windows kod imzası (EV/OV sertifika).**
+All backup/restore critical gaps (P1), operational visibility (D-3 — tam), monolithic decomposition (D-4), mandatory D-5 product gaps (D-5.1 through D-5.4), DB-1 migration discipline, D-2 Release Notes UI, DB-2 audit trail, and DB-3 integer minor unit migration tamamlandı. **Gate 1 tek engelleyicisi: Windows kod imzası (EV/OV sertifika).**
 
 ### D-5 Deferred Decisions
 D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal SDK work until a concrete provider/hardware choice exists. Do not implement e-belge work until fiscal provider, legal scope, and document flow are selected.
@@ -133,11 +139,24 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
 - Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
 
-### DB-2 Audit Trail (in progress)
-- Continue wiring `entity_mutations` to menu/product price changes and product delete/archive flows.
-- Add audit coverage for order item updates, customer assignment changes, stock movements, printer/admin configuration mutations.
-- Add admin-only audit log viewer after backend mutation coverage is broad enough.
-- Do not start DB-3 integer minor unit migration until DB-2 audit trail coverage is complete.
+### Sıradaki: C-2 — Auth Hardening (Refresh Token + Mobile Session)
+**Ön koşul:** C-1 ✅ tamamlandı.
+- `refresh_tokens` tablosu migration (id, user_id, token_hash, expires_at, device_id, created_at)
+- `POST /api/auth/refresh` + `POST /api/auth/logout` endpoint
+- Access token TTL: 15dk (mobil) / 8saat (desktop — backward compatible)
+- Refresh token TTL: 30 gün
+- `X-Client-Type: mobile|desktop` header ile ayırt et
+
+### O-2 — Tenant Identity + Billing (4 ay sonrası)
+**Ön koşul:** O-1 ✅, 4 ay pilot tamamlanmış.
+- Tenant model (plan, limit, billing)
+- RBAC genişleme
+- Tenant-aware rate limiting + backup/restore
+- iyzico subscription (TR market)
+
+### DB sonrası düşük öncelik
+- `_cents` kolonlarını primary read source yapma (REAL deprecated) — v2 verisi dolunca.
+- Audit log viewer'a CSV export eklenebilir.
 
 ### Print queue UI (P2)
 - Print queue summary panel in Admin UI (pending/failed/stale counts)
@@ -164,6 +183,7 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - **CallerID** — Primary: C# SDK helper (`tools/callerid-sdk-helper`), **self-contained win-x64 binary** (no .NET runtime needed). Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`). Both POST to `POST /api/bridge/caller-id/incoming` with `X-Bridge-Token`. CallerID helper `.exe` is bundled via `extraResources`; `desktop:preflight` verifies it exists before packaging.
 - **BRIDGE_TOKEN** — must always be masked in logs (`***`); never log in plain text.
 - **DB transactions** — order, payment, and print operations must be atomic (all-or-nothing).
+- **Para birimi (DB-3)** — `server/utils/money.js` `toCents(value)` = `Math.round(Number(value) * 100)`. Tüm yeni mutation'lar hem REAL hem `_cents` sütununa yazar. REAL sütunlar silinmedi — geriye dönük uyumluluk. Reports COALESCE fallback kullanır: `COALESCE(col_cents, ROUND(col * 100)) / 100.0`.
 - **Mock mode** — must default to OFF; must never be enabled in production.
 - **userData path** — in packaged Electron, SQLite lives at `app.getPath('userData')` (`%APPDATA%\restoran-pos\pos.db`). On first launch, migrates from `server/data/pos.db` if userData is empty. `uploads/` and `backups/` also live under userData.
 - **Electron logging** — all process stdout/stderr (backend, StoreBridge, CallerID) and uncaught exceptions are written to `userData/logs/electron-main.log`. Check this file first for field support.

@@ -8,10 +8,21 @@ const serverRoot = path.join(configDir, '..');
 
 dotenv.config({ path: path.join(serverRoot, '.env') });
 
+function resolveUserDataPath() {
+  const raw = process.env.USER_DATA_PATH;
+  if (!raw) {
+    return path.join(serverRoot, 'data');
+  }
+  if (path.isAbsolute(raw)) {
+    return raw;
+  }
+  return path.resolve(serverRoot, raw);
+}
+
 function resolveDbPath() {
   const raw = process.env.DB_PATH;
   if (!raw) {
-    return path.join(serverRoot, 'data', 'pos.db');
+    return path.join(resolveUserDataPath(), 'pos.db');
   }
   if (path.isAbsolute(raw)) {
     return raw;
@@ -36,7 +47,11 @@ export default {
   serverRoot,
   clientDist,
   port: parseInt(process.env.PORT || '3001'),
+  host: process.env.HOST || '127.0.0.1',
   nodeEnv,
+  get userDataPath() {
+    return resolveUserDataPath();
+  },
   jwt: {
     secret: jwtSecret,
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
