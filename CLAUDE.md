@@ -39,6 +39,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | D-2 | Signing + Wizard + Update Disiplini | First-run setup wizard (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı), `setup:is-completed`/`setup:complete` IPC, `pos-config.json` `setupCompleted` flag, `UpdateNotification` expandable release notes. Kod imzası ertelendi (sertifika satın alımı gerekli). |
 | D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation → `store-bridge.old.log`), `writeBridgeLog` (info/error, timestamp prefix), `setupBridgeFileLogging` + `bridgeLogStream` cleanup on `before-quit`. Crash reporter: `writeCrashLog` → `crashes.log` JSON-line (ts/type/message/stack/version/platform/arch), `uncaughtException`/`unhandledRejection` capture. Server: `requestIdMiddleware` (`X-Request-Id` header, `crypto.randomUUID`), JSON-line access log (`[access]` prefix: method/path/status/ms/requestId, health check hariç). |
 | D-4 | Monolitik Ayrıştırma | `electron/main.cjs` 301 satırlık orchestrator'a indirildi ve `electron/modules/*` altına bölündü; `server/routes/orders.js` + `payments.js` domain logic'i `orderService.js`/`paymentService.js` içine taşındı; `client/src/services/api.js` 31 satırlık facade oldu ve domain mixin modüllerine ayrıldı; `OrderScreen.jsx` için `useCatalog`, `useCart`, `ModifierModal`, `ClipboardEmpty` çıkarıldı; `PrinterDetailPage.jsx` için `usePrinterForm`, `PrinterDeviceSection`, `PrinterPreviewPanel` çıkarıldı. Son doğrulama: 318/318 test, `lint:ci` 0 warning, client build başarılı. |
+| D-5 | Ürün Eksiklerini Kapatma | D-5.1 period close / X-Z raporu ve kapalı dönem lock; D-5.2 ödeme/siparişe bağlı iade akışı; D-5.3 bahşiş modeli ve raporlama; D-5.4 rezervasyon → masa oturtma/adisyon bağlantısı tamamlandı. D-5.5 ödeme terminal SDK ve D-5.6 e-belge entegrasyonu provider/hardware/fiscal kararları gelene kadar bilinçli olarak deferred. Son doğrulama: 334/334 test, `lint:ci` 0 warning, client build başarılı. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -47,10 +48,12 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Payment (cash/card/mixed, discount, change calculation, auto-close)
 - Kitchen screen (active orders, item-level preparation tracking, age warnings)
 - Receipt/invoice printing (ESC/POS, PC857 Turkish, word-wrap, header/footer configurable)
-- Reservation module (calendar view, date/guests/notes)
+- Reservation module (calendar view, date/guests/notes, table seating link with arrived/no-show guardrails)
 - Inventory tracking (items, movements, low-stock alerts)
 - Customer management (multi-phone/address, order history, Excel/CSV import-export)
-- Reports (daily sales, payment breakdown, top sellers, category/user breakdown, 4 interactive charts)
+- Reports (daily sales, payment breakdown, top sellers, category/user breakdown, 4 interactive charts, X/Z period close)
+- Refund / return flow (refund records tied to original orders/payments, closed-period guard, report totals)
+- Tip / bahşiş tracking (payment-level tip capture, separate X/Z report totals)
 - Order history with advanced filters (date range, customer, amount)
 - CallerID (C812A V8 HID device, clipboard bridge via PowerShell; SDK helper as primary — **self-contained win-x64 binary**)
 - Socket.io real-time (kitchen, table, takeaway screens)
@@ -117,17 +120,10 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 ## Pending Tasks
 
-All backup/restore critical gaps (P1), operational visibility (D-3), and monolithic decomposition (D-4) are complete.
+All backup/restore critical gaps (P1), operational visibility (D-3), monolithic decomposition (D-4), and mandatory D-5 product gaps (D-5.1 through D-5.4) are complete.
 
-### Next Required Roadmap Step — D-5 Product Gaps
-Follow the audit report dependency order. Do not start DB-1/O-1/mobile/cloud work until D-5 is either completed or explicitly deferred by the user.
-
-1. **D-5.1 Period close / X-Z report** — add day/shift close model, X preview, Z close, closed-period lock behavior, and reports UI.
-2. **D-5.2 Refund / return flow** — add post-payment refund records tied to original payments/orders, protect closed periods, and surface refund totals in reports.
-3. **D-5.3 Tip / bahşiş model** — add tip capture and reporting after the refund foundation is in place.
-4. **D-5.4 Reservation → table seating** — connect reservations to table occupancy/open-order flow with arrived/no-show guardrails.
-5. **D-5.5 Payment terminal SDK** — optional; keep deferred unless hardware/provider is chosen.
-6. **D-5.6 e-belge integration** — optional; keep deferred until fiscal provider and legal scope are chosen.
+### D-5 Deferred Decisions
+D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal SDK work until a concrete provider/hardware choice exists. Do not implement e-belge work until fiscal provider, legal scope, and document flow are selected.
 
 ### Remaining Architectural Debt (after D-5, low risk)
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.

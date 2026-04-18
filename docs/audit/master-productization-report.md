@@ -6,6 +6,8 @@
 **Yöntem:** Kanıta dayalı. Repo/gercek dosya boyutları, test sayımları, mevcut audit raporları (00–11), git history, CLAUDE.md ve runbook'lar doğrudan alındı.
 **Bu raporun sınırı:** Kod değiştirilmedi. Refactor yapılmadı. Yalnızca analiz, kanıt toplama ve yol haritası üretimi yapıldı.
 
+> **Uygulama notu (2026-04-18):** Bu rapor 2026-04-17 tarihli ana audit snapshot'ıdır. Rapor sonrası D-1, D-2, D-3, D-4 ve D-5.1-D-5.4 tamamlandı. D-5.5 ödeme terminal SDK ve D-5.6 e-belge entegrasyonu provider/hardware/fiscal kararları beklediği için bilinçli olarak deferred durumdadır. Son doğrulama: 334/334 test, `lint:ci` 0 warning, client build başarılı.
+
 ---
 
 ## 1) Yönetici Özeti
@@ -896,13 +898,16 @@ Mobil + cloud + offline → şart olacak. Bugün yok. CRDT, last-write-wins veya
 #### Aşama D-5 — Ürün Eksiklerini Kapatma
 **Amaç:** Ticari satılabilirlik.
 **Ön koşullar:** D-4.
-**Yapılacaklar:**
-- Period close / X-Z raporu.
-- İade / return akışı.
-- e-belge entegrasyonu (opsiyonel).
-- Ödeme terminal SDK (opsiyonel).
-- Tip/bahşiş modeli.
-- Rezervasyon → masa eşleme.
+**Durum (2026-04-18):** Zorunlu D-5 kapsamı tamamlandı; opsiyonel entegrasyonlar karar bağımlı olarak ertelendi.
+**Tamamlananlar:**
+- D-5.1 Period close / X-Z raporu: X önizleme, Z kapanış snapshot'ı, kapalı dönem mutation lock, rapor UI.
+- D-5.2 İade / return akışı: orijinal ödeme/sipariş bağlantısı, kapalı dönem guard'ı, raporlarda ayrı iade toplamı.
+- D-5.3 Tip/bahşiş modeli: ödeme seviyesinde bahşiş, X/Z raporda ayrı bahşiş toplamı.
+- D-5.4 Rezervasyon → masa eşleme: rezervasyondan masaya oturtma/adisyon açma, dolu masa guard'ı, cancelled/no_show koruması.
+**Deferred:**
+- D-5.5 Ödeme terminal SDK: provider + hardware seçilmeden uygulanmayacak.
+- D-5.6 e-belge entegrasyonu: fiscal provider + legal kapsam seçilmeden uygulanmayacak.
+**Son doğrulama:** `npm run test` 334/334 geçti, `npm run lint:ci` 0 warning geçti, `npm run build --prefix client` geçti.
 
 ---
 
