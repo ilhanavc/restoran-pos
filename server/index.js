@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/node';
 import { createServer } from 'http';
 import express from 'express';
 import path from 'path';
@@ -29,6 +30,23 @@ import reservationsRoutes from './routes/reservations.js';
 import stockRoutes from './routes/stock.js';
 import waiterCallRoutes from './routes/waiterCall.js';
 import attributesRoutes from './routes/attributes.js';
+import { requestIdMiddleware } from './middleware/requestId.js';
+
+if (process.env.SENTRY_DSN) {
+  try {
+    Sentry.init({
+      dsn: process.env.SENTRY_DSN,
+      environment: process.env.NODE_ENV === 'development' ? 'development' : 'production',
+      beforeSend(event) {
+        delete event.user;
+        return event;
+      },
+    });
+    console.log('[sentry] server crash reporter active');
+  } catch (e) {
+    console.warn('[sentry] server init failed:', e?.message);
+  }
+}
 
 const app = express();
 
@@ -51,6 +69,26 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));
+
+// Her request'e izlenebilir kimlik ata (X-Request-Id header)
+app.use(requestIdMiddleware);
+
+// Structured access log — JSON-line, electron-main.log'a akar (health check hariç)
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    if (req.path === '/api/health') return;
+    console.log('[access]', JSON.stringify({
+      ts: new Date().toISOString(),
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      ms: Date.now() - start,
+      requestId: req.requestId || null,
+    }));
+  });
+  next();
+});
 
 // Rate limiting
 // Auth endpoint'leri: 15 dakikada 50 deneme (brute-force koruması)
@@ -162,6 +200,11 @@ if (config.nodeEnv === 'production') {
       `[prod] React build bulunamadı (${config.clientDist}). Önce proje kökünde "npm run build" çalıştırın.`,
     );
   }
+}
+
+// Sentry error handler — route'lardan sonra, custom error handler'dan önce
+if (process.env.SENTRY_DSN) {
+  Sentry.setupExpressErrorHandler(app);
 }
 
 // Error handler (en sonda)

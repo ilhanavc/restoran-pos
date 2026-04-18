@@ -89,4 +89,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   /** Electron ortamında çalışıp çalışmadığını döner (browser'dan ayırt etmek için). */
   isElectron: true,
+
+  /** Sentry DSN yapılandırılmışsa döner — renderer crash reporter için. */
+  sentryDsn: process.env.SENTRY_DSN || null,
 });

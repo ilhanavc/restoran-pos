@@ -42,6 +42,8 @@ let mainWindow = null;
 let posConfig = {};
 /** @type {fs.WriteStream | null} */
 let logStream = null;
+/** @type {fs.WriteStream | null} */
+let bridgeLogStream = null;
 
 function formatLogArg(arg) {
   if (arg instanceof Error) return `${arg.stack || arg.message}`;
@@ -89,12 +91,76 @@ function setupFileLogging() {
 
   process.on('uncaughtException', (err) => {
     console.error('[electron] uncaughtException', err);
+    writeCrashLog('uncaughtException', err);
   });
-  process.on('unhandledRejection', (err) => {
-    console.error('[electron] unhandledRejection', err);
+  process.on('unhandledRejection', (reason) => {
+    console.error('[electron] unhandledRejection', reason);
+    writeCrashLog('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)));
   });
 
   console.log('[electron] log file:', logPath);
+  setupBridgeFileLogging(logsDir);
+}
+
+function writeBridgeLog(level, text) {
+  if (!bridgeLogStream) return;
+  try {
+    const ts = new Date().toISOString();
+    const lines = String(text).split(/\r?\n/).filter(Boolean);
+    for (const line of lines) {
+      bridgeLogStream.write(`[${ts}] [${level}] ${line}\n`);
+    }
+  } catch { /* logging must never crash the app */ }
+}
+
+function writeCrashLog(type, err) {
+  try {
+    const logsDir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    const entry = JSON.stringify({
+      ts: new Date().toISOString(),
+      type,
+      message: err?.message || String(err),
+      stack: err?.stack || null,
+      version: app.getVersion?.() || null,
+      platform: process.platform,
+      arch: process.arch,
+    }) + '\n';
+    fs.appendFileSync(path.join(logsDir, 'crashes.log'), entry);
+  } catch { /* crash reporter must never crash */ }
+}
+
+function initSentry(dsn, version) {
+  if (!dsn) return;
+  try {
+    const Sentry = require('@sentry/electron/main');
+    Sentry.init({
+      dsn,
+      release: `restoran-pos@${version || 'unknown'}`,
+      environment: process.env.NODE_ENV === 'development' ? 'development' : 'production',
+      beforeSend(event) {
+        delete event.user;
+        return event;
+      },
+    });
+    console.log('[sentry] remote crash reporter active');
+  } catch (e) {
+    console.warn('[sentry] init failed:', e?.message);
+  }
+}
+
+function setupBridgeFileLogging(logsDir) {
+  const maxSize = 5 * 1024 * 1024; // 5 MB — rotate
+  const logPath = path.join(logsDir, 'store-bridge.log');
+  try {
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > maxSize) {
+      const oldPath = path.join(logsDir, 'store-bridge.old.log');
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+      fs.renameSync(logPath, oldPath);
+    }
+  } catch { /* rotation failure is non-fatal */ }
+  bridgeLogStream = fs.createWriteStream(logPath, { flags: 'a' });
+  console.log('[electron] bridge log file:', logPath);
 }
 
 // ---------------------------------------------------------------------------
@@ -628,8 +694,14 @@ function startStoreBridge(port) {
   bridgeProcess = child;
   bridgePort = port;
 
-  child.stdout.on('data', (d) => process.stdout.write(`[store-bridge] ${d}`));
-  child.stderr.on('data', (d) => process.stderr.write(`[store-bridge] ${d}`));
+  child.stdout.on('data', (d) => {
+    process.stdout.write(`[store-bridge] ${d}`);
+    writeBridgeLog('info', d);
+  });
+  child.stderr.on('data', (d) => {
+    process.stderr.write(`[store-bridge] ${d}`);
+    writeBridgeLog('error', d);
+  });
 
   child.on('exit', (code) => {
     bridgeProcess = null;
@@ -1265,6 +1337,7 @@ app.whenReady().then(async () => {
     console.log('[electron] pos-config.json yüklendi');
   }
   ensureJwtSecret();
+  initSentry(posConfig.sentryDsn || process.env.SENTRY_DSN, app.getVersion());
 
   const codeRoot = getCodeRoot();
   const distIndex = path.join(codeRoot, 'client', 'dist', 'index.html');
@@ -1642,6 +1715,14 @@ app.on('before-quit', () => {
   if (bridgeProcess && !bridgeProcess.killed) {
     killProcess(bridgeProcess);
     forceKillAfterTimeout(bridgeProcess);
+  }
+  if (bridgeLogStream) {
+    try {
+      bridgeLogStream.end();
+    } catch {
+      /* ignore */
+    }
+    bridgeLogStream = null;
   }
   if (logStream) {
     try {

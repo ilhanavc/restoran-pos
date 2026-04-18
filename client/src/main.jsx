@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import * as Sentry from '@sentry/browser';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import { AuthProvider } from './context/AuthContext.jsx';
@@ -11,6 +12,21 @@ import { applyDisplaySettings, loadStoredDisplaySettings } from './utils/display
 import './styles/global.css';
 
 applyDisplaySettings(loadStoredDisplaySettings());
+
+const _sentryDsn = window.electronAPI?.sentryDsn;
+if (_sentryDsn) {
+  try {
+    Sentry.init({
+      dsn: _sentryDsn,
+      release: undefined,
+      environment: import.meta.env.DEV ? 'development' : 'production',
+      beforeSend(event) {
+        delete event.user;
+        return event;
+      },
+    });
+  } catch { /* must never break renderer startup */ }
+}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
