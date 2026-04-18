@@ -14,7 +14,7 @@ try {
   console.log('Seeding database...');
 
   // Önceleri mevcut verileri temizle
-  const tablesToClear = ['call_logs', 'incoming_calls', 'audit_logs', 'settings', 'print_jobs', 'printer_routing', 'printers',
+  const tablesToClear = ['call_logs', 'incoming_calls', 'entity_mutations', 'audit_logs', 'settings', 'print_jobs', 'printer_routing', 'printers',
     'payments', 'order_items', 'orders', 'customer_addresses', 'customer_phones', 'customers',
     'product_modifiers', 'product_portions', 'products', 'categories', 'tables', 'dining_areas', 'users', 'roles', 'branches', 'businesses'];
   

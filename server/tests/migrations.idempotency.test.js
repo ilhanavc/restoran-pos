@@ -40,7 +40,7 @@ describe('Migrations — fresh DB', () => {
       'businesses', 'users', 'roles', 'dining_areas', 'tables',
       'categories', 'products', 'orders', 'order_items',
       'payments', 'printers', 'print_jobs', 'customers', 'audit_logs',
-      'schema_migrations',
+      'schema_migrations', 'entity_mutations',
     ];
 
     for (const t of required) {
@@ -88,6 +88,33 @@ describe('Migrations — fresh DB', () => {
     expect(row).toBeDefined();
     expect(row.name).toBe('Legacy schema baseline');
     expect(row.applied_at).toBeTruthy();
+    db.close();
+  });
+
+  it('entity_mutations audit trail tablosunu ve indekslerini oluşturur', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    const cols = db.prepare(`PRAGMA table_info(entity_mutations)`).all().map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining([
+      'id',
+      'business_id',
+      'entity_table',
+      'entity_id',
+      'action',
+      'before_json',
+      'after_json',
+      'actor_user_id',
+      'reason',
+      'request_id',
+      'source',
+      'created_at',
+    ]));
+
+    const indexes = db.prepare(`PRAGMA index_list(entity_mutations)`).all().map((idx) => idx.name);
+    expect(indexes).toContain('idx_entity_mutations_business_created');
+    expect(indexes).toContain('idx_entity_mutations_entity');
+    expect(indexes).toContain('idx_entity_mutations_actor_created');
     db.close();
   });
 });
