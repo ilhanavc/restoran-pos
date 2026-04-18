@@ -118,8 +118,6 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 All backup/restore critical gaps (P1) and operational (P2) items completed as of Sprint 12.
 Long-term roadmap items deferred pending production testing period.
 
-### D-3 Eksik (tek madde)
-- **Support bundle UI butonu** — `GET /admin/support-bundle` endpoint hazır (`server/routes/admin.js`), `StoreBridgePage` (`/settings/bridge`) içine "Destek Paketi İndir" butonu eklenmeli. Endpoint ZIP döner, tarayıcıda indirilmeli.
 
 ### Remaining architectural debt (do next, low risk)
 - `OrderScreen.jsx` (1428 lines) — extract catalog/cart/customer/action hooks separately; do NOT refactor in one pass
