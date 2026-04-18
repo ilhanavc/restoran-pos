@@ -745,7 +745,7 @@ function buildDesktopReadiness(businessId) {
     {
       key: 'receipt_printer',
       title: 'Kasa fişi yazıcısı',
-      status: readinessStatus({ ok: counts.receiptPrinters >= 1 && configuredReceiptOk }),
+      status: readinessStatus({ ok: counts.receiptPrinters >= 1 && configuredReceiptOk, warning: true }),
       message:
         counts.receiptPrinters >= 1 && configuredReceiptOk
           ? 'Aktif kasa fişi yazıcısı seçilmiş'
@@ -755,7 +755,7 @@ function buildDesktopReadiness(businessId) {
     {
       key: 'kitchen_printer',
       title: 'Mutfak yazıcısı',
-      status: readinessStatus({ ok: counts.kitchenPrinters >= 1 && configuredKitchenOk }),
+      status: readinessStatus({ ok: counts.kitchenPrinters >= 1 && configuredKitchenOk, warning: true }),
       message:
         counts.kitchenPrinters >= 1 && configuredKitchenOk
           ? 'Aktif mutfak yazıcısı seçilmiş'

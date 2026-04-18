@@ -35,8 +35,9 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | 10 | Audit Hardening + Release Hardening | Full codebase audit (10 audit reports in `docs/audit/`: 00–09 + quality hardening), route lazy-loading (main chunk 948kB→265kB), `ConfirmDialog`/`useConfirmDialog` common component (window.confirm removed), `orderActionPolicy`/`orderPaymentState` utility layer, `api/core.js` HTTP separation, print_jobs lease-based claim + claim ownership guard + manual retry + structured error codes, StoreBridge API timeout/health-retry, CallerID reconnect + bounded POST retry + duplicate ringing guard, Electron persistent logging (`userData/logs/electron-main.log`), JWT secret persisted to `pos-config.json`, CallerID helper packaging fix (`extraResources`), `desktop:preflight` script, `build:callerid-helper` script, encoding module extracted to `store-bridge/printers/encoding.js`, password min-length guard (G-1), takeaway+table_id conflict guard (G-2), transfer Zod schema (G-3), 25 console.error context labels (admin.js), ErrorBoundary, bridge max-restart circuit-breaker, backup-restore runbook, 30 new tests (285 total) |
 | 11 | Desktop Core Hardening + Repo Cleanup | StoreBridgePage health/log/queue panel, `printErrorMessages.js` 16-code error dictionary (TR), `toast.warning` type, MaintenancePage backup staleness banner, PaymentScreen print-failure feedback, `backup-failed` IPC channel, `GET /admin/support-bundle` diagnostic endpoint, `smoke:server-health` script wired into `dist:prepare`, `dist:release` = dist:win + latest.yml, CallerID self-contained win-x64 publish (.NET 8), `printer-acceptance-checklist.md`, `code-signing-runbook.md`, ESLint 27 warnings → 0 (`lint:ci --max-warnings 0`), Playwright e2e specs (table-order-payment, takeaway), `adminBridgeObservability` integration test, **repo cleanup** (451 MB freed: old zips/artifacts/tmp), **pos-config.json removed from git** (security), 9 sprint pass docs → `docs/audit/archive/`, 33 new tests (318 total) |
 | 12 | Backup/Restore Hardening | **P1 critical gaps:** uploads folder backup + restore, backup meta.json (appVersion, schemaVersion, rowCounts, integrityCheck), open order uyarısı restore planlamadan önce (GET /maintenance/open-orders), pos-config.json snapshot backup + restore (JWT secret, bridge token). **P2 operational UX:** "Dosyadan Geri Yükle" + file picker, post-restore SHA-256+integrity-check + safety revert, "Dışa Aktar" per-backup button, disk-space pre-check warning, two-step restore modal (summary + final confirm). **P3 external protection:** SHA-256 hash in meta.json + verification on restore, Windows Task Scheduler integration (gece 03:00 robocopy, hedef klasör picker, manuel tetik, config JSON). `backup-restore-readiness-plan.md` risk matrix + runbook. 0 lint warnings. |
-| D-1 | Test + CI Kapısı | GitHub Actions CI (lint + backend tests + frontend RTL), RTL test suite (PaymentScreen, OrderScreen — 22 tests). |
+| D-1 | Test + CI Kapısı | GitHub Actions CI (lint + backend tests + frontend RTL + Playwright e2e), RTL test suite (PaymentScreen, OrderScreen — 22 tests), Playwright e2e job eklendi CI'a, `db:seed` artık `app.setup` settings kaydı yazıyor (Playwright readiness yönlendirmesi engellenir). |
 | D-2 | Signing + Wizard + Update Disiplini | First-run setup wizard (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı), `setup:is-completed`/`setup:complete` IPC, `pos-config.json` `setupCompleted` flag, `UpdateNotification` expandable release notes. Kod imzası ertelendi (sertifika satın alımı gerekli). |
+| D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation → `store-bridge.old.log`), `writeBridgeLog` (info/error, timestamp prefix), `setupBridgeFileLogging` + `bridgeLogStream` cleanup on `before-quit`. Crash reporter: `writeCrashLog` → `crashes.log` JSON-line (ts/type/message/stack/version/platform/arch), `uncaughtException`/`unhandledRejection` capture. Server: `requestIdMiddleware` (`X-Request-Id` header, `crypto.randomUUID`), JSON-line access log (`[access]` prefix: method/path/status/ms/requestId, health check hariç). |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -71,6 +72,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - electron-updater auto-update (GitHub Releases, v1.0.3+); `dist:release` generates `latest.yml`
 - **First-run setup wizard** (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı); `setup:is-completed`/`setup:complete` IPC; `pos-config.json` `setupCompleted` flag
 - `UpdateNotification`: expandable release notes ("Değişiklikleri gör/gizle"), indirme progress bar, "Kur ve Yeniden Başlat"
+- **Operasyonel görünürlük (D-3):** `userData/logs/store-bridge.log` (5 MB rotation), `crashes.log` JSON-line crash reporter (`uncaughtException`/`unhandledRejection`), `X-Request-Id` correlation header (her API request), JSON-line structured access log
 - Product image upload (server/uploads/products/, /uploads static)
 - Combo menu support (product_combos table, UI in MenuProductEditorPage)
 - Customer 360 profile (total spend, order count, last visit, top 3 products)
@@ -116,6 +118,9 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 All backup/restore critical gaps (P1) and operational (P2) items completed as of Sprint 12.
 Long-term roadmap items deferred pending production testing period.
 
+### D-3 Eksik (tek madde)
+- **Support bundle UI butonu** — `GET /admin/support-bundle` endpoint hazır (`server/routes/admin.js`), `StoreBridgePage` (`/settings/bridge`) içine "Destek Paketi İndir" butonu eklenmeli. Endpoint ZIP döner, tarayıcıda indirilmeli.
+
 ### Remaining architectural debt (do next, low risk)
 - `OrderScreen.jsx` (1428 lines) — extract catalog/cart/customer/action hooks separately; do NOT refactor in one pass
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components
@@ -140,7 +145,6 @@ Long-term roadmap items deferred pending production testing period.
 - Online order integrations (Yemeksepeti, Getir)
 - Mobile waiter app (tablet/offline)
 - Loyalty program
-- CI/CD pipeline (GitHub Actions) — **high priority, prevents packaging bugs**
 - Frontend test coverage (React component tests)
 - QR code local generation (replace external api.qrserver.com dependency)
 
@@ -164,6 +168,8 @@ Long-term roadmap items deferred pending production testing period.
 - **ConfirmDialog** — `window.confirm` is banned. Use `client/src/components/common/ConfirmDialog.jsx` + `useConfirmDialog.js` hook for all destructive-action confirmations.
 - **ESLint** — `lint:ci` enforces `--max-warnings 0`. Any new warning breaks the CI gate. Fix warnings before committing.
 - **dist:release** — Full release chain: `npm run dist:release` = `dist:win` + `dist:gen-update-meta` (generates `latest.yml` for electron-updater).
+- **Desktop Readiness checks** — `receipt_printer` and `kitchen_printer` are `warning` (not `blocker`). Businesses without printers can complete setup. See `buildDesktopReadiness()` in `server/routes/admin.js`.
+- **`app.setup` settings key** — written by `db:seed` and by `POST /api/admin/desktop-readiness/complete`. Controls whether app redirects to readiness page on every navigation. If not set, users are locked out of all non-settings screens.
 
 ## Folder Structure
 ```

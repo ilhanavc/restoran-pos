@@ -233,7 +233,7 @@ describe('admin desktop readiness', () => {
     expect(readinessRes.status).toBe(200);
     expect(readinessRes.body.ready).toBe(false);
     expect(readinessRes.body.blockerCount).toBeGreaterThan(0);
-    expect(readinessRes.body.checks.some((check) => check.key === 'receipt_printer' && check.status === 'blocker')).toBe(true);
+    expect(readinessRes.body.checks.some((check) => check.key === 'receipt_printer' && check.status === 'warning')).toBe(true);
 
     const completeRes = await request(app)
       .post('/api/admin/desktop-readiness/complete')

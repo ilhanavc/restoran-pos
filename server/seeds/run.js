@@ -162,6 +162,12 @@ try {
   console.log('   3 yazıcı oluşturuldu');
 
   // Doğrulama
+  const adminUser = db.prepare(`SELECT id FROM users WHERE email = 'admin@demo.com' AND business_id = ?`).get(businessId);
+  if (adminUser) {
+    db.prepare(`INSERT INTO settings (id, business_id, key, value, updated_at) VALUES (?, ?, 'app.setup', ?, datetime('now'))`)
+      .run(uuid(), businessId, JSON.stringify({ completedAt: new Date().toISOString(), completedBy: adminUser.id }));
+  }
+
   const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get();
   const productCount = db.prepare('SELECT COUNT(*) as c FROM products').get();
   const tableCountCheck = db.prepare('SELECT COUNT(*) as c FROM tables').get();
