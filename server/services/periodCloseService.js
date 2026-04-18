@@ -130,6 +130,15 @@ export function buildPeriodReport(businessId, date) {
   `).all(businessId, startAt, endAt);
   const refundTotal = round2(refundRows.reduce((sum, refund) => sum + Number(refund.amount || 0), 0));
 
+  const tipRows = db.prepare(`
+    SELECT t.*, COALESCE(u.full_name, 'Bilinmeyen') AS cashier_name
+    FROM tips t
+    LEFT JOIN users u ON u.id = t.created_by
+    WHERE t.business_id = ? AND t.created_at >= ? AND t.created_at < ?
+    ORDER BY t.created_at, t.id
+  `).all(businessId, startAt, endAt);
+  const tipTotal = round2(tipRows.reduce((sum, tip) => sum + Number(tip.amount || 0), 0));
+
   const closedOrders = db.prepare(`
     SELECT o.id, o.order_no, o.order_type, o.status, o.grand_total, o.discount_amount,
       o.created_at, o.closed_at,
@@ -193,6 +202,8 @@ export function buildPeriodReport(businessId, date) {
       total_discounts: round2(orderStats.total_discounts),
       refund_total: refundTotal,
       refund_count: refundRows.length,
+      tip_total: tipTotal,
+      tip_count: tipRows.length,
       net_revenue: round2(totalRevenue - refundTotal),
       dine_in_count: Number(orderStats.dine_in_count) || 0,
       takeaway_count: Number(orderStats.takeaway_count) || 0,
@@ -201,6 +212,7 @@ export function buildPeriodReport(businessId, date) {
     cashier_breakdown: Array.from(cashierBuckets.values()),
     order_type_breakdown: orderTypeBreakdown,
     refunds: refundRows,
+    tips: tipRows,
     closed_orders: closedOrders,
     cancelled_orders: cancelledOrders,
     open_orders: openOrders,

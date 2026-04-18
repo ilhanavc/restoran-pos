@@ -166,7 +166,8 @@ export function closeOrderAndTableIfPaid(order, businessId, userId) {
 // ---------------------------------------------------------------------------
 
 export function createPayment(businessId, userId, paymentData, idempotencyKey) {
-  const { order_id, payment_type, amount, cash_received, note, close_order, print_receipt, print_printer_id } = paymentData;
+  const { order_id, payment_type, amount, tip_amount, cash_received, note, close_order, print_receipt, print_printer_id } = paymentData;
+  const tipAmount = round2(tip_amount || 0);
 
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, businessId);
   if (!order) {
@@ -205,8 +206,9 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
   assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
 
   const paymentId = genId();
-  const cashIn = cash_received != null ? cash_received : amount;
-  const changeAmount = payment_type === 'cash' ? Math.max(0, cashIn - amount) : 0;
+  const cashIn = cash_received != null ? cash_received : amount + tipAmount;
+  const cashDue = round2(amount + tipAmount);
+  const changeAmount = payment_type === 'cash' ? Math.max(0, round2(cashIn - cashDue)) : 0;
   let closed = false;
 
   db.transaction(() => {
@@ -222,18 +224,24 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
       err.status = 400;
       throw err;
     }
-    if (payment_type === 'cash' && cashIn + 0.02 < amount) {
+    if (payment_type === 'cash' && cashIn + 0.02 < cashDue) {
       const err = new Error('Alınan nakit tutarı ödeme tutarından düşük olamaz');
       err.status = 400;
       throw err;
     }
     db.prepare(`INSERT INTO payments (
       id, business_id, order_id, payment_type, amount, cash_received, change_amount, note,
-      idempotency_key, source, created_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?)`).run(
+      idempotency_key, source, tip_amount, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'manual', ?, ?)`).run(
       paymentId, businessId, order_id, payment_type, amount, cashIn, changeAmount,
-      note || null, idempotencyKey, userId,
+      note || null, idempotencyKey, tipAmount, userId,
     );
+    if (tipAmount > 0) {
+      db.prepare(`
+        INSERT INTO tips (id, business_id, order_id, payment_id, amount, created_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(genId(), businessId, order_id, paymentId, tipAmount, userId);
+    }
     if (close_order) {
       closed = closeOrderAndTableIfPaid(order, businessId, userId);
       if (!closed) {
@@ -244,7 +252,7 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
     }
   })();
 
-  auditLog(businessId, userId, 'payment_received', 'payment', paymentId, { payment_type, amount });
+  auditLog(businessId, userId, 'payment_received', 'payment', paymentId, { payment_type, amount, tip_amount: tipAmount });
 
   const payment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
   const { updatedOrder } = buildPaymentOrderResponse(order_id);
@@ -276,7 +284,8 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
 }
 
 export function createSplitPayment(businessId, userId, paymentData, idempotencyKey) {
-  const { order_id, payment_type, cash_received, payer_no, payer_label, note, allocations } = paymentData;
+  const { order_id, payment_type, tip_amount, cash_received, payer_no, payer_label, note, allocations } = paymentData;
+  const tipAmount = round2(tip_amount || 0);
 
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(order_id, businessId);
   if (!order) {
@@ -374,24 +383,31 @@ export function createSplitPayment(businessId, userId, paymentData, idempotencyK
       throw err;
     }
 
-    const cashIn = cash_received != null ? Number(cash_received) : amount;
-    if (payment_type === 'cash' && cashIn + 0.02 < amount) {
+    const cashDue = round2(amount + tipAmount);
+    const cashIn = cash_received != null ? Number(cash_received) : cashDue;
+    if (payment_type === 'cash' && cashIn + 0.02 < cashDue) {
       const err = new Error('Alınan nakit tutarı ödeme tutarından düşük olamaz');
       err.status = 400;
       throw err;
     }
-    const changeAmount = payment_type === 'cash' ? Math.max(0, round2(cashIn - amount)) : 0;
+    const changeAmount = payment_type === 'cash' ? Math.max(0, round2(cashIn - cashDue)) : 0;
     const payerNo = payer_no != null ? Number(payer_no) : null;
     const payerLabel = payer_label || (payerNo ? `Kişi ${payerNo}` : null);
 
     db.prepare(`INSERT INTO payments (
       id, business_id, order_id, payment_type, payment_scope, payer_no, payer_label,
-      amount, cash_received, change_amount, note, idempotency_key, source, created_by
-    ) VALUES (?, ?, ?, ?, 'split_item', ?, ?, ?, ?, ?, ?, ?, 'manual_split', ?)`).run(
+      amount, cash_received, change_amount, note, idempotency_key, source, tip_amount, created_by
+    ) VALUES (?, ?, ?, ?, 'split_item', ?, ?, ?, ?, ?, ?, ?, 'manual_split', ?, ?)`).run(
       paymentId, businessId, order.id, payment_type,
       payerNo, payerLabel, amount, cashIn, changeAmount,
-      note || null, idempotencyKey, userId,
+      note || null, idempotencyKey, tipAmount, userId,
     );
+    if (tipAmount > 0) {
+      db.prepare(`
+        INSERT INTO tips (id, business_id, order_id, payment_id, amount, created_by)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `).run(genId(), businessId, order.id, paymentId, tipAmount, userId);
+    }
 
     const insertAllocation = db.prepare(`INSERT INTO payment_allocations (
       id, business_id, payment_id, order_id, order_item_id, quantity,
@@ -410,7 +426,7 @@ export function createSplitPayment(businessId, userId, paymentData, idempotencyK
   })();
 
   auditLog(businessId, userId, 'split_payment_received', 'payment', paymentId, {
-    payment_type, amount: createdPayment?.amount, payer_no: payer_no || null,
+    payment_type, amount: createdPayment?.amount, tip_amount: tipAmount, payer_no: payer_no || null,
   });
 
   const updatedOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id);

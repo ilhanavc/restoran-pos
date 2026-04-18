@@ -36,6 +36,11 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
       FROM refunds
       WHERE business_id = ? AND status = 'completed' AND created_at >= ? AND created_at < ?
     `).get(req.businessId, startAt, endAt);
+    const tipSummary = db.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total
+      FROM tips
+      WHERE business_id = ? AND created_at >= ? AND created_at < ?
+    `).get(req.businessId, startAt, endAt);
 
     const orderStats = db.prepare(`
       SELECT COUNT(*) as total_orders,
@@ -118,6 +123,8 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
       refundTotal: refundSummary.total,
       refundCount: refundSummary.count,
       netRevenue: revenue.total - refundSummary.total,
+      tipTotal: tipSummary.total,
+      tipCount: tipSummary.count,
       orderStats,
       paymentBreakdown,
       topProducts,

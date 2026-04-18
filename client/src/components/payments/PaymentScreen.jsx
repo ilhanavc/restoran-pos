@@ -45,6 +45,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const [paymentType, setPaymentType] = useState('cash');
   const [paymentAction, setPaymentAction] = useState('save');
   const [amountInput, setAmountInput] = useState('');
+  const [tipInput, setTipInput] = useState('');
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [lastChange, setLastChange] = useState(0);
@@ -66,6 +67,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const selectedAction = paymentActions.find((action) => action.key === paymentAction) || paymentActions[0];
   const requestedAmount = amountInput ? Number(amountInput) : totalDue;
   const payAmount = roundMoney(Math.min(Math.max(0, requestedAmount), totalDue));
+  const tipAmount = roundMoney(Math.max(0, Number(tipInput || 0)));
   const activeItems = (orderState.items || []).filter((item) => item.status !== 'cancelled');
   const contextParts = [
     orderState.waiter_name || orderState.user_name ? `Garson: ${orderState.waiter_name || orderState.user_name}` : null,
@@ -169,7 +171,8 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
         order_id: orderState.id,
         payment_type: paymentType,
         amount: payAmount,
-        cash_received: payAmount,
+        tip_amount: tipAmount,
+        cash_received: payAmount + tipAmount,
         close_order: selectedAction.closeOrder,
         print_receipt: selectedAction.printReceipt,
         print_printer_id: selectedAction.printReceipt ? printerId : null,
@@ -506,6 +509,30 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                   </div>
                   <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
                     İşlenecek tutar: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(payAmount)}</strong>
+                  </div>
+                </div>
+
+                <div style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  background: 'var(--bg-secondary)',
+                  padding: 16,
+                }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 850, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase' }}>
+                    Bahşiş
+                  </label>
+                  <input
+                    className="input input-lg"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={tipInput}
+                    onChange={(e) => setTipInput(e.target.value)}
+                    placeholder="0,00"
+                    style={{ fontSize: 18, fontWeight: 850, textAlign: 'center' }}
+                  />
+                  <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                    Toplam tahsilat: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(payAmount + tipAmount)}</strong>
                   </div>
                 </div>
               </>

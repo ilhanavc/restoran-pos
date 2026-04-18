@@ -574,6 +574,10 @@ export default function ReportsScreen() {
                     <div className="stat-card-value" style={{ color: 'var(--danger)' }}>{formatCurrency(periodReport.summary?.refund_total)}</div>
                   </div>
                   <div className="stat-card">
+                    <div className="stat-card-label">Bahşiş</div>
+                    <div className="stat-card-value" style={{ color: 'var(--accent)' }}>{formatCurrency(periodReport.summary?.tip_total)}</div>
+                  </div>
+                  <div className="stat-card">
                     <div className="stat-card-label">Net Tahsilat</div>
                     <div className="stat-card-value">{formatCurrency(periodReport.summary?.net_revenue)}</div>
                   </div>

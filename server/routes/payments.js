@@ -23,6 +23,7 @@ const createPaymentSchema = {
       errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card' }),
     }),
     amount: z.number().positive('Tutar sıfırdan büyük olmalıdır'),
+    tip_amount: z.number().min(0).optional().nullable(),
     cash_received: z.number().min(0).optional().nullable(),
     note: z.string().max(500).optional().nullable(),
     idempotency_key: z.string().trim().min(1).max(128).optional().nullable(),
@@ -38,6 +39,7 @@ const createSplitPaymentSchema = {
     payment_type: z.enum(['cash', 'card'], {
       errorMap: () => ({ message: 'Geçerli ödeme tipi: cash, card' }),
     }),
+    tip_amount: z.number().min(0).optional().nullable(),
     cash_received: z.number().min(0).optional().nullable(),
     payer_no: z.number().int().positive().max(999).optional().nullable(),
     payer_label: z.string().max(80).optional().nullable(),

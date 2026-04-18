@@ -250,6 +250,7 @@ export const migrations = [
     payer_no INTEGER,
     payer_label TEXT,
     amount REAL NOT NULL CHECK(amount > 0),
+    tip_amount REAL DEFAULT 0 CHECK(tip_amount >= 0),
     cash_received REAL DEFAULT 0 CHECK(cash_received >= 0),
     change_amount REAL DEFAULT 0 CHECK(change_amount >= 0),
     note TEXT,
@@ -298,6 +299,16 @@ export const migrations = [
     amount REAL NOT NULL CHECK(amount > 0),
     reason TEXT,
     status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed','voided')),
+    created_at TEXT DEFAULT (datetime('now')),
+    created_by TEXT REFERENCES users(id)
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS tips (
+    id TEXT PRIMARY KEY,
+    business_id TEXT NOT NULL REFERENCES businesses(id),
+    order_id TEXT NOT NULL REFERENCES orders(id),
+    payment_id TEXT NOT NULL REFERENCES payments(id),
+    amount REAL NOT NULL CHECK(amount > 0),
     created_at TEXT DEFAULT (datetime('now')),
     created_by TEXT REFERENCES users(id)
   )`,
@@ -414,6 +425,9 @@ export const migrations = [
   `CREATE INDEX IF NOT EXISTS idx_refunds_business_created ON refunds(business_id, created_at)`,
   `CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(order_id)`,
   `CREATE INDEX IF NOT EXISTS idx_refunds_payment ON refunds(payment_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_tips_business_created ON tips(business_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_tips_order ON tips(order_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_tips_payment ON tips(payment_id)`,
   `CREATE INDEX IF NOT EXISTS idx_incoming_calls_phone ON incoming_calls(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_audit_logs_business ON audit_logs(business_id)`,
   `CREATE INDEX IF NOT EXISTS idx_print_jobs_business_status_created ON print_jobs(business_id, status, created_at)`,
@@ -765,6 +779,9 @@ function ensureColumnMigrations() {
   if (paymentCols.length && !paymentCols.some((c) => c.name === 'source')) {
     db.prepare("ALTER TABLE payments ADD COLUMN source TEXT DEFAULT 'manual'").run();
   }
+  if (paymentCols.length && !paymentCols.some((c) => c.name === 'tip_amount')) {
+    db.prepare('ALTER TABLE payments ADD COLUMN tip_amount REAL DEFAULT 0 CHECK(tip_amount >= 0)').run();
+  }
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(business_id, order_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
 
   db.exec(`
@@ -785,6 +802,21 @@ function ensureColumnMigrations() {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_payment ON payment_allocations(payment_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order ON payment_allocations(order_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_allocations_order_item ON payment_allocations(order_item_id)`);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tips (
+      id TEXT PRIMARY KEY,
+      business_id TEXT NOT NULL REFERENCES businesses(id),
+      order_id TEXT NOT NULL REFERENCES orders(id),
+      payment_id TEXT NOT NULL REFERENCES payments(id),
+      amount REAL NOT NULL CHECK(amount > 0),
+      created_at TEXT DEFAULT (datetime('now')),
+      created_by TEXT REFERENCES users(id)
+    )
+  `);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tips_business_created ON tips(business_id, created_at)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tips_order ON tips(order_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_tips_payment ON tips(payment_id)`);
 
   // order_id NOT NULL → nullable (test job'ları için gerekli; SQLite tablo recreation gerektirir)
   pjCols = db.prepare('PRAGMA table_info(print_jobs)').all();
