@@ -36,6 +36,7 @@ const AttributeGroupsPage = lazy(() => import('./components/settings/AttributeGr
 const CallerIdScreen = lazy(() => import('./components/callerid/CallerIdScreen.jsx'));
 const ReservationsScreen = lazy(() => import('./components/reservations/ReservationsScreen.jsx'));
 const StockScreen = lazy(() => import('./components/stock/StockScreen.jsx'));
+const SetupWizardPage = lazy(() => import('./components/settings/SetupWizardPage.jsx'));
 
 function getShellTitle(pathname) {
   if (pathname === '/home') return 'Anasayfa';
@@ -81,6 +82,7 @@ export default function App() {
   const { user, loading, hasRole } = useAuth();
   const toast = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [setupCompleted, setSetupCompleted] = useState(null); // null=loading, true=done, false=wizard
   const [paymentOrder, setPaymentOrder] = useState(null);
   const [quickPaymentOrder, setQuickPaymentOrder] = useState(null);
   const paymentAfterCompleteRef = useRef('back');
@@ -102,6 +104,15 @@ export default function App() {
       return;
     }
     api.me().then((d) => d.display && applyDisplaySettings(d.display)).catch(() => {});
+  }, [user]);
+
+  // İlk kurulum wizard kontrolü — yalnızca Electron + admin rolü
+  useEffect(() => {
+    if (!user || user.role !== 'admin') { setSetupCompleted(true); return; }
+    if (!window.electronAPI?.setupIsCompleted) { setSetupCompleted(true); return; }
+    window.electronAPI.setupIsCompleted()
+      .then((done) => setSetupCompleted(done))
+      .catch(() => setSetupCompleted(true));
   }, [user]);
 
   useEffect(() => {
@@ -212,6 +223,14 @@ export default function App() {
       <Routes>
         <Route path="*" element={<LoginScreen />} />
       </Routes>
+    );
+  }
+
+  if (setupCompleted === false) {
+    return (
+      <Suspense fallback={null}>
+        <SetupWizardPage onComplete={() => setSetupCompleted(true)} />
+      </Suspense>
     );
   }
 

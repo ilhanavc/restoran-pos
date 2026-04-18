@@ -1383,6 +1383,28 @@ ipcMain.on('restart-app', () => {
 });
 
 // ---------------------------------------------------------------------------
+// İlk kurulum wizard IPC
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('setup:is-completed', () => {
+  const cfg = readPosConfig();
+  return cfg.setupCompleted === true;
+});
+
+ipcMain.handle('setup:complete', (_event, { businessName }) => {
+  const cfgPath = getPosConfigPath();
+  let cfg = {};
+  if (fs.existsSync(cfgPath)) {
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (_) { /* bozuk JSON */ }
+  }
+  cfg.setupCompleted = true;
+  if (businessName) cfg.businessName = businessName;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), 'utf8');
+  console.log('[electron] İlk kurulum tamamlandı, pos-config.json güncellendi.');
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
 // P3-1: Windows Görev Zamanlayıcı ile harici yedek kopyalama
 // ---------------------------------------------------------------------------
 

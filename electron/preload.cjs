@@ -81,6 +81,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Görevi hemen bir kez çalıştırır (robocopy test). */
   schedulerRunNow: () => ipcRenderer.invoke('backup:scheduler-run-now'),
 
+  /** İlk kurulum wizard tamamlandı mı? */
+  setupIsCompleted: () => ipcRenderer.invoke('setup:is-completed'),
+
+  /** İlk kurulum tamamlandı olarak işaretle; businessName opsiyonel. */
+  setupComplete: (data) => ipcRenderer.invoke('setup:complete', data),
+
   /** Electron ortamında çalışıp çalışmadığını döner (browser'dan ayırt etmek için). */
   isElectron: true,
 });

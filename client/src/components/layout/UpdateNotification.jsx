@@ -11,6 +11,7 @@ export default function UpdateNotification() {
   const [progress, setProgress] = useState(null);   // { percent }
   const [downloaded, setDownloaded] = useState(null); // { version }
   const [dismissed, setDismissed] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -86,6 +87,31 @@ export default function UpdateNotification() {
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
           Güncelleme arka planda indiriliyor.
         </p>
+      )}
+
+      {update?.releaseNotes && !downloaded && (
+        <div>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ padding: '2px 0', fontSize: 11 }}
+            onClick={() => setNotesOpen((o) => !o)}
+          >
+            {notesOpen ? 'Değişiklikleri gizle ▲' : 'Değişiklikleri gör ▼'}
+          </button>
+          {notesOpen && (
+            <div style={{
+              marginTop: 6, fontSize: 11, color: 'var(--text-secondary)',
+              maxHeight: 140, overflowY: 'auto',
+              background: 'var(--bg-secondary)', borderRadius: 4, padding: '6px 8px',
+              whiteSpace: 'pre-wrap', lineHeight: 1.5,
+            }}>
+              {typeof update.releaseNotes === 'string'
+                ? update.releaseNotes
+                : JSON.stringify(update.releaseNotes, null, 2)}
+            </div>
+          )}
+        </div>
       )}
 
       {downloaded && (
