@@ -94,6 +94,23 @@ describe('refund flow', () => {
       reason: 'Müşteri iadesi',
       status: 'completed',
     });
+
+    const mutation = dbRef.current.prepare(`
+      SELECT * FROM entity_mutations WHERE entity_table = 'refunds' AND entity_id = ?
+    `).get(res.body.refunds[0].id);
+    expect(mutation).toMatchObject({
+      business_id: seeds.businessId,
+      action: 'refund',
+      actor_user_id: seeds.userId,
+      reason: 'Müşteri iadesi',
+      source: 'api.refunds.full_order',
+    });
+    expect(JSON.parse(mutation.after_json)).toMatchObject({
+      id: res.body.refunds[0].id,
+      order_id: orderId,
+      payment_id: paymentId,
+      amount: 150,
+    });
   });
 
   it('prevents refunding more than the remaining payment amount', async () => {
@@ -104,6 +121,11 @@ describe('refund flow', () => {
       .set('Authorization', authHeader)
       .send({ payment_id: paymentId, amount: 60 })
       .expect(201);
+
+    const mutationCount = dbRef.current.prepare(`
+      SELECT COUNT(*) AS c FROM entity_mutations WHERE entity_table = 'refunds' AND action = 'refund'
+    `).get();
+    expect(mutationCount.c).toBe(1);
 
     const res = await request(app)
       .post('/api/refunds')

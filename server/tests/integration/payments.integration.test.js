@@ -208,6 +208,27 @@ describe('full payments', () => {
 
     const payments = dbRef.current.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(orderId);
     expect(payments.c).toBe(1);
+
+    const mutation = dbRef.current.prepare(`
+      SELECT * FROM entity_mutations WHERE entity_table = 'payments' AND entity_id = ?
+    `).get(first.body.payment.id);
+    expect(mutation).toMatchObject({
+      business_id: seeds.businessId,
+      action: 'create',
+      actor_user_id: seeds.userId,
+      request_id: null,
+      source: 'api.payments.create',
+    });
+    expect(JSON.parse(mutation.after_json)).toMatchObject({
+      id: first.body.payment.id,
+      order_id: orderId,
+      amount: 160,
+    });
+
+    const mutationCount = dbRef.current.prepare(`
+      SELECT COUNT(*) AS c FROM entity_mutations WHERE entity_table = 'payments' AND entity_id = ?
+    `).get(first.body.payment.id);
+    expect(mutationCount.c).toBe(1);
   });
 
   it('deduplicates repeated split payment requests with an idempotency key', async () => {
@@ -243,6 +264,17 @@ describe('full payments', () => {
     const allocations = dbRef.current.prepare('SELECT COUNT(*) AS c FROM payment_allocations WHERE order_id = ?').get(orderId);
     expect(payments.c).toBe(1);
     expect(allocations.c).toBe(1);
+
+    const mutation = dbRef.current.prepare(`
+      SELECT action, source, after_json FROM entity_mutations WHERE entity_table = 'payments' AND entity_id = ?
+    `).get(first.body.payment.id);
+    expect(mutation.action).toBe('create');
+    expect(mutation.source).toBe('api.payments.split');
+    expect(JSON.parse(mutation.after_json)).toMatchObject({
+      id: first.body.payment.id,
+      payment_scope: 'split_item',
+      amount: 160,
+    });
   });
 
   it('rejects a second payment that exceeds the remaining balance after a partial payment', async () => {

@@ -3,6 +3,7 @@ import { genId, auditLog } from '../utils/helpers.js';
 import { enqueueReceiptJobForClosedOrder, processPendingJobsSync } from './printJobs.js';
 import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
+import { recordEntityMutation } from './entityMutationService.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -165,7 +166,7 @@ export function closeOrderAndTableIfPaid(order, businessId, userId) {
 // Domain operations
 // ---------------------------------------------------------------------------
 
-export function createPayment(businessId, userId, paymentData, idempotencyKey) {
+export function createPayment(businessId, userId, paymentData, idempotencyKey, auditContext = {}) {
   const { order_id, payment_type, amount, tip_amount, cash_received, note, close_order, print_receipt, print_printer_id } = paymentData;
   const tipAmount = round2(tip_amount || 0);
 
@@ -236,6 +237,18 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
       paymentId, businessId, order_id, payment_type, amount, cashIn, changeAmount,
       note || null, idempotencyKey, tipAmount, userId,
     );
+    const insertedPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
+    recordEntityMutation({
+      businessId,
+      entityTable: 'payments',
+      entityId: paymentId,
+      action: 'create',
+      after: insertedPayment,
+      actorUserId: userId,
+      reason: note || null,
+      requestId: auditContext.requestId || null,
+      source: 'api.payments.create',
+    });
     if (tipAmount > 0) {
       db.prepare(`
         INSERT INTO tips (id, business_id, order_id, payment_id, amount, created_by)
@@ -283,7 +296,7 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey) {
   return { payment, order: updatedOrder };
 }
 
-export function createSplitPayment(businessId, userId, paymentData, idempotencyKey) {
+export function createSplitPayment(businessId, userId, paymentData, idempotencyKey, auditContext = {}) {
   const { order_id, payment_type, tip_amount, cash_received, payer_no, payer_label, note, allocations } = paymentData;
   const tipAmount = round2(tip_amount || 0);
 
@@ -423,6 +436,17 @@ export function createSplitPayment(businessId, userId, paymentData, idempotencyK
     }
 
     createdPayment = db.prepare('SELECT * FROM payments WHERE id = ?').get(paymentId);
+    recordEntityMutation({
+      businessId,
+      entityTable: 'payments',
+      entityId: paymentId,
+      action: 'create',
+      after: createdPayment,
+      actorUserId: userId,
+      reason: note || null,
+      requestId: auditContext.requestId || null,
+      source: 'api.payments.split',
+    });
   })();
 
   auditLog(businessId, userId, 'split_payment_received', 'payment', paymentId, {

@@ -72,7 +72,9 @@ router.get('/orders/:orderId/split-state', authorize('admin', 'cashier'), (req, 
 router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (req, res) => {
   try {
     const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotency_key, req.get('Idempotency-Key'));
-    const result = createPayment(req.businessId, req.user.id, req.body, idempotencyKey);
+    const result = createPayment(req.businessId, req.user.id, req.body, idempotencyKey, {
+      requestId: req.requestId || req.get('x-request-id') || null,
+    });
     if (result.idempotent_replay) return res.status(200).json({ ...result });
     emitToRoom(req.businessId, 'order:updated', { order: result.order });
     res.status(201).json(result);
@@ -89,7 +91,9 @@ router.post('/', authorize('admin', 'cashier'), validate(createPaymentSchema), (
 router.post('/split', authorize('admin', 'cashier'), validate(createSplitPaymentSchema), (req, res) => {
   try {
     const idempotencyKey = normalizeIdempotencyKey(req.body?.idempotency_key, req.get('Idempotency-Key'));
-    const result = createSplitPayment(req.businessId, req.user.id, req.body, idempotencyKey);
+    const result = createSplitPayment(req.businessId, req.user.id, req.body, idempotencyKey, {
+      requestId: req.requestId || req.get('x-request-id') || null,
+    });
     if (result.idempotent_replay) return res.status(200).json({ ...result });
     emitToRoom(req.businessId, 'order:updated', { order: result.order });
     res.status(201).json(result);

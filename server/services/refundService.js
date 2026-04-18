@@ -1,6 +1,7 @@
 import db from '../config/database.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
+import { recordEntityMutation } from './entityMutationService.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -52,7 +53,7 @@ function assertPaymentRefundable(payment, businessId, amount) {
   return remaining;
 }
 
-export function createRefundForPayment(businessId, userId, { payment_id, amount, reason }) {
+export function createRefundForPayment(businessId, userId, { payment_id, amount, reason }, auditContext = {}) {
   const refundAmount = round2(amount);
   const payment = db.prepare(`
     SELECT p.*, o.status AS order_status
@@ -63,10 +64,24 @@ export function createRefundForPayment(businessId, userId, { payment_id, amount,
   assertPaymentRefundable(payment, businessId, refundAmount);
 
   const refundId = genId();
-  db.prepare(`
-    INSERT INTO refunds (id, business_id, order_id, payment_id, amount, reason, status, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
-  `).run(refundId, businessId, payment.order_id, payment.id, refundAmount, reason || null, userId);
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO refunds (id, business_id, order_id, payment_id, amount, reason, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, 'completed', ?)
+    `).run(refundId, businessId, payment.order_id, payment.id, refundAmount, reason || null, userId);
+    const insertedRefund = db.prepare('SELECT * FROM refunds WHERE id = ?').get(refundId);
+    recordEntityMutation({
+      businessId,
+      entityTable: 'refunds',
+      entityId: refundId,
+      action: 'refund',
+      after: insertedRefund,
+      actorUserId: userId,
+      reason: reason || null,
+      requestId: auditContext.requestId || null,
+      source: 'api.refunds.create',
+    });
+  })();
 
   auditLog(businessId, userId, 'refund_created', 'refund', refundId, {
     order_id: payment.order_id,
@@ -76,7 +91,7 @@ export function createRefundForPayment(businessId, userId, { payment_id, amount,
   return db.prepare('SELECT * FROM refunds WHERE id = ?').get(refundId);
 }
 
-export function createFullRefundForOrder(businessId, userId, orderId, reason) {
+export function createFullRefundForOrder(businessId, userId, orderId, reason, auditContext = {}) {
   const order = db.prepare('SELECT * FROM orders WHERE id = ? AND business_id = ?').get(orderId, businessId);
   if (!order) {
     const err = new Error('Sipariş bulunamadı');
@@ -111,7 +126,19 @@ export function createFullRefundForOrder(businessId, userId, orderId, reason) {
         reason || 'Tam sipariş iadesi',
         userId,
       );
-      created.push(db.prepare('SELECT * FROM refunds WHERE id = ?').get(refundId));
+      const insertedRefund = db.prepare('SELECT * FROM refunds WHERE id = ?').get(refundId);
+      recordEntityMutation({
+        businessId,
+        entityTable: 'refunds',
+        entityId: refundId,
+        action: 'refund',
+        after: insertedRefund,
+        actorUserId: userId,
+        reason: reason || 'Tam sipariş iadesi',
+        requestId: auditContext.requestId || null,
+        source: 'api.refunds.full_order',
+      });
+      created.push(insertedRefund);
     }
     return created;
   })();

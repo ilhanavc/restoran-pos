@@ -39,7 +39,9 @@ router.get('/orders/:orderId/payments', authorize('admin', 'cashier'), (req, res
 
 router.post('/', authorize('admin', 'cashier'), validate(createRefundSchema), (req, res) => {
   try {
-    const refund = createRefundForPayment(req.businessId, req.user.id, req.body);
+    const refund = createRefundForPayment(req.businessId, req.user.id, req.body, {
+      requestId: req.requestId || req.get('x-request-id') || null,
+    });
     res.status(201).json({ refund });
   } catch (err) {
     if (err.status === 409) return res.status(409).json({ error: err.message });
@@ -57,6 +59,7 @@ router.post('/orders/:orderId/full', authorize('admin', 'cashier'), validate(ful
       req.user.id,
       req.params.orderId,
       req.body.reason,
+      { requestId: req.requestId || req.get('x-request-id') || null },
     );
     res.status(201).json(result);
   } catch (err) {
