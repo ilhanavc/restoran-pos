@@ -165,12 +165,20 @@ export function recordTakeawayDeliveryPaymentIfNeeded(order, businessId, userId)
   ).get(businessId, order.id, idempotencyKey);
   if (existing) return existing.id;
 
+  const plannedType = ['cash', 'card'].includes(order?.takeaway_planned_payment_type)
+    ? order.takeaway_planned_payment_type
+    : 'other';
+  const cashReceived = plannedType === 'cash' ? due : 0;
+  const note = plannedType === 'other'
+    ? 'Paket teslim edildiğinde otomatik ödendi olarak işlendi'
+    : `Paket teslim edildi — planlanan ödeme tipi: ${plannedType === 'cash' ? 'Nakit' : 'Kredi Kartı'}`;
+
   db.prepare(`INSERT INTO payments (
     id, business_id, order_id, payment_type, amount, cash_received, change_amount,
     amount_cents, change_cents, tip_cents, note, idempotency_key, source, created_by
-  ) VALUES (?, ?, ?, 'other', ?, ?, 0, ?, 0, 0, ?, ?, 'system_takeaway_delivery', ?)`).run(
-    paymentId, businessId, order.id, due, due, toCents(due),
-    'Paket teslim edildiğinde otomatik ödendi olarak işlendi',
+  ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 0, 0, ?, ?, 'system_takeaway_delivery', ?)`).run(
+    paymentId, businessId, order.id, plannedType, due, cashReceived, toCents(due),
+    note,
     idempotencyKey, userId,
   );
   return paymentId;
@@ -343,7 +351,7 @@ export function autoCancelOrderIfNoActiveItems(orderId, businessId, userId) {
 
 export function createOrder(businessId, branchId, userId, orderData, auditContext = {}) {
   const { table_id, order_type, customer_id, call_log_id, items, note, guest_count,
-    delivery_address, delivery_note, courier_note } = orderData;
+    delivery_address, delivery_note, courier_note, takeaway_planned_payment_type } = orderData;
 
   const resolvedType = order_type || 'dine_in';
   assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
@@ -351,6 +359,15 @@ export function createOrder(businessId, branchId, userId, orderData, auditContex
     const err = new Error('Paket siparişlerde masa kimliği (table_id) gönderilemez');
     err.isBadRequest = true;
     throw err;
+  }
+  let resolvedPlannedPaymentType = null;
+  if (resolvedType === 'takeaway' && takeaway_planned_payment_type != null && takeaway_planned_payment_type !== '') {
+    if (!['cash', 'card'].includes(takeaway_planned_payment_type)) {
+      const err = new Error('Geçersiz ödeme tipi');
+      err.isBadRequest = true;
+      throw err;
+    }
+    resolvedPlannedPaymentType = takeaway_planned_payment_type;
   }
 
   const orderId = genId();
@@ -398,8 +415,8 @@ export function createOrder(businessId, branchId, userId, orderData, auditContex
       subtotal, subtotal_cents, discount_cents, vat_total, grand_total, grand_total_cents,
       pricing_policy_version, service_charge_rate, service_charge_amount, service_charge_cents,
       note, delivery_address, delivery_note, courier_note, guest_count,
-      table_name_snapshot, customer_name_snapshot, user_name_snapshot, status, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)`).run(
+      table_name_snapshot, customer_name_snapshot, user_name_snapshot, takeaway_planned_payment_type, status, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'saved', ?)`).run(
       orderId, businessId, branchId, orderNo, resolvedType,
       table_id || null, customer_id || null, userId,
       subtotal, toCents(subtotal), grandTotal, toCents(grandTotal),
@@ -408,6 +425,7 @@ export function createOrder(businessId, branchId, userId, orderData, auditContex
       delivery_address || null, delivery_note || null, courier_note || null,
       guest_count || 0,
       headerSnapshot.table_name_snapshot, headerSnapshot.customer_name_snapshot, headerSnapshot.user_name_snapshot,
+      resolvedPlannedPaymentType,
       userId,
     );
 
@@ -797,7 +815,7 @@ export function updateOrderItem(businessId, orderId, itemId, userId, updates) {
 
 export function updateTakeawayDelivery(businessId, orderId, userId, action) {
   const o = db.prepare(`
-    SELECT id, order_type, status, takeaway_out_at, takeaway_delivered_at, grand_total
+    SELECT id, order_type, status, takeaway_out_at, takeaway_delivered_at, grand_total, takeaway_planned_payment_type
     FROM orders WHERE id = ? AND business_id = ?
   `).get(orderId, businessId);
   if (!o) {

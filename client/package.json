@@ -15,8 +15,10 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "apexcharts": "^5.10.6",
     "lucide-react": "^0.383.0",
     "react": "^18.2.0",
+    "react-apexcharts": "^2.1.0",
     "react-dom": "^18.2.0",
     "react-is": "^18.3.1",
     "react-router-dom": "^6.20.0",

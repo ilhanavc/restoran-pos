@@ -12,6 +12,7 @@ import { reservationsMixin } from './api/reservations.js';
 import { stockMixin } from './api/stock.js';
 import { waiterCallMixin } from './api/waiterCall.js';
 import { adminMixin } from './api/admin.js';
+import { dashboardMixin } from './api/dashboard.js';
 
 class ApiService extends ApiHttpClient {}
 
@@ -30,6 +31,7 @@ Object.assign(
   stockMixin,
   waiterCallMixin,
   adminMixin,
+  dashboardMixin,
 );
 
 export const api = new ApiService();

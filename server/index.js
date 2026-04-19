@@ -30,6 +30,7 @@ import stockRoutes from './routes/stock.js';
 import waiterCallRoutes from './routes/waiterCall.js';
 import attributesRoutes from './routes/attributes.js';
 import mobileRoutes from './routes/mobile.js';
+import dashboardRoutes from './routes/dashboard.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
 
 const app = express();
@@ -143,6 +144,7 @@ app.use('/api/stock', stockRoutes);
 app.use('/api/waiter-call', waiterCallLimiter, waiterCallRoutes);
 app.use('/api/attributes', attributesRoutes);
 app.use('/api/mobile', mobileRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {

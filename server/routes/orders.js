@@ -60,6 +60,7 @@ const createOrderSchema = {
     delivery_address: z.string().max(500).optional().nullable(),
     delivery_note: z.string().max(500).optional().nullable(),
     courier_note: z.string().max(500).optional().nullable(),
+    takeaway_planned_payment_type: z.enum(['cash', 'card']).optional().nullable(),
   }),
 };
 
@@ -335,7 +336,12 @@ router.get('/:id', staffAndKitchen, (req, res) => {
     `).get(req.params.id, req.businessId);
     if (!order) return res.status(404).json({ error: 'Sipariş bulunamadı' });
 
-    order.items = db.prepare(`SELECT * FROM order_items WHERE order_id = ? ORDER BY created_at`).all(order.id);
+    order.items = db.prepare(`
+      SELECT oi.*, u.full_name as created_by_name
+      FROM order_items oi
+      LEFT JOIN users u ON oi.created_by = u.id
+      WHERE oi.order_id = ? ORDER BY oi.created_at
+    `).all(order.id);
     order.payments = db.prepare(`SELECT * FROM payments WHERE order_id = ? ORDER BY created_at`).all(order.id);
     res.json(order);
   } catch (err) {
@@ -352,9 +358,7 @@ router.patch('/:id/customer', staff, (req, res) => {
     if (ORDER_STATUSES_CLOSED.includes(order.status)) {
       return res.status(400).json({ error: 'Kapalı siparişte müşteri değiştirilemez' });
     }
-    if (order.order_type !== 'dine_in') {
-      return res.status(400).json({ error: 'Sadece salon siparişlerinde müşteri atanabilir' });
-    }
+    // Hem salon hem paket siparişlerde müşteri değiştirilebilir
 
     let cid = customer_id != null && customer_id !== '' ? String(customer_id) : null;
     let customerNameSnapshot = null;

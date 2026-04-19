@@ -2,7 +2,7 @@ import { Suspense, lazy, useState, useCallback, useEffect, useRef } from 'react'
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext.jsx';
 import { useToast } from './context/ToastContext.jsx';
-import { Menu, X } from 'lucide-react';
+import { Menu, X, ArrowLeft } from 'lucide-react';
 import Sidebar from './components/layout/Sidebar.jsx';
 import LoginScreen from './components/auth/LoginScreen.jsx';
 import api from './services/api.js';
@@ -96,6 +96,7 @@ export default function App() {
   const location = useLocation();
   const isOrderScreen = location.pathname.startsWith('/order/');
   const shellTitle = !isOrderScreen ? getShellTitle(location.pathname) : null;
+  const isSettingsSubpage = location.pathname.startsWith('/settings/') && location.pathname !== '/settings';
   const canSeeTakeawayQuickButton = hasRole('admin', 'cashier');
   const defaultPath = hasRole('admin', 'cashier')
     ? '/home'
@@ -257,6 +258,18 @@ export default function App() {
             <div className="shell-inline-title" aria-hidden={sidebarOpen}>
               {shellTitle}
             </div>
+          ) : null}
+          {isSettingsSubpage ? (
+            <button
+              type="button"
+              className="shell-back-btn"
+              onClick={() => navigate('/settings')}
+              aria-label="Ayarlara geri dön"
+              title="Ayarlara geri dön"
+            >
+              <ArrowLeft size={16} />
+              <span>Geri</span>
+            </button>
           ) : null}
           {sidebarOpen && (
             <div className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} />

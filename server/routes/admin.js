@@ -2368,12 +2368,18 @@ router.get('/entity-mutations', (req, res) => {
     const entityTable = req.query.entity_table || null;
     const action = req.query.action || null;
     const actorUserId = req.query.actor_user_id || null;
+    const entityId = req.query.entity_id || null;
+    const fromTs = req.query.from || null;
+    const toTs = req.query.to || null;
 
     let where = 'WHERE m.business_id = ?';
     const params = [req.businessId];
     if (entityTable) { where += ' AND m.entity_table = ?'; params.push(entityTable); }
     if (action) { where += ' AND m.action = ?'; params.push(action); }
     if (actorUserId) { where += ' AND m.actor_user_id = ?'; params.push(actorUserId); }
+    if (entityId) { where += ' AND m.entity_id = ?'; params.push(entityId); }
+    if (fromTs) { where += ' AND m.created_at >= ?'; params.push(fromTs); }
+    if (toTs) { where += ' AND m.created_at <= ?'; params.push(toTs); }
 
     const rows = db.prepare(`
       SELECT m.id, m.entity_table, m.entity_id, m.action,

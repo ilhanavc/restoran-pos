@@ -5,7 +5,7 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useCatalog } from './hooks/useCatalog.js';
 import { useCart } from './hooks/useCart.js';
-import { formatCurrency, ORDER_ITEM_LINE_STATUS } from '../../constants/index.js';
+import { formatCurrency } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
   canEditOrderItem,
@@ -18,12 +18,14 @@ import {
 } from '../../utils/orderActionPolicy.js';
 import {
   Search, Plus, Minus, Trash2, Save,
-  CreditCard, X, ArrowRightLeft, Phone, User, ChevronLeft,
+  CreditCard, X, ArrowRightLeft, Phone, User, ChevronLeft, Banknote, Printer,
 } from 'lucide-react';
 import OrderProductDetailModal from './OrderProductDetailModal.jsx';
 import ModifierModal from './ModifierModal.jsx';
 import ClipboardEmpty from './ClipboardEmpty.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import CustomerDetailsModal from './CustomerDetailsModal.jsx';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 
 function toOrderAttributePayload(selectedAttributes = []) {
   const byGroup = new Map();
@@ -78,12 +80,28 @@ export default function OrderScreen({
   const [takeawayPhone, setTakeawayPhone] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(customer ?? null);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [customerDetailsOpen, setCustomerDetailsOpen] = useState(false);
+  const [pendingCustomerChange, setPendingCustomerChange] = useState(null); // { ...customer }
+  const [savingCustomerChange, setSavingCustomerChange] = useState(false);
+  const [printSelectorOpen, setPrintSelectorOpen] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerList, setCustomerList] = useState([]);
   const [customerListLoading, setCustomerListLoading] = useState(false);
   const [newCustomerMode, setNewCustomerMode] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', address_title: 'Ev' });
+  const [newCustomer, setNewCustomer] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '',
+    phone_2: '',
+    address: '',
+    address_title: 'Ev',
+    address_note: '',
+    province: '',
+    district: '',
+    neighborhood: '',
+  });
   const [selectedTakeawayAddress, setSelectedTakeawayAddress] = useState(customer?.selectedAddress || '');
+  const [paymentTypeModalOpen, setPaymentTypeModalOpen] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const toast = useToast();
   const { hasRole } = useAuth();
@@ -229,12 +247,16 @@ export default function OrderScreen({
     removeCartItem(index);
   };
 
-  const handleSaveOrder = async ({ skipNavigate = false } = {}) => {
+  const handleSaveOrder = async ({ skipNavigate = false, plannedPaymentType = null } = {}) => {
     const draftState = canSaveOrderDraft({ cartItems, orderType, selectedCustomer });
     if (!draftState.ok && draftState.reason === 'empty') { toast.error('Sipariş boş'); return null; }
     if (!draftState.ok && draftState.reason === 'customer-required') {
       openCustomerModal();
       toast.error('Paket sipariş için müşteri seçimi zorunludur');
+      return null;
+    }
+    if (orderType === 'takeaway' && !existingOrder && !plannedPaymentType) {
+      setPaymentTypeModalOpen(true);
       return null;
     }
     setSaving(true);
@@ -261,6 +283,7 @@ export default function OrderScreen({
         call_log_id: callLogId != null ? String(callLogId).trim() || null : null,
         guest_count: table?.guest_count || 0,
         delivery_address: selectedTakeawayAddress || customer?.selectedAddress || null,
+        takeaway_planned_payment_type: orderType === 'takeaway' ? plannedPaymentType : null,
         items: cartItems.map((ci) => ({
           product_id: ci.product_id,
           quantity: ci.quantity,
@@ -408,6 +431,11 @@ export default function OrderScreen({
   };
 
   const loadCustomersForModal = async (q = '') => {
+    if (orderType === 'takeaway' && q.length < 2) {
+      setCustomerList([]);
+      setCustomerListLoading(false);
+      return;
+    }
     setCustomerListLoading(true);
     try {
       let data;
@@ -430,8 +458,23 @@ export default function OrderScreen({
     setCustomerModalOpen(true);
     setCustomerSearchQuery('');
     setNewCustomerMode(false);
-    setNewCustomer({ full_name: '', phone: '', address: '', address_title: 'Ev' });
-    loadCustomersForModal('');
+    setNewCustomer({
+      first_name: '',
+      last_name: '',
+      phone: '',
+      phone_2: '',
+      address: '',
+      address_title: 'Ev',
+      address_note: '',
+      province: '',
+      district: '',
+      neighborhood: '',
+    });
+    if (orderType === 'takeaway') {
+      setCustomerList([]);
+    } else {
+      loadCustomersForModal('');
+    }
   };
 
   const handleCustomerSearchInput = (q) => {
@@ -439,7 +482,11 @@ export default function OrderScreen({
     if (q.length >= 2) {
       loadCustomersForModal(q);
     } else if (q === '') {
-      loadCustomersForModal('');
+      if (orderType === 'takeaway') {
+        setCustomerList([]);
+      } else {
+        loadCustomersForModal('');
+      }
     }
   };
 
@@ -462,6 +509,10 @@ export default function OrderScreen({
       setSelectedTakeawayAddress(defaultAddr?.address || '');
     }
     setCustomerModalOpen(false);
+    if (orderType === 'takeaway' && !existingOrder) {
+      setPaymentTypeModalOpen(true);
+      return;
+    }
     if (existingOrder?.id && !isOrderClosedOrCancelled(existingOrder)) {
       try {
         setSaving(true);
@@ -503,8 +554,22 @@ export default function OrderScreen({
       setSelectedTakeawayAddress(newCustomer.address || '');
       setCustomerModalOpen(false);
       setNewCustomerMode(false);
-      setNewCustomer({ full_name: '', phone: '', address: '', address_title: 'Ev' });
+      setNewCustomer({
+      first_name: '',
+      last_name: '',
+      phone: '',
+      phone_2: '',
+      address: '',
+      address_title: 'Ev',
+      address_note: '',
+      province: '',
+      district: '',
+      neighborhood: '',
+    });
       toast.success('Müşteri oluşturuldu');
+      if (orderType === 'takeaway' && !existingOrder) {
+        setPaymentTypeModalOpen(true);
+      }
     } catch (err) {
       toast.error(err.message || 'Müşteri oluşturulamadı');
     }
@@ -567,10 +632,16 @@ export default function OrderScreen({
       {/* Sol: üst bar + arama + yatay kategoriler + ürün ızgarası */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
         <div className="order-screen-topbar">
-          <button type="button" className="order-screen-back-zone" onClick={onBack} title="Masalar ekranına dön">
-            <span className="order-screen-back-zone-icon" aria-hidden="true">
+          <div className="order-screen-back-zone">
+            <button
+              type="button"
+              className="order-screen-back-zone-icon"
+              onClick={onBack}
+              title="Masalar ekranına dön"
+              aria-label="Masalar ekranına dön"
+            >
               <ChevronLeft size={20} />
-            </span>
+            </button>
             <span className="order-screen-back-zone-body">
               <span className="order-screen-table-title">
                 {table
@@ -583,10 +654,31 @@ export default function OrderScreen({
                 <span className="order-screen-area-pill">{table.area_name}</span>
               )}
               {orderType === 'dine_in' && selectedCustomer?.full_name && (
-                <span className="order-screen-customer-line">{selectedCustomer.full_name}</span>
+                <span
+                  className="order-screen-customer-line order-screen-customer-line-clickable"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setCustomerDetailsOpen(true); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCustomerDetailsOpen(true);
+                    }
+                  }}
+                  title="Müşteri bilgilerini düzenle"
+                >
+                  {selectedCustomer.full_name}
+                </span>
               )}
               {orderType === 'takeaway' && selectedCustomer?.full_name && (
-                <span className="order-screen-customer-line">{selectedCustomer.full_name}</span>
+                <span
+                  className="order-screen-customer-line"
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                  style={{ pointerEvents: 'auto' }}
+                >
+                  {selectedCustomer.full_name}
+                </span>
               )}
               {orderType === 'takeaway' && (customer || (takeawayPhone && takeawayPhone.trim() !== '')) && (
                 <span className="order-screen-customer-line order-screen-takeaway-phone">
@@ -595,7 +687,7 @@ export default function OrderScreen({
                 </span>
               )}
             </span>
-          </button>
+          </div>
 
           {orderType === 'dine_in' && table && (
             <>
@@ -613,9 +705,36 @@ export default function OrderScreen({
             </>
           )}
 
-          {existingOrder && (
-            <span className="badge badge-info order-screen-order-badge" style={{ fontSize: 11 }}>#{existingOrder.order_no}</span>
+          {orderType === 'takeaway' && selectedCustomer?.id && (
+            <>
+              <span className="order-screen-topbar-divider" aria-hidden />
+              <button
+                type="button"
+                className="order-screen-topbar-icon-btn"
+                onClick={() => setCustomerDetailsOpen(true)}
+                disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
+                title="Müşteri bilgileri"
+              >
+                <User size={22} strokeWidth={2} />
+              </button>
+            </>
           )}
+
+          {existingOrder?.id && (
+            <>
+              <span className="order-screen-topbar-divider" aria-hidden />
+              <button
+                type="button"
+                className="order-screen-topbar-icon-btn"
+                onClick={() => setPrintSelectorOpen(true)}
+                disabled={saving}
+                title="Yazdır"
+              >
+                <Printer size={22} strokeWidth={2} />
+              </button>
+            </>
+          )}
+
 
           <div className="order-screen-topbar-search">
             <div style={{ position: 'relative', width: '100%' }}>
@@ -865,8 +984,6 @@ export default function OrderScreen({
               </div>
               {allExistingItems.filter((i) => i.status !== 'cancelled').map((item) => {
                 const mods = JSON.parse(item.modifiers || '[]');
-                const st = ORDER_ITEM_LINE_STATUS[item.status] || ORDER_ITEM_LINE_STATUS.sent;
-                const lineBadge = item.status && item.status !== 'new' ? st : null;
                 const canEditQty = canEditOrderItem(item, existingOrder);
                 return (
                   <div
@@ -910,14 +1027,30 @@ export default function OrderScreen({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600 }}>{item.product_name}</span>
-                        {lineBadge && (
-                          <span style={{
-                            fontSize: 8, fontWeight: 800, padding: '2px 6px', borderRadius: 4,
-                            background: lineBadge.bg, color: lineBadge.color,
-                          }}>
-                            {lineBadge.short}
-                          </span>
-                        )}
+                        {(() => {
+                          const parts = [];
+                          if (item.created_by_name) parts.push(item.created_by_name);
+                          if (item.created_at) {
+                            const d = new Date(item.created_at.includes('T') ? item.created_at : item.created_at.replace(' ', 'T') + 'Z');
+                            if (!Number.isNaN(d.getTime())) {
+                              parts.push(d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }));
+                            }
+                          }
+                          return parts.length > 0 ? (
+                            <span style={{
+                              fontSize: 8,
+                              fontWeight: 800,
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              background: 'var(--warning-muted)',
+                              color: 'var(--warning)',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.03em',
+                            }}>
+                              {parts.join(' · ')}
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                       {item.portion_label && (
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{item.portion_label}</div>
@@ -1101,7 +1234,40 @@ export default function OrderScreen({
             </div>
           )}
 
-          {hasUnsavedChanges ? (
+          {pendingCustomerChange ? (
+            <>
+              <div style={{ fontSize: 13, lineHeight: 1.3, marginBottom: 6, color: 'var(--text-muted)' }}>
+                Müşteri değiştirilecek:
+                <strong style={{ marginLeft: 6, color: 'var(--text)' }}>
+                  {pendingCustomerChange.full_name || `${pendingCustomerChange.first_name || ''} ${pendingCustomerChange.last_name || ''}`.trim()}
+                </strong>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
+                disabled={savingCustomerChange}
+                onClick={async () => {
+                  setSavingCustomerChange(true);
+                  try {
+                    if (existingOrder?.id) {
+                      await api.patchOrderCustomer(existingOrder.id, pendingCustomerChange.id);
+                    }
+                    setSelectedCustomer(pendingCustomerChange);
+                    setPendingCustomerChange(null);
+                    toast.success('Müşteri güncellendi');
+                    onBack?.();
+                  } catch (err) {
+                    toast.error(err?.message || 'Müşteri değiştirilemedi');
+                  } finally {
+                    setSavingCustomerChange(false);
+                  }
+                }}
+              >
+                <Save size={16} /> {savingCustomerChange ? 'Kaydediliyor...' : 'Kaydet'}
+              </button>
+            </>
+          ) : hasUnsavedChanges ? (
             <button
               type="button"
               className="btn btn-primary"
@@ -1266,6 +1432,51 @@ export default function OrderScreen({
         }}
       />
 
+      <ManualPrintSelectorModal
+        open={printSelectorOpen && !!existingOrder?.id}
+        onClose={() => setPrintSelectorOpen(false)}
+        printRole="receipt"
+        title="Siparişi Yazdır"
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          if (!existingOrder?.id) return;
+          try {
+            await api.printOrderReceipt(existingOrder.id, { printer_id: printerId });
+            toast.success('Yazdırma isteği gönderildi');
+          } catch (err) {
+            toast.error(err?.message || 'Yazdırma isteği gönderilemedi');
+          }
+        }}
+      />
+
+      {customerDetailsOpen && selectedCustomer?.id && (
+        <CustomerDetailsModal
+          customerId={selectedCustomer.id}
+          initialCustomer={selectedCustomer}
+          onClose={() => setCustomerDetailsOpen(false)}
+          onClearSelection={() => {
+            setSelectedCustomer(null);
+            setCustomerDetailsOpen(false);
+          }}
+          onSaved={(updated) => {
+            setSelectedCustomer((prev) => ({ ...prev, ...updated }));
+          }}
+          onSelectCustomer={(c) => {
+            // Aynı müşteri seçildiyse pending'i iptal et
+            if (c?.id === selectedCustomer?.id) {
+              setPendingCustomerChange(null);
+            } else {
+              setPendingCustomerChange(c);
+            }
+          }}
+          onCreateNew={() => {
+            setCustomerDetailsOpen(false);
+            setNewCustomerMode(true);
+            setCustomerModalOpen(true);
+          }}
+        />
+      )}
+
       {customerModalOpen && (
         <div className="modal-overlay" onClick={() => setCustomerModalOpen(false)}>
           <div className="modal modal-md order-customer-modal" onClick={(e) => e.stopPropagation()}>
@@ -1313,29 +1524,77 @@ export default function OrderScreen({
               )}
               {newCustomerMode && !selectedCustomer && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <input
+                      className="input"
+                      placeholder="Müşteri Adı *"
+                      value={newCustomer.first_name}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, first_name: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Müşteri Soyadı"
+                      value={newCustomer.last_name}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, last_name: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Müşteri Telefonu"
+                      value={newCustomer.phone}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, phone: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Müşteri Telefonu 2"
+                      value={newCustomer.phone_2}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, phone_2: e.target.value }))}
+                    />
+                  </div>
                   <input
                     className="input"
-                    placeholder="Ad Soyad"
-                    value={newCustomer.full_name}
-                    onChange={(e) => setNewCustomer((p) => ({ ...p, full_name: e.target.value }))}
+                    placeholder="Adres Başlığı (Ev, İşyeri, Diğer — maks. 15 karakter)"
+                    maxLength={15}
+                    value={newCustomer.address_title}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, address_title: e.target.value }))}
                   />
-                  <input
+                  <textarea
                     className="input"
-                    placeholder="Telefon"
-                    value={newCustomer.phone}
-                    onChange={(e) => setNewCustomer((p) => ({ ...p, phone: e.target.value }))}
-                  />
-                  <input
-                    className="input"
+                    rows={2}
                     placeholder="Adres"
                     value={newCustomer.address}
                     onChange={(e) => setNewCustomer((p) => ({ ...p, address: e.target.value }))}
                   />
+                  <input
+                    className="input"
+                    placeholder="Adres Tarifi / Notu"
+                    value={newCustomer.address_note}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, address_note: e.target.value }))}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                    <input
+                      className="input"
+                      placeholder="İl"
+                      value={newCustomer.province}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, province: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="İlçe"
+                      value={newCustomer.district}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, district: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Mahalle"
+                      value={newCustomer.neighborhood}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, neighborhood: e.target.value }))}
+                    />
+                  </div>
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
                     onClick={handleCreateCustomerFromModal}
-                    disabled={!newCustomer.full_name || !newCustomer.phone}
+                    disabled={!newCustomer.first_name}
                   >
                     Müşteri Oluştur
                   </button>
@@ -1365,7 +1624,11 @@ export default function OrderScreen({
                 )}
                 {!customerListLoading && customerList.length === 0 && (
                   <div className="empty-state" style={{ padding: 20 }}>
-                    <div className="empty-state-text">Müşteri bulunamadı</div>
+                    <div className="empty-state-text">
+                      {orderType === 'takeaway' && customerSearchQuery.trim().length < 2
+                        ? 'Seçmek istediğiniz müşteriyi arama yaparak bulabilirsiniz'
+                        : 'Müşteri bulunamadı'}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1386,6 +1649,104 @@ export default function OrderScreen({
             </div>
             <div className="modal-footer">
               <button type="button" className="btn btn-ghost" data-testid="order-customer-modal-close-button" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {paymentTypeModalOpen && (
+        <div className="modal-overlay" onClick={() => !saving && setPaymentTypeModalOpen(false)}>
+          <div
+            className="modal modal-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="takeaway-payment-type-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+              <div>
+                <h2 id="takeaway-payment-type-title" style={{ margin: 0, fontSize: 18 }}>Ödeme Tipi Seçiniz</h2>
+                <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.45 }}>
+                  Siparişiniz teslim edildiğinde seçilen tipte ödeme kaydı oluşturulacak.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setPaymentTypeModalOpen(false)}
+                disabled={saving}
+                title="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 14,
+              }}>
+                <button
+                  type="button"
+                  data-testid="takeaway-payment-type-cash"
+                  disabled={saving}
+                  onClick={async () => {
+                    setPaymentTypeModalOpen(false);
+                    await handleSaveOrder({ plannedPaymentType: 'cash' });
+                  }}
+                  style={{
+                    minHeight: 120,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    padding: 16,
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    fontSize: 15,
+                    fontWeight: 800,
+                  }}
+                >
+                  <Banknote size={34} color="var(--success)" strokeWidth={1.8} />
+                  Nakit
+                </button>
+                <button
+                  type="button"
+                  data-testid="takeaway-payment-type-card"
+                  disabled={saving}
+                  onClick={async () => {
+                    setPaymentTypeModalOpen(false);
+                    await handleSaveOrder({ plannedPaymentType: 'card' });
+                  }}
+                  style={{
+                    minHeight: 120,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    padding: 16,
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    fontSize: 15,
+                    fontWeight: 800,
+                  }}
+                >
+                  <CreditCard size={34} color="var(--accent)" strokeWidth={1.8} />
+                  Kredi Kartı
+                </button>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPaymentTypeModalOpen(false)}
+                disabled={saving}
+              >
+                Vazgeç
+              </button>
             </div>
           </div>
         </div>

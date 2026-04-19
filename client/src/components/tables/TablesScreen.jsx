@@ -6,12 +6,12 @@ import { useIncomingCall } from '../../context/IncomingCallContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
 import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
-import { getPaymentStateLabel, isOrderFullyPaid } from '../../utils/orderPaymentState.js';
+import { isOrderFullyPaid } from '../../utils/orderPaymentState.js';
 import { getPrintErrorMessage } from '../../utils/printErrorMessages.js';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 import {
-  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2, Package,
+  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2, Package, AlertTriangle,
 } from 'lucide-react';
 
 function formatOrderElapsed(dateStr, now = Date.now()) {
@@ -61,6 +61,7 @@ export default function TablesScreen({
   const [manualPrintDialog, setManualPrintDialog] = useState({ open: false, orderId: null, role: 'receipt', kind: 'receipt', title: '' });
   const [printHealth, setPrintHealth] = useState(null);
   const [retryingPrintJobId, setRetryingPrintJobId] = useState(null);
+  const [printAlertOpen, setPrintAlertOpen] = useState(false);
   const takeawayMenuRef = useRef(null);
   const toast = useToast();
   const { openOrder: openIncomingCallOrder } = useIncomingCall() || {};
@@ -186,13 +187,13 @@ export default function TablesScreen({
     loadPrintHealth();
   };
 
-  const retryFirstFailedPrintJob = async () => {
+  const retryFirstFailedPrintJob = async ({ silent = false } = {}) => {
     const job = printHealth?.recentFailed?.[0];
     if (!job?.id || retryingPrintJobId) return;
     setRetryingPrintJobId(job.id);
     try {
       await api.retryPrintJob(job.id);
-      toast.success('Yazdırma işi yeniden kuyruğa alındı');
+      if (!silent) toast.success('Yazdırma işi yeniden kuyruğa alındı');
       await loadPrintHealth();
     } catch (err) {
       toast.error(err.message || 'Yazdırma işi yeniden denenemedi');
@@ -580,6 +581,22 @@ export default function TablesScreen({
               <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
                 <Phone size={16} />
               </button>
+              {(failedPrintCount > 0 || stalePrintCount > 0) && (
+                <button
+                  type="button"
+                  className="btn btn-icon tables-action-btn tables-print-alert-btn"
+                  onClick={() => setPrintAlertOpen(true)}
+                  title="Yazdırma sorunu var"
+                  aria-label="Yazdırma sorunu var, detay için tıklayın"
+                  style={{
+                    background: 'var(--danger)',
+                    color: 'var(--text-on-accent, #fff)',
+                    borderColor: 'var(--danger)',
+                  }}
+                >
+                  <AlertTriangle size={16} />
+                </button>
+              )}
               {transferMode && (
                 <button className="btn btn-ghost btn-sm" onClick={() => setTransferMode(null)}>
                   İptal
@@ -603,54 +620,6 @@ export default function TablesScreen({
             Hedef masayı seçin
           </div>
         )}
-
-        {(failedPrintCount > 0 || stalePrintCount > 0) && (
-          <div className="print-health-alert">
-            <div className="print-health-alert-main">
-              <Printer size={17} />
-              <div>
-                <strong>Yazdırma sorunu var</strong>
-                <div>
-                  {failedPrintCount > 0 ? `${failedPrintCount} başarısız iş` : ''}
-                  {failedPrintCount > 0 && stalePrintCount > 0 ? ' · ' : ''}
-                  {stalePrintCount > 0 ? `${stalePrintCount} süresi geçmiş iş` : ''}
-                  {pendingPrintCount > 0 ? ` · ${pendingPrintCount} bekleyen` : ''}
-                </div>
-                {firstFailedPrintJob && (() => {
-                  const { label, action } = getPrintErrorMessage(firstFailedPrintJob.last_error_code);
-                  return (
-                    <div className="print-health-alert-detail">
-                      <span>{firstFailedPrintJob.printer_name || 'Yazıcı'} · {label}</span>
-                      <span style={{ display: 'block', marginTop: 2, color: 'var(--color-warning)' }}>{action}</span>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-            {firstFailedPrintJob && (
-              <button
-                type="button"
-                className="btn btn-warning btn-sm"
-                onClick={retryFirstFailedPrintJob}
-                disabled={!!retryingPrintJobId}
-              >
-                {retryingPrintJobId ? 'Deneniyor...' : 'Tekrar Dene'}
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="tabs" style={{ marginBottom: 0 }}>
-          {areas.map(area => (
-            <button key={area.id} className={`tab ${activeArea === area.id ? 'active' : ''}`}
-              onClick={() => setActiveArea(area.id)}>
-              {area.name}
-              <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>
-                ({(area.tables || []).filter(t => t.status === 'occupied').length}/{(area.tables || []).length})
-              </span>
-            </button>
-          ))}
-        </div>
       </div>
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
@@ -658,6 +627,17 @@ export default function TablesScreen({
           flex: 1, overflow: 'auto', padding: '16px var(--page-padding-x) 24px var(--page-safe-left)',
           paddingRight: showTakeawaySidebar ? 12 : 24,
         }}>
+          <div className="tabs" style={{ marginBottom: 12 }}>
+            {areas.map(area => (
+              <button key={area.id} className={`tab ${activeArea === area.id ? 'active' : ''}`}
+                onClick={() => setActiveArea(area.id)}>
+                {area.name}
+                <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>
+                  ({(area.tables || []).filter(t => t.status === 'occupied').length}/{(area.tables || []).length})
+                </span>
+              </button>
+            ))}
+          </div>
           {loading ? (
             <div className="empty-state"><div style={{ animation: 'pulse 1.5s infinite' }}>Yükleniyor...</div></div>
           ) : (
@@ -893,7 +873,6 @@ export default function TablesScreen({
             )}
             {takeawayOrders.map((o) => {
               const isOut = Boolean(o.takeaway_out_at);
-              const paymentState = getPaymentStateLabel(o);
               const canMarkDelivered = isOut;
               const isBusy = takeawayActionLoading?.orderId === o.id;
               const isPrinting = isBusy && takeawayActionLoading?.action === 'print';
@@ -914,6 +893,7 @@ export default function TablesScreen({
                     overflow: 'hidden',
                     position: 'relative',
                     minHeight: 184,
+                    flexShrink: 0,
                     boxShadow: openTakeawayMenuId === o.id ? 'var(--shadow-lg)' : 'var(--shadow-soft)',
                   }}
                 >
@@ -1098,22 +1078,6 @@ export default function TablesScreen({
                       >
                         <Clock size={11} />
                         {isOut ? 'Teslimatta' : 'Hazırlanıyor'}
-                      </span>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          borderRadius: 8,
-                          padding: '4px 8px',
-                          border: `1px solid ${paymentState.color}`,
-                          background: paymentState.bg,
-                          color: paymentState.color,
-                          fontSize: 10,
-                          fontWeight: 850,
-                          textTransform: 'uppercase',
-                        }}
-                      >
-                        {paymentState.label}
                       </span>
                     </div>
                   </button>
@@ -1444,6 +1408,123 @@ export default function TablesScreen({
               >
                 {takeawayActionLoading?.action === 'cancel' ? 'İptal ediliyor...' : 'Siparişi iptal et'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {printAlertOpen && (
+        <div className="modal-overlay" onClick={() => setPrintAlertOpen(false)}>
+          <div
+            className="modal modal-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="print-alert-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10,
+                  background: 'var(--danger-muted)', color: 'var(--danger)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h2 id="print-alert-title" style={{ margin: 0, fontSize: 18 }}>Yazdırma sorunu var</h2>
+                  <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.45 }}>
+                    Kuyrukta bekleyen ya da başarısız olan yazdırma işleri tespit edildi.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setPrintAlertOpen(false)}
+                title="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 8,
+                marginBottom: 14,
+              }}>
+                {failedPrintCount > 0 && (
+                  <span className="badge badge-danger" style={{ fontSize: 12 }}>
+                    {failedPrintCount} başarısız iş
+                  </span>
+                )}
+                {stalePrintCount > 0 && (
+                  <span className="badge badge-warning" style={{ fontSize: 12 }}>
+                    {stalePrintCount} süresi geçmiş iş
+                  </span>
+                )}
+                {pendingPrintCount > 0 && (
+                  <span className="badge" style={{ fontSize: 12 }}>
+                    {pendingPrintCount} bekleyen
+                  </span>
+                )}
+              </div>
+
+              {firstFailedPrintJob && (() => {
+                const { label, action } = getPrintErrorMessage(firstFailedPrintJob.last_error_code);
+                return (
+                  <div style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: 14,
+                    background: 'var(--bg-tertiary)',
+                    marginBottom: 12,
+                  }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                      Son başarısız iş
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
+                      {firstFailedPrintJob.printer_name || 'Yazıcı'}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 700, marginBottom: 6 }}>
+                      {label}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      {action}
+                    </div>
+                    {firstFailedPrintJob.last_error_code && (
+                      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                        Hata kodu: <code>{firstFailedPrintJob.last_error_code}</code>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                Daha fazla teşhis için Ayarlar → StoreBridge Durumu sayfasını açabilir veya Destek Paketini indirebilirsiniz.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPrintAlertOpen(false)}
+              >
+                Kapat
+              </button>
+              {firstFailedPrintJob && (
+                <button
+                  type="button"
+                  className="btn btn-warning"
+                  disabled={!!retryingPrintJobId}
+                  onClick={async () => {
+                    await retryFirstFailedPrintJob({ silent: true });
+                  }}
+                >
+                  {retryingPrintJobId ? 'Deneniyor...' : 'Tekrar Dene'}
+                </button>
+              )}
             </div>
           </div>
         </div>

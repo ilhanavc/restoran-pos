@@ -108,9 +108,6 @@ export default function KitchenScreen() {
             <ChefHat size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
             Mutfak Ekranı
           </h1>
-          <div className="page-header-subtitle">
-            {orders.length} aktif sipariş
-          </div>
         </div>
         <button className="btn btn-ghost" onClick={loadOrders}>
           <RefreshCw size={16} /> Yenile
