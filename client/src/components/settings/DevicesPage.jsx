@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Smartphone, Plus, Trash2, ToggleLeft, ToggleRight, RefreshCw, Copy, Check } from 'lucide-react';
-import api from '../../services/api/api.js';
+import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 
 function PlatformBadge({ platform }) {
