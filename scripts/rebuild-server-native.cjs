@@ -8,11 +8,17 @@ const path = require('path');
 
 const root = path.join(__dirname, '..');
 
+// CI ortamında Electron ABI rebuild gerekmez — Node.js prebuilt yeterli.
+if (process.env.CI) {
+  console.log('[rebuild-server-native] CI ortamı algılandı, Electron rebuild atlanıyor.');
+  process.exit(0);
+}
+
 let electronVer;
 try {
   electronVer = require(path.join(root, 'node_modules', 'electron', 'package.json')).version;
 } catch {
-  console.log('[rebuild-server-native] Electron bulunamadı, yeniden derleme atlanıyor (CI ortamı)');
+  console.log('[rebuild-server-native] Electron bulunamadı, yeniden derleme atlanıyor.');
   process.exit(0);
 }
 const fromSource = process.env.FORCE_SQLITE_BUILD_FROM_SOURCE === '1';

@@ -98,14 +98,14 @@ describe('PaymentScreen', () => {
   it('"Kalanı Al" butonu tüm kalan tutarı input\'a yazar', async () => {
     renderPayment({ grand_total: 150 });
     await userEvent.click(screen.getByRole('button', { name: /Kalanı Al/i }));
-    expect(screen.getByRole('spinbutton').value).toBe('150');
+    expect(screen.getByTestId('payment-amount-input').value).toBe('150');
   });
 
   // 6 ─────────────────────────────────────────────────────────────────────────
   it('"Tümünü Al" butonu toplam tutarı input\'a yazar', async () => {
     renderPayment({ grand_total: 200, payments: [{ id: 'p1', amount: 50 }] });
     await userEvent.click(screen.getByRole('button', { name: /Tümünü Al/i }));
-    expect(screen.getByRole('spinbutton').value).toBe('200');
+    expect(screen.getByTestId('payment-amount-input').value).toBe('200');
   });
 
   // 7 ─────────────────────────────────────────────────────────────────────────
@@ -162,7 +162,7 @@ describe('PaymentScreen', () => {
     });
 
     renderPayment({ grand_total: 150 });
-    const input = screen.getByRole('spinbutton');
+    const input = screen.getByTestId('payment-amount-input');
     await userEvent.clear(input);
     await userEvent.type(input, '200');
     await userEvent.click(screen.getByTestId('payment-submit-button'));

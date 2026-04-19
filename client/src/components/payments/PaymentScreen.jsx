@@ -491,6 +491,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                       onChange={(e) => setAmountInput(e.target.value)}
                       placeholder={formatCurrency(totalDue)}
                       style={{ fontSize: 22, fontWeight: 850, textAlign: 'center' }}
+                      data-testid="payment-amount-input"
                     />
                     <button
                       type="button"
