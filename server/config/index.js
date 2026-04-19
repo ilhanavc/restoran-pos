@@ -37,6 +37,10 @@ if (nodeEnv === 'production' && (!process.env.JWT_SECRET || jwtSecret === 'fallb
   throw new Error('Üretim ortamında JWT_SECRET ortam değişkeni zorunludur ve varsayılan gizli anahtar kullanılamaz.');
 }
 
+if (nodeEnv === 'production' && process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
+  throw new Error('Üretim ortamında JWT_SECRET en az 32 karakter olmalıdır (zayıf anahtar reddedildi).');
+}
+
 /** Vite client build (`npm run build` kökte veya client içinde) */
 const clientDist = process.env.CLIENT_DIST_PATH
   ? path.resolve(process.env.CLIENT_DIST_PATH)
