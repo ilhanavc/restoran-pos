@@ -15,13 +15,16 @@ test('cashier can create takeaway order with selected customer', async ({ page }
   await expect(saveButton).toBeVisible();
   await saveButton.click();
 
-  await expect(page.getByTestId('order-customer-search-input')).toBeVisible();
+  const customerSearchInput = page.getByTestId('order-customer-search-input');
+  await expect(customerSearchInput).toBeVisible();
+  await customerSearchInput.fill('Ah');
   const firstCustomer = page.locator('[data-testid^="customer-row-"]').first();
   await expect(firstCustomer).toBeVisible();
   await firstCustomer.click();
-  await page.waitForTimeout(200);
 
-  await saveButton.click();
+  const cashPaymentType = page.getByTestId('takeaway-payment-type-cash');
+  await expect(cashPaymentType).toBeVisible();
+  await cashPaymentType.click();
 
   await expect(page).toHaveURL(/\/tables/);
   await expect(page.locator('[data-testid^="takeaway-order-card-"]').first()).toBeVisible();
