@@ -39,6 +39,7 @@ const StockScreen = lazy(() => import('./components/stock/StockScreen.jsx'));
 const SetupWizardPage = lazy(() => import('./components/settings/SetupWizardPage.jsx'));
 const ReleaseNotesPage = lazy(() => import('./components/settings/ReleaseNotesPage.jsx'));
 const AuditLogPage = lazy(() => import('./components/settings/AuditLogPage.jsx'));
+const DevicesPage = lazy(() => import('./components/settings/DevicesPage.jsx'));
 
 function getShellTitle(pathname) {
   if (pathname === '/home') return 'Anasayfa';
@@ -66,6 +67,7 @@ function getShellTitle(pathname) {
   if (pathname === '/settings/caller-id') return 'Gelen Aramalar';
   if (pathname === '/settings/release-notes') return 'Sürüm Notları';
   if (pathname === '/settings/audit-log') return 'Denetim Günlüğü';
+  if (pathname === '/settings/devices') return 'Mobil Cihazlar';
   return null;
 }
 
@@ -312,6 +314,7 @@ export default function App() {
             <Route path="caller-id" element={<CallerIdScreen />} />
             <Route path="release-notes" element={<ReleaseNotesPage />} />
             <Route path="audit-log" element={<AuditLogPage />} />
+            <Route path="devices" element={<DevicesPage />} />
           </Route>
           
           <Route path="/order/table/:id" element={

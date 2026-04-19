@@ -1,4 +1,4 @@
-import { Settings, Store, Users, Printer, Monitor, Phone, CheckCircle2, DatabaseBackup, Activity, ScrollText, ClipboardList } from 'lucide-react';
+import { Settings, Store, Users, Printer, Monitor, Phone, CheckCircle2, DatabaseBackup, Activity, ScrollText, ClipboardList, Smartphone } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const sections = [
@@ -12,6 +12,7 @@ const sections = [
   { icon: Phone, label: 'Gelen arama (Caller ID)', desc: 'Arama geçmişi ve gelen arama yönetimi', to: '/settings/caller-id' },
   { icon: ScrollText, label: 'Sürüm Notları', desc: 'Uygulama sürüm geçmişi, yenilikler ve güncelleme', to: '/settings/release-notes' },
   { icon: ClipboardList, label: 'Denetim Günlüğü', desc: 'Ürün, kullanıcı, stok ve yapılandırma değişiklik geçmişi', to: '/settings/audit-log' },
+  { icon: Smartphone, label: 'Mobil Cihazlar', desc: 'Kayıtlı garson telefonları, eşleştirme ve yönetim', to: '/settings/devices' },
 ];
 
 export default function SettingsHome() {

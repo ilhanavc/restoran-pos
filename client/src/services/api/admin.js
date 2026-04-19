@@ -94,4 +94,10 @@ export const adminMixin = {
     if (actor_user_id) params.set('actor_user_id', actor_user_id);
     return this.get(`/admin/entity-mutations?${params}`);
   },
+
+  // Device management
+  getDevices() { return this.get('/admin/devices'); },
+  createPairingToken() { return this.post('/admin/devices/pairing-token', {}); },
+  updateDevice(id, data) { return this.patch(`/admin/devices/${id}`, data); },
+  deleteDevice(id) { return this.delete(`/admin/devices/${id}`); },
 };

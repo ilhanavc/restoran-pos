@@ -45,6 +45,9 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | DB-3 | Integer Minor Unit Migration | `server/utils/money.js` (`toCents`, `fromCents`). `0002_add_cents_columns` migration: `orders`, `order_items`, `payments`, `refunds`, `products`, `product_portions` tablolarına `_cents` shadow kolonları + backfill. Dual-write: `orderService`, `paymentService`, `refundService`, `products.js` her mutation'da hem REAL hem `_cents` yazar. Reports read-path: COALESCE template'leri (`paymentAmountCents`, `orderGrandTotalCents` vb.) — REAL sütunlar korunuyor. `money.utils.test.js` (floating-point edge case dahil). Son doğrulama: 349/349 test, `lint:ci` 0 warning. |
 | DB-4 | Snapshot Tamamlama | `0003_snapshot_columns` migration: `orders` tablosuna `pricing_policy_version` (sipariş anındaki ürün MAX updated_at), `service_charge_rate/amount/cents` snapshot alanları; `order_items` tablosuna `vat_rate_snapshot` eklendi. `orderService.js` dual-write: her sipariş oluşturulurken menu versiyonu, servis ücreti oranı ve kalem vat_rate snapshot'ı yazılıyor. `grand_total` hesabı değiştirilmedi. `snapshot.test.js` (pricing_policy_version, vat_rate_snapshot, idempotency). Son doğrulama: 352/352 test, `lint:ci` 0 warning. |
 | C-1 | Railway Cloud Deployment | `railway.json` (NIXPACKS builder, `start:server`, `/api/health` healthcheck 30s); `server/config/index.js` merkezi `HOST`/`PORT`/`USER_DATA_PATH` (env-driven, absolute path desteği); `CORS_ORIGINS` env'den split; `server/.env.example` commit edilebilir şablon; Electron cloud modu: `pos-config.json`'da `cloudServerUrl` set edilirse local Express subprocess başlatılmaz, cloud URL kullanılır; `preload.cjs` `config:get-electron-config` IPC ile `apiBaseUrl` renderer'a expose edilir; `client/src/services/api/core.js` `electronConfig?.apiBaseUrl → VITE_API_URL → localhost:3001` önceliği. Son doğrulama: 352/352 test, `lint:ci` 0 warning. |
+| C-2 | Auth Hardening — Refresh Token + Mobile Session | `0004_refresh_tokens` migration; `tokenUtils.js` (generateRefreshToken, hashToken SHA-256); mobil login → 15dk access + 30 gün refresh token; `POST /api/auth/refresh` (rotate); `POST /api/auth/logout`; `POST /api/auth/logout-all`; desktop akışı değişmedi. `auth.refresh.test.js` (5 senaryo). Son doğrulama: 357/357 test, `lint:ci` 0 warning. |
+| M-1.1 | Mobile-First Waiter Endpoints | `requireMobile` middleware; `server/routes/mobile.js` (6 endpoint: tables, table order, add item, categories, waiter-call, me); `mobile.endpoints.test.js` (11 senaryo). 368/368 test. |
+| M-1.2 | Device Pairing (QR + device_id) | `0005_devices` migration (`devices` + `device_pairing_tokens` tabloları); `POST /api/mobile/devices/register` (pairing token doğrulama + cihaz kaydı); `GET /api/admin/devices`, `POST /api/admin/devices/pairing-token` (8 kar. token, 10dk TTL), `PATCH /api/admin/devices/:id`, `DELETE /api/admin/devices/:id`; `DevicesPage.jsx` (`/settings/devices`) — QR görüntüleme (api.qrserver.com), token kopyalama, cihaz tablosu, toggle/sil; `SettingsHome` + `App.jsx` route eklendi. Son doğrulama: 368/368 test, `lint:ci` 0 warning. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -139,13 +142,13 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
 - Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
 
-### Sıradaki: C-2 — Auth Hardening (Refresh Token + Mobile Session)
-**Ön koşul:** C-1 ✅ tamamlandı.
-- `refresh_tokens` tablosu migration (id, user_id, token_hash, expires_at, device_id, created_at)
-- `POST /api/auth/refresh` + `POST /api/auth/logout` endpoint
-- Access token TTL: 15dk (mobil) / 8saat (desktop — backward compatible)
-- Refresh token TTL: 30 gün
-- `X-Client-Type: mobile|desktop` header ile ayırt et
+### Sıradaki: M-1.3 — Push Notification (FCM + APNs)
+**Ön koşul:** M-1.2 ✅ tamamlandı. Firebase projesi kurulumu gerekli (dış bağımlılık).
+- `firebase-admin` npm paketi (server)
+- `devices` tablosuna `push_token` alanı
+- `POST /api/mobile/devices/push-token` endpoint
+- `server/services/pushNotificationService.js`
+- Tetikleyiciler: yeni sipariş, mutfak hazır, masa çağrısı
 
 ### O-2 — Tenant Identity + Billing (4 ay sonrası)
 **Ön koşul:** O-1 ✅, 4 ay pilot tamamlanmış.

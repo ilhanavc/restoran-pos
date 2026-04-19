@@ -3,6 +3,7 @@ import bcryptjs from 'bcryptjs';
 import { z } from 'zod';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import Database from 'better-sqlite3';
 import { getPrinterPreviewPlainLines } from '../../store-bridge/printers/renderers.js';
 import db from '../config/database.js';
@@ -2396,6 +2397,77 @@ router.get('/entity-mutations', (req, res) => {
     res.json({ mutations, total, limit, offset });
   } catch (err) {
     console.error('[admin:entity-mutations:list]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Device management ──────────────────────────────────────────────────────
+
+// GET /api/admin/devices — tüm kayıtlı cihazlar
+router.get('/devices', (req, res) => {
+  try {
+    const devices = db.prepare(`
+      SELECT d.id, d.device_name, d.platform, d.is_active, d.last_seen_at, d.created_at,
+             u.full_name AS user_name, u.email AS user_email
+      FROM devices d
+      JOIN users u ON d.user_id = u.id
+      WHERE d.business_id = ?
+      ORDER BY d.created_at DESC
+    `).all(req.businessId);
+    res.json(devices);
+  } catch (err) {
+    console.error('[admin:devices:list]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/admin/devices/pairing-token — eşleştirme kodu üret (10 dk geçerli)
+router.post('/devices/pairing-token', (req, res) => {
+  try {
+    // Süresi dolmuş tokenları temizle
+    db.prepare(`DELETE FROM device_pairing_tokens WHERE business_id = ? AND expires_at < datetime('now')`).run(req.businessId);
+
+    const token = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+
+    db.prepare(`
+      INSERT INTO device_pairing_tokens (id, business_id, token, expires_at)
+      VALUES (?, ?, ?, ?)
+    `).run(genId(), req.businessId, token, expiresAt);
+
+    res.json({ token, expires_at: expiresAt });
+  } catch (err) {
+    console.error('[admin:devices:pairing-token]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// PATCH /api/admin/devices/:id — cihazı aktif/pasif yap
+router.patch('/devices/:id', (req, res) => {
+  try {
+    const device = db.prepare('SELECT * FROM devices WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!device) return res.status(404).json({ error: 'Cihaz bulunamadı' });
+
+    const isActive = req.body.is_active === true ? 1 : 0;
+    db.prepare(`UPDATE devices SET is_active = ?, last_seen_at = last_seen_at WHERE id = ?`).run(isActive, req.params.id);
+
+    res.json(db.prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id));
+  } catch (err) {
+    console.error('[admin:devices:patch]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// DELETE /api/admin/devices/:id — cihazı kaldır
+router.delete('/devices/:id', (req, res) => {
+  try {
+    const device = db.prepare('SELECT * FROM devices WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!device) return res.status(404).json({ error: 'Cihaz bulunamadı' });
+
+    db.prepare('DELETE FROM devices WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[admin:devices:delete]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
