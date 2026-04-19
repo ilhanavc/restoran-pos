@@ -35,6 +35,11 @@ import { requestIdMiddleware } from './middleware/requestId.js';
 
 const app = express();
 
+// Reverse proxy arkasındaysa (Nginx, Cloudflare) gerçek client IP'yi X-Forwarded-For
+// başlığından çözmek için; express-rate-limit ve access log güvenilirliği buna bağlı.
+// TRUST_PROXY_HOPS env'i ile ayarlanır (varsayılan 0 = doğrudan erişim).
+app.set('trust proxy', config.trustProxyHops);
+
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')

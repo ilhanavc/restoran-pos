@@ -41,6 +41,17 @@ if (nodeEnv === 'production' && process.env.JWT_SECRET && process.env.JWT_SECRET
   throw new Error('Üretim ortamında JWT_SECRET en az 32 karakter olmalıdır (zayıf anahtar reddedildi).');
 }
 
+/**
+ * Express 'trust proxy' hop sayısı. 0 = doğrudan; 1 = tek reverse proxy (örn. Nginx);
+ * 2 = zincirli proxy (örn. Cloudflare → Nginx). Rate-limit ve req.ip güvenilirliği buna
+ * bağlı. Sayıya çevrilemeyen değerler 0'a düşer (güvenli default).
+ */
+const trustProxyHopsRaw = process.env.TRUST_PROXY_HOPS;
+const trustProxyHopsParsed = Number.parseInt(trustProxyHopsRaw ?? '', 10);
+const trustProxyHops = Number.isFinite(trustProxyHopsParsed) && trustProxyHopsParsed >= 0
+  ? trustProxyHopsParsed
+  : 0;
+
 /** Vite client build (`npm run build` kökte veya client içinde) */
 const clientDist = process.env.CLIENT_DIST_PATH
   ? path.resolve(process.env.CLIENT_DIST_PATH)
@@ -53,6 +64,7 @@ export default {
   port: parseInt(process.env.PORT || '3001'),
   host: process.env.HOST || '127.0.0.1',
   nodeEnv,
+  trustProxyHops,
   get userDataPath() {
     return resolveUserDataPath();
   },
