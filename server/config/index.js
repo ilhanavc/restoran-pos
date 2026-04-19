@@ -65,6 +65,17 @@ export default {
   host: process.env.HOST || '127.0.0.1',
   nodeEnv,
   trustProxyHops,
+
+  /**
+   * Global rate-limit: tüm unauthenticated dahil tüm endpoint'lere uygulanır.
+   * /api/health hariç tutulur (monitoring probe'larını kırmamak için).
+   * windowMs: milisaniye; max: pencere başına izin verilen istek sayısı.
+   */
+  globalRateLimit: {
+    windowMs: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 dakika
+    max: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_MAX || '300', 10),              // 15 dk'da 300 istek
+  },
+
   get userDataPath() {
     return resolveUserDataPath();
   },

@@ -40,6 +40,20 @@ const app = express();
 // TRUST_PROXY_HOPS env'i ile ayarlanır (varsayılan 0 = doğrudan erişim).
 app.set('trust proxy', config.trustProxyHops);
 
+// Global rate-limit — /api/health hariç tüm endpoint'lere uygulanır.
+// Monitoring probe'larının ve per-route limiter'ların etkisiz kalmaması için
+// health endpoint skip edilir; gerçek IP için trust proxy ayarının doğru
+// yapıldığından emin olun (TRUST_PROXY_HOPS).
+const globalLimiter = rateLimit({
+  windowMs: config.globalRateLimit.windowMs,
+  max: config.globalRateLimit.max,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/api/health',
+  message: { error: 'Çok fazla istek gönderildi, lütfen daha sonra tekrar deneyin.' },
+});
+app.use(globalLimiter);
+
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
 const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
