@@ -5,7 +5,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **415 automated tests** · 15/15 production checklist items passed
+**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **425 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
@@ -49,6 +49,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | M-1.1 | Mobile-First Waiter Endpoints | `requireMobile` middleware; `server/routes/mobile.js` (6 endpoint: tables, table order, add item, categories, waiter-call, me); `mobile.endpoints.test.js` (11 senaryo). 368/368 test. |
 | M-1.2 | Device Pairing (QR + device_id) | `0005_devices` migration (`devices` + `device_pairing_tokens` tabloları); `POST /api/mobile/devices/register` (pairing token doğrulama + cihaz kaydı); `GET /api/admin/devices`, `POST /api/admin/devices/pairing-token` (8 kar. token, 10dk TTL), `PATCH /api/admin/devices/:id`, `DELETE /api/admin/devices/:id`; `DevicesPage.jsx` (`/settings/devices`) — QR görüntüleme (api.qrserver.com), token kopyalama, cihaz tablosu, toggle/sil; `SettingsHome` + `App.jsx` route eklendi. Son doğrulama: 368/368 test, `lint:ci` 0 warning. |
 | FAZ 0 (0.1/0.3/0.4/0.2/0.5) | Güvenlik Sertleştirmesi (Online Öncesi) | **0.1** JWT_SECRET fail-fast (prod: zorunlu + min 32 char guard), `config.jwtSecret.test.js`. **0.3** `TRUST_PROXY_HOPS` env (0/1/2), geçersiz → 0 fallback, `config.trustProxy.test.js`. **0.4** Global rate-limit env-driven (`GLOBAL_RATE_LIMIT_WINDOW_MS/MAX`, `/api/health` skip) + `compression()` gzip middleware + `pretest` scripti (`npm rebuild better-sqlite3` — ABI drift kalıcı çözümü). **0.2** `utils/corsOrigin.js` ortak whitelist checker — prod'da yalnızca `CORS_ORIGINS`, dev'de localhost/127.0.0.1/192.168/10.x regex; bilinmeyen origin → `CORS: origin not allowed`; `cors()` ve Socket.io aynı callback; `corsOrigin.test.js` (15 test). **0.5** `utils/password.js` validator (min 8 + büyük harf + rakam); `0011_must_change_password` migration; admin user create → `must_change_password=1`; admin başkasının şifresini resetlerse flag=1; login'de flag=1 → 403 + `{must_change_password,email,businessId}`; `POST /api/auth/change-password` (old+new doğrulama, politika, farklılık guard, refresh token'lar iptal); `password.utils.test.js` (10 test) + `changePassword.integration.test.js` (7 test). **Kategori hard-delete**: `categories.js` soft-delete yerine transaction-based hard-delete (`product_modifiers`/`product_combos` temizle, `printer_routing.category_id=NULL`, CASCADE ile `product_portions`/`product_attribute_groups`); `0010_cleanup_soft_deleted_categories` mevcut pasifleri temizler. Son doğrulama: 415/415 test, `lint:ci` 0 warning. |
+| FAZ 0 (0.6/0.7) | Yapılandırılmış Log + Hata İzleme | **0.6** `server/utils/logger.js` merkezi Pino logger — D-3 NDJSON şemasıyla uyumlu (`ts/level/msg` alan isimleri korundu), `redact` path'leri: `authorization`, `x-bridge-token`, `cookie`, `*.password`, `*.token`, `*.jwtSecret`, `*.bridgeToken`, `*.refreshToken`; dev: `pino-pretty` transport; prod: raw JSON; test: `silent` level. `pino-http` access log middleware (`customProps` ile method/path/status/ms/requestId korundu, `/api/health` autoLogging ignore). `server/index.js` banner/404/prod-warn log'ları logger.* üzerinden. **0.7** Sentry backend (`@sentry/node` + `@sentry/profiling-node` → `nodeProfilingIntegration`) + frontend (`@sentry/react` + `replayIntegration` — `maskAllText:true`, `maskAllInputs:true`, `blockAllMedia:true` → POS verileri GDPR/KVKK altında). `server/utils/sentry.js` + `client/src/services/sentry.js` **simetrik redact** (aynı SENSITIVE_KEYS seti, 6-depth recursive walk, `beforeSend` hook scope'u `request/extra/contexts/breadcrumbs` temizler); frontend'de ek olarak `query_string` regex ile `?token=...` kazınır. `ignoreErrors` gürültü filtresi (CORS/rate-limit/validation backend'de; ResizeObserver/Network Error frontend'de). `Sentry.setupExpressErrorHandler` 500 response'a `sentryEventId` ekler — log correlation için. `AuthContext` login/logout/bootstrap'te `Sentry.setUser` çağırır (id/email/username/role, PII opt-in değil). `ErrorBoundary` React render hataları için `Sentry.withScope` + `componentStack` context. `@sentry/vite-plugin` source map upload — `SENTRY_AUTH_TOKEN` varsa otomatik tetiklenir, yüklendikten sonra `.map` dosyalarını `dist/` içinden siler (prod bundle'a .map sızma koruması); bundle'lara otomatik `_sentryDebugIds` injekt edilir. `server/.env.example` + `client/.env.example` + `docs/runbooks/sentry-setup-runbook.md` (12 bölüm: hesap → proje → auth token → env → verify → prod deploy → revert). `sentry.redact.test.js` (10 test: null/undefined, case-insensitive auth header, cookie, password, nested tokens, array scanning, depth guard, non-sensitive preservation, jwtSecret/bridgeToken, DSN-state-config consistency). End-to-end aktivasyon doğrulandı: backend init log + test error + dashboard + redact payload (`[Filtered]`), frontend init + test error + session replay mask + source map upload (release `restoran-pos@1.0.9` artifact'leri Sentry'de). Son doğrulama: 425/425 test, `lint:ci` 0 warning. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -77,7 +78,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
   - External backup import (UI file picker) + export (save dialog) per backup
   - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- **415 automated tests** (Vitest + Supertest integration), all passing
+- **425 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
@@ -143,20 +144,7 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
 - Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
 
-### Sıradaki: FAZ 0 — 0.6 Pino Structured Logging
-**Ön koşul:** 0.5 ✅ tamamlandı. `docs/01-CLAUDE-CODE-YOL-HARITASI.md` referans.
-- `npm install --prefix server pino pino-http pino-pretty`
-- `server/index.js` — mevcut NDJSON `console.log`'ları `pino` logger'a migrate et (kademeli)
-- `redact: ['req.headers.authorization', 'req.headers["x-bridge-token"]', '*.password', '*.token']`
-- Dev: `pino-pretty` transport; prod: raw JSON
-
-### FAZ 0 — 0.7 Sentry (Backend + Frontend)
-**Ön koşul:** 0.6 (Pino) tamamlanırsa error korelasyonu kolaylaşır.
-- `@sentry/node` (server) + `@sentry/react` (client)
-- `SENTRY_DSN` / `VITE_SENTRY_DSN` env'leri
-- Express requestHandler + errorHandler
-
-### FAZ 0 — 0.8 Secrets ve .gitignore Audit
+### Sıradaki: FAZ 0 — 0.8 Secrets ve .gitignore Audit
 - `.env`, `pos-config.json`, `*.db`, `backups/`, `uploads/`, `logs/` git'te olmamalı
 - `git log --all --full-history -- '**/*.env'` ile geçmiş tarama
 - Sızmış varsa `git filter-repo` ile temizle
