@@ -89,27 +89,37 @@ router.patch('/:id', staffMenu, (req, res) => {
   }
 });
 
-// DELETE /api/categories/:id — soft delete; ürünler is_deleted=1 yapılır
+// DELETE /api/categories/:id — hard delete; kategori ve tüm ürünleri kalıcı silinir
 router.delete('/:id', staffMenu, (req, res) => {
   try {
-    const row = db.prepare('SELECT * FROM categories WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    const row = db.prepare('SELECT id, name FROM categories WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!row) return res.status(404).json({ error: 'Kategori bulunamadı' });
-    // SQLite: is_active 1/0; null veya 0 ise zaten pasif sayılır
-    if (Number(row.is_active) !== 1) {
-      return res.status(400).json({ error: 'Bu kategori zaten kaldırılmış' });
-    }
 
     const txn = db.transaction(() => {
-      db.prepare(`UPDATE categories SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?`).run(
-        req.params.id,
-        req.businessId,
-      );
-      db.prepare(`UPDATE products SET is_deleted = 1, is_active = 0, updated_at = datetime('now')
-        WHERE business_id = ? AND category_id = ?`).run(req.businessId, req.params.id);
+      // Kategoriye ait ürün ID'lerini topla
+      const productIds = db.prepare(
+        'SELECT id FROM products WHERE category_id = ? AND business_id = ?',
+      ).all(req.params.id, req.businessId).map((p) => p.id);
+
+      if (productIds.length > 0) {
+        const ph = productIds.map(() => '?').join(',');
+        // Ürünlere bağlı modifier ve combo kayıtlarını sil (CASCADE yok)
+        db.prepare(`DELETE FROM product_modifiers WHERE product_id IN (${ph})`).run(...productIds);
+        db.prepare(`DELETE FROM product_combos WHERE parent_product_id IN (${ph}) OR child_product_id IN (${ph})`).run(...productIds, ...productIds);
+      }
+
+      // Yazıcı yönlendirmesindeki kategori referansını temizle (nullable FK)
+      db.prepare('UPDATE printer_routing SET category_id = NULL WHERE category_id = ? AND business_id = ?').run(req.params.id, req.businessId);
+
+      // Ürünleri sil (product_portions, product_attribute_groups CASCADE ile silinir)
+      db.prepare('DELETE FROM products WHERE category_id = ? AND business_id = ?').run(req.params.id, req.businessId);
+
+      // Kategoriyi sil (category_attribute_groups CASCADE ile silinir)
+      db.prepare('DELETE FROM categories WHERE id = ? AND business_id = ?').run(req.params.id, req.businessId);
     });
     txn();
 
-    auditLog(req.businessId, req.user.id, 'category_delete', 'category', req.params.id, {});
+    auditLog(req.businessId, req.user.id, 'category_delete', 'category', req.params.id, { name: row.name, hard_delete: true });
     res.json({ success: true });
   } catch (err) {
     console.error('Category delete:', err);

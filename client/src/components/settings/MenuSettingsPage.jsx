@@ -291,7 +291,7 @@ export default function MenuSettingsPage() {
   );
 
   const loadCategories = useCallback(async () => {
-    const rows = await api.getCategories({ include_inactive: 1 });
+    const rows = await api.getCategories();
     setCategories(rows);
   }, []);
 
@@ -369,18 +369,18 @@ export default function MenuSettingsPage() {
   const deleteCategory = async (id) => {
     const n = productCountByCat[id] || 0;
     requestConfirm({
-      title: 'Kategori pasif yapılsın mı?',
+      title: 'Kategori kalıcı olarak silinsin mi?',
       body:
         n > 0
-          ? `Bu kategori pasif yapılacak ve içindeki ${n} ürün menüden kaldırılacak.`
-          : 'Bu kategori pasif yapılacak.',
-      confirmLabel: 'Pasif yap',
+          ? `Bu kategori ve içindeki ${n} ürün kalıcı olarak silinecek. Bu işlem geri alınamaz.`
+          : 'Bu kategori kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+      confirmLabel: 'Kalıcı Sil',
       tone: 'danger',
       onConfirm: async () => {
         setWorking(true);
         try {
           await api.deleteCategory(id);
-          success('Kategori kaldırıldı');
+          success('Kategori silindi');
           await load();
           if (activeCategoryId === id) {
             setFilterMode('all');

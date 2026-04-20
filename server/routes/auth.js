@@ -7,6 +7,7 @@ import db from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { auditLog, genId } from '../utils/helpers.js';
 import { generateRefreshToken, hashToken } from '../utils/tokenUtils.js';
+import { validatePassword } from '../utils/password.js';
 import { validate } from '../middleware/validate.js';
 
 const router = Router();
@@ -45,6 +46,15 @@ const logoutSchema = {
   body: z.object({
     refreshToken: z.string().trim().min(1).optional(),
   }).optional().default({}),
+};
+
+const changePasswordSchema = {
+  body: z.object({
+    email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
+    oldPassword: z.string().min(1, 'Mevcut şifre gerekli').max(128),
+    newPassword: z.string().min(1, 'Yeni şifre gerekli').max(128),
+    business_id: z.string().trim().min(1).optional(),
+  }),
 };
 
 function signAccessToken(user, expiresIn) {
@@ -116,6 +126,17 @@ router.post('/login', validate(loginSchema), (req, res) => {
         auditLog(user.business_id, null, 'login_failed', 'user', user.id);
       } catch (_e) { /* audit tablosu yazılamazsa girişi engelleme */ }
       return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
+    }
+
+    // Zorunlu şifre değişimi (yeni user veya admin reset sonrası) — token verilmez,
+    // frontend /auth/change-password akışına yönlendirir.
+    if (Number(user.must_change_password) === 1) {
+      return res.status(403).json({
+        error: 'Şifrenizi değiştirmeniz gerekiyor',
+        must_change_password: true,
+        email: user.email,
+        businessId: user.business_id,
+      });
     }
 
     const token = signAccessToken(
@@ -228,6 +249,73 @@ router.post('/logout', authenticate, validate(logoutSchema), (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Logout error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/change-password — authentication gerekmez; eski şifre doğrulanır.
+// Hem normal parola değişimi hem de `must_change_password=1` sonrası zorunlu
+// değişim için kullanılır. Başarıda must_change_password=0 yapılır.
+router.post('/change-password', validate(changePasswordSchema), (req, res) => {
+  try {
+    const { email, oldPassword, newPassword, business_id } = req.body;
+    const emNorm = email.toLowerCase().trim();
+
+    const rows = db.prepare(`
+      SELECT u.id, u.business_id, u.password_hash, u.is_active
+      FROM users u
+      WHERE u.email = ? AND u.is_active = 1
+    `).all(emNorm);
+
+    if (!rows.length) {
+      return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
+    }
+
+    let user;
+    if (rows.length > 1) {
+      if (!business_id) {
+        return res.status(400).json({
+          error: 'Bu e-posta birden fazla işletmede kayıtlı. Lütfen işletme seçin.',
+          requireBusinessId: true,
+        });
+      }
+      user = rows.find((r) => r.business_id === business_id);
+      if (!user) return res.status(401).json({ error: 'Geçersiz işletme seçimi veya şifre' });
+    } else {
+      user = rows[0];
+    }
+
+    if (!bcryptjs.compareSync(oldPassword, user.password_hash)) {
+      try {
+        auditLog(user.business_id, null, 'change_password_failed', 'user', user.id);
+      } catch (_e) { /* yoksay */ }
+      return res.status(401).json({ error: 'Mevcut şifre yanlış' });
+    }
+
+    // Yeni şifre politika kontrolü (min 8, büyük harf, rakam).
+    const pwErr = validatePassword(newPassword);
+    if (pwErr) return res.status(400).json({ error: pwErr });
+
+    // Eski şifreyle aynı olmasın
+    if (bcryptjs.compareSync(newPassword, user.password_hash)) {
+      return res.status(400).json({ error: 'Yeni şifre eski şifreden farklı olmalı' });
+    }
+
+    const newHash = bcryptjs.hashSync(newPassword, 10);
+    db.prepare(`
+      UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(newHash, user.id);
+
+    // Güvenlik: açık tüm refresh token'ları iptal et — diğer cihazlar yeniden login olsun.
+    try {
+      db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
+    } catch (_e) { /* refresh_tokens tablosu yoksa yoksay */ }
+
+    auditLog(user.business_id, user.id, 'change_password', 'user', user.id);
+    res.json({ success: true, message: 'Şifre güncellendi. Yeni şifre ile giriş yapabilirsiniz.' });
+  } catch (err) {
+    console.error('Change password error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });

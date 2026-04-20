@@ -5,7 +5,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **352 automated tests** · 15/15 production checklist items passed
+**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **415 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
@@ -48,6 +48,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | C-2 | Auth Hardening — Refresh Token + Mobile Session | `0004_refresh_tokens` migration; `tokenUtils.js` (generateRefreshToken, hashToken SHA-256); mobil login → 15dk access + 30 gün refresh token; `POST /api/auth/refresh` (rotate); `POST /api/auth/logout`; `POST /api/auth/logout-all`; desktop akışı değişmedi. `auth.refresh.test.js` (5 senaryo). Son doğrulama: 357/357 test, `lint:ci` 0 warning. |
 | M-1.1 | Mobile-First Waiter Endpoints | `requireMobile` middleware; `server/routes/mobile.js` (6 endpoint: tables, table order, add item, categories, waiter-call, me); `mobile.endpoints.test.js` (11 senaryo). 368/368 test. |
 | M-1.2 | Device Pairing (QR + device_id) | `0005_devices` migration (`devices` + `device_pairing_tokens` tabloları); `POST /api/mobile/devices/register` (pairing token doğrulama + cihaz kaydı); `GET /api/admin/devices`, `POST /api/admin/devices/pairing-token` (8 kar. token, 10dk TTL), `PATCH /api/admin/devices/:id`, `DELETE /api/admin/devices/:id`; `DevicesPage.jsx` (`/settings/devices`) — QR görüntüleme (api.qrserver.com), token kopyalama, cihaz tablosu, toggle/sil; `SettingsHome` + `App.jsx` route eklendi. Son doğrulama: 368/368 test, `lint:ci` 0 warning. |
+| FAZ 0 (0.1/0.3/0.4/0.2/0.5) | Güvenlik Sertleştirmesi (Online Öncesi) | **0.1** JWT_SECRET fail-fast (prod: zorunlu + min 32 char guard), `config.jwtSecret.test.js`. **0.3** `TRUST_PROXY_HOPS` env (0/1/2), geçersiz → 0 fallback, `config.trustProxy.test.js`. **0.4** Global rate-limit env-driven (`GLOBAL_RATE_LIMIT_WINDOW_MS/MAX`, `/api/health` skip) + `compression()` gzip middleware + `pretest` scripti (`npm rebuild better-sqlite3` — ABI drift kalıcı çözümü). **0.2** `utils/corsOrigin.js` ortak whitelist checker — prod'da yalnızca `CORS_ORIGINS`, dev'de localhost/127.0.0.1/192.168/10.x regex; bilinmeyen origin → `CORS: origin not allowed`; `cors()` ve Socket.io aynı callback; `corsOrigin.test.js` (15 test). **0.5** `utils/password.js` validator (min 8 + büyük harf + rakam); `0011_must_change_password` migration; admin user create → `must_change_password=1`; admin başkasının şifresini resetlerse flag=1; login'de flag=1 → 403 + `{must_change_password,email,businessId}`; `POST /api/auth/change-password` (old+new doğrulama, politika, farklılık guard, refresh token'lar iptal); `password.utils.test.js` (10 test) + `changePassword.integration.test.js` (7 test). **Kategori hard-delete**: `categories.js` soft-delete yerine transaction-based hard-delete (`product_modifiers`/`product_combos` temizle, `printer_routing.category_id=NULL`, CASCADE ile `product_portions`/`product_attribute_groups`); `0010_cleanup_soft_deleted_categories` mevcut pasifleri temizler. Son doğrulama: 415/415 test, `lint:ci` 0 warning. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -76,7 +77,7 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
   - External backup import (UI file picker) + export (save dialog) per backup
   - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- **352 automated tests** (Vitest + Supertest integration), all passing
+- **415 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
@@ -142,7 +143,29 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
 - Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
 
-### Sıradaki: M-1.3 — Push Notification (FCM + APNs)
+### Sıradaki: FAZ 0 — 0.6 Pino Structured Logging
+**Ön koşul:** 0.5 ✅ tamamlandı. `docs/01-CLAUDE-CODE-YOL-HARITASI.md` referans.
+- `npm install --prefix server pino pino-http pino-pretty`
+- `server/index.js` — mevcut NDJSON `console.log`'ları `pino` logger'a migrate et (kademeli)
+- `redact: ['req.headers.authorization', 'req.headers["x-bridge-token"]', '*.password', '*.token']`
+- Dev: `pino-pretty` transport; prod: raw JSON
+
+### FAZ 0 — 0.7 Sentry (Backend + Frontend)
+**Ön koşul:** 0.6 (Pino) tamamlanırsa error korelasyonu kolaylaşır.
+- `@sentry/node` (server) + `@sentry/react` (client)
+- `SENTRY_DSN` / `VITE_SENTRY_DSN` env'leri
+- Express requestHandler + errorHandler
+
+### FAZ 0 — 0.8 Secrets ve .gitignore Audit
+- `.env`, `pos-config.json`, `*.db`, `backups/`, `uploads/`, `logs/` git'te olmamalı
+- `git log --all --full-history -- '**/*.env'` ile geçmiş tarama
+- Sızmış varsa `git filter-repo` ile temizle
+
+### FAZ 0 — 0.9 CI/CD (GitHub Actions)
+- Mevcut `.github/workflows/` kontrol et — lint + test + build pipeline
+- Main/PR'a push'ta otomatik koşsun
+
+### M-1.3 — Push Notification (FCM + APNs)
 **Ön koşul:** M-1.2 ✅ tamamlandı. Firebase projesi kurulumu gerekli (dış bağımlılık).
 - `firebase-admin` npm paketi (server)
 - `devices` tablosuna `push_token` alanı
@@ -180,7 +203,7 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - QR code local generation (replace external api.qrserver.com dependency)
 
 ## Critical Technical Notes
-- **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds. Vitest uses system Node: if `npm run test` fails with an ABI/version mismatch after `postinstall` or an Electron rebuild, run `npm rebuild better-sqlite3` in `server/`.
+- **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds. **Kalıcı çözüm (FAZ 0 — 0.4):** `server/package.json` artık `pretest` scripti ile `npm rebuild better-sqlite3 --quiet` çalıştırır — `npm test` her zaman sistem Node ABI'si için derlenmiş binary'yi garanti eder, Electron rebuild sonrası elle `npm rebuild` çalıştırmak gerekmez.
 - **`store-bridge/node_modules`** — `dist:prepare` runs `npm install --prefix store-bridge --omit=dev` since Sprint 9. Previously missing, caused iconv-lite crash in v1.0.2. Do NOT remove this step.
 - **PC857 Turkish encoding** — `ESC t 12` command; per-printer `skipInit` setting available to skip `ESC @` initialization (fixes Turkish chars on some network printers). Encoding logic lives in `store-bridge/printers/encoding.js` (extracted from `renderers.js` in Sprint 10).
 - **CallerID** — Primary: C# SDK helper (`tools/callerid-sdk-helper`), **self-contained win-x64 binary** (no .NET runtime needed). Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`). Both POST to `POST /api/bridge/caller-id/incoming` with `X-Bridge-Token`. CallerID helper `.exe` is bundled via `extraResources`; `desktop:preflight` verifies it exists before packaging.
@@ -190,7 +213,9 @@ D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal
 - **Mock mode** — must default to OFF; must never be enabled in production.
 - **userData path** — in packaged Electron, SQLite lives at `app.getPath('userData')` (`%APPDATA%\restoran-pos\pos.db`). On first launch, migrates from `server/data/pos.db` if userData is empty. `uploads/` and `backups/` also live under userData.
 - **Electron logging** — all process stdout/stderr (backend, StoreBridge, CallerID) and uncaught exceptions are written to `userData/logs/electron-main.log`. Check this file first for field support.
-- **JWT_SECRET** — on first Electron launch the secret is auto-generated and persisted to `userData/pos-config.json`, so sessions survive restarts without requiring `server/.env`. Set explicitly in `.env` for browser-only (`prod`) mode. **`pos-config.json` is gitignored — never commit it.**
+- **JWT_SECRET** — on first Electron launch the secret is auto-generated and persisted to `userData/pos-config.json`, so sessions survive restarts without requiring `server/.env`. Set explicitly in `.env` for browser-only (`prod`) mode. **`pos-config.json` is gitignored — never commit it.** **Prod guard (FAZ 0 — 0.1):** `NODE_ENV=production` altında `JWT_SECRET` yoksa veya fallback değerse fail-fast; < 32 karakter → reddet.
+- **Şifre politikası (FAZ 0 — 0.5)** — `server/utils/password.js::validatePassword()` yalnızca YENİ şifre belirlenirken çağrılır (admin user create, admin şifre reset, user change-password). Login mevcut hash'i doğrular — eski kısa şifreler geriye dönük çalışır. Yeni kullanıcı veya admin reset → `users.must_change_password=1` → login 403 + `{must_change_password:true}` → frontend `/auth/change-password` akışına yönlendirir. `POST /api/auth/change-password` tüm refresh token'ları iptal eder (güvenlik).
+- **CORS whitelist (FAZ 0 — 0.2)** — `server/utils/corsOrigin.js` `buildCorsOriginCallback` Express ve Socket.io için ortak. Prod'da yalnızca `CORS_ORIGINS` env whitelist'i geçer; dev'de localhost/127.0.0.1/192.168.x/10.x (herhangi port) otomatik izinli. Origin header'ı olmayan istekler (mobile app, curl, same-origin) her zaman geçer.
 - **`server/.env`** — never committed to git.
 - **`pos-config.json`** (root) — local Electron config, contains JWT secret. Gitignored since Sprint 11. Never commit.
 - **CORS_ORIGINS** — LAN IP support configured via env var.
@@ -266,7 +291,7 @@ restoran-pos-v3/
 ```bash
 # Development
 npm run dev             # Vite (5173) + API (3001) concurrently
-npm run test            # Run all 346 tests (from repo root; delegates to server)
+npm run test            # Run all 415 tests (from repo root; delegates to server)
 npm run test:watch      # Watch mode
 npm run lint            # ESLint with warnings (dev)
 npm run lint:ci         # ESLint --max-warnings 0 (CI gate — must stay 0)
@@ -300,7 +325,7 @@ npm run all:start       # Windows: start-all.bat (POS + Bridge + CallerID)
 - Small, safe steps — no large refactors
 - Present a summary before making changes: "What will change and why"
 - Do not touch working code unnecessarily
-- Every new feature must not break the existing **346 tests**
+- Every new feature must not break the existing **415 tests**
 - `lint:ci` must stay at 0 warnings — fix before every commit
 - Summarize what changed only when asked — do not add trailing summaries to every response
 - **Always read this file at the start of every session** before making any changes

@@ -4,9 +4,11 @@ import path from 'path';
 import fs from 'fs';
 import cors from 'cors';
 
+import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import config from './config/index.js';
+import { buildCorsOriginCallback } from './utils/corsOrigin.js';
 import { runMigrations } from './migrations/run.js';
 import { initSocket } from './socket.js';
 
@@ -55,14 +57,16 @@ const globalLimiter = rateLimit({
 app.use(globalLimiter);
 
 // Middleware
+app.use(compression());
 app.use(helmet({ contentSecurityPolicy: false }));
-const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
-  .split(',')
-  .map((o) => o.trim())
-  .filter(Boolean);
-
+// CORS origin callback: prod'da yalnızca `config.corsOrigins` whitelist'i;
+// dev'de ek olarak localhost / 127.0.0.1 / LAN (192.168.x, 10.x) otomatik izin verir.
+// Bilinmeyen origin → `CORS: origin not allowed` (403). Detay: utils/corsOrigin.js
 app.use(cors({
-  origin: allowedOrigins,
+  origin: buildCorsOriginCallback({
+    origins: config.corsOrigins,
+    isProduction: config.nodeEnv === 'production',
+  }),
   credentials: true,
 }));
 app.use(express.json({ limit: '10mb' }));

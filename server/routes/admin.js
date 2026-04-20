@@ -10,6 +10,7 @@ import db from '../config/database.js';
 import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
+import { validatePassword } from '../utils/password.js';
 import { recordEntityMutation } from '../services/entityMutationService.js';
 import { ORDER_STATUSES_CLOSED } from '../constants/orderStatus.js';
 
@@ -1818,7 +1819,9 @@ router.post('/users', (req, res) => {
     const em = (email ?? '').toLowerCase().trim();
     if (!emailRe.test(em)) return res.status(400).json({ error: 'Geçerli bir e-posta girin' });
     const pw = password ?? '';
-    if (!pw || pw.length < 4) return res.status(400).json({ error: 'Şifre en az 4 karakter olmalıdır' });
+    // Şifre politikası (FAZ 0 — 0.5): min 8 karakter, büyük harf, rakam.
+    const pwErr = validatePassword(pw);
+    if (pwErr) return res.status(400).json({ error: pwErr });
     const role = db
       .prepare(`SELECT id FROM roles WHERE business_id = ? AND slug = ?`)
       .get(req.businessId, role_slug || 'waiter');
@@ -1833,9 +1836,10 @@ router.post('/users', (req, res) => {
       const b = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId);
       branchId = b?.id || null;
     }
+    // Yeni kullanıcı ilk login'de şifreyi değiştirmek zorunda (geçici şifre modeli).
     db.prepare(
-      `INSERT INTO users (id, business_id, branch_id, role_id, email, password_hash, full_name, is_active, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      `INSERT INTO users (id, business_id, branch_id, role_id, email, password_hash, full_name, is_active, must_change_password, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
     ).run(id, req.businessId, branchId, role.id, em, hash, fn, active);
     auditLog(req.businessId, req.user.id, 'create_user', 'user', id);
     const u = db
@@ -1897,19 +1901,26 @@ router.patch('/users/:id', (req, res) => {
     if (userId === req.user.id && !nextActive) {
       return res.status(400).json({ error: 'Kendi hesabınızı pasifleştiremezsiniz' });
     }
-    // Şifre güncelleme: verilmişse uzunluk kontrolü yap
+    // Şifre güncelleme: verilmişse politika kontrolü yap (min 8, büyük harf, rakam).
+    // Admin başka bir kullanıcının şifresini resetlediğinde o kullanıcı ilk login'de
+    // tekrar değiştirmek zorunda (must_change_password=1). Kullanıcı kendi şifresini
+    // değiştiriyorsa flag ezilmez — /auth/change-password akışı bunu sıfırlar.
+    let pwStr = null;
     if (password !== undefined && password !== null) {
-      const pwStr = String(password).trim();
-      if (pwStr.length > 0 && pwStr.length < 4) {
-        return res.status(400).json({ error: 'Şifre en az 4 karakter olmalıdır' });
+      const trimmed = String(password).trim();
+      if (trimmed.length > 0) {
+        const pwErr = validatePassword(trimmed);
+        if (pwErr) return res.status(400).json({ error: pwErr });
+        pwStr = trimmed;
       }
     }
-    const hash = password && String(password).trim().length > 0 ? bcryptjs.hashSync(String(password).trim(), 10) : null;
+    const hash = pwStr ? bcryptjs.hashSync(pwStr, 10) : null;
     if (hash) {
+      const forceChange = userId !== req.user.id ? 1 : 0;
       db.prepare(
-        `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, password_hash = ?, updated_at = datetime('now')
+        `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, password_hash = ?, must_change_password = ?, updated_at = datetime('now')
          WHERE id = ? AND business_id = ?`,
-      ).run(fn, em, roleId, nextActive, hash, userId, req.businessId);
+      ).run(fn, em, roleId, nextActive, hash, forceChange, userId, req.businessId);
     } else {
       db.prepare(
         `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, updated_at = datetime('now')

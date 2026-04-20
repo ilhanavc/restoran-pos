@@ -445,30 +445,39 @@ describe('admin maintenance backup restore planning', () => {
   });
 });
 
-describe('PATCH /api/admin/users/:id — şifre güncelleme guard (G-1)', () => {
-  it('3 karakterlik şifre ile güncelleme → 400', async () => {
+describe('PATCH /api/admin/users/:id — şifre güncelleme guard (G-1 / FAZ 0 — 0.5)', () => {
+  it('3 karakterlik şifre ile güncelleme → 400 (min 8)', async () => {
     const res = await request(app)
       .patch(`/api/admin/users/${seeds.userId}`)
       .set('Authorization', authHeader)
       .send({ password: 'abc' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/4 karakter/);
+    expect(res.body.error).toMatch(/en az 8 karakter/);
   });
 
-  it('1 karakterlik şifre ile güncelleme → 400', async () => {
+  it('7 karakterlik şifre (sınırın altında) → 400', async () => {
     const res = await request(app)
       .patch(`/api/admin/users/${seeds.userId}`)
       .set('Authorization', authHeader)
-      .send({ password: 'x' });
+      .send({ password: 'Abc1234' });
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/4 karakter/);
+    expect(res.body.error).toMatch(/en az 8 karakter/);
   });
 
-  it('4 karakterlik şifre (minimum sınırda) → 200', async () => {
+  it('büyük harf içermeyen 8+ karakter → 400', async () => {
     const res = await request(app)
       .patch(`/api/admin/users/${seeds.userId}`)
       .set('Authorization', authHeader)
-      .send({ password: '1234' });
+      .send({ password: 'abcdef12' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/büyük harf/);
+  });
+
+  it('politika uyumlu şifre (8+ / büyük / rakam) → 200', async () => {
+    const res = await request(app)
+      .patch(`/api/admin/users/${seeds.userId}`)
+      .set('Authorization', authHeader)
+      .send({ password: 'Pass1234' });
     expect(res.status).toBe(200);
   });
 

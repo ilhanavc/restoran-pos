@@ -6,6 +6,7 @@ import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import config from './config/index.js';
 import db from './config/database.js';
+import { buildCorsOriginCallback } from './utils/corsOrigin.js';
 
 /** @type {import('socket.io').Server | null} */
 let io = null;
@@ -15,20 +16,16 @@ let io = null;
  * @param {import('http').Server} httpServer
  */
 export function initSocket(httpServer) {
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    `http://localhost:${config.port}`,
-    `http://127.0.0.1:${config.port}`,
-  ];
-
-  if (config.corsOrigins?.length) {
-    allowedOrigins.push(...config.corsOrigins);
-  }
+  // HTTP API ile aynı whitelist mantığı — prod'da explicit origin'ler, dev'de
+  // localhost/127.0.0.1/LAN regex'leri. Detay: utils/corsOrigin.js
+  const originCallback = buildCorsOriginCallback({
+    origins: config.corsOrigins,
+    isProduction: config.nodeEnv === 'production',
+  });
 
   io = new Server(httpServer, {
     cors: {
-      origin: allowedOrigins,
+      origin: originCallback,
       credentials: true,
     },
     transports: ['websocket', 'polling'],

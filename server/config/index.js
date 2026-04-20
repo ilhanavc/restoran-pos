@@ -67,6 +67,16 @@ export default {
   trustProxyHops,
 
   /**
+   * CORS whitelist — `CORS_ORIGINS` env'inden virgülle ayrılmış origin listesi.
+   * Production'da boş liste = cross-origin istekler reddedilir (yalnızca same-origin geçer).
+   * Development'ta server/index.js buna localhost + 127.0.0.1 + 192.168.x.x regex'lerini ekler.
+   */
+  corsOrigins: (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean),
+
+  /**
    * Global rate-limit: tüm unauthenticated dahil tüm endpoint'lere uygulanır.
    * /api/health hariç tutulur (monitoring probe'larını kırmamak için).
    * windowMs: milisaniye; max: pencere başına izin verilen istek sayısı.

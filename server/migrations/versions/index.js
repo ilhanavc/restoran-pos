@@ -8,6 +8,8 @@ import * as takeawayPlannedPaymentType from './0006_takeaway_planned_payment_typ
 import * as dropLegacyCustomerColumns from './0007_drop_legacy_customer_columns.js';
 import * as customerNameSplitAndAddressAdmin from './0008_customer_name_split_and_address_admin.js';
 import * as renormalizeCustomerPhones from './0009_renormalize_customer_phones.js';
+import * as cleanupSoftDeletedCategories from './0010_cleanup_soft_deleted_categories.js';
+import * as mustChangePassword from './0011_must_change_password.js';
 
 export const BASELINE_SCHEMA_VERSION = baselineLegacySchema.version;
 
@@ -22,4 +24,6 @@ export const versionedMigrations = [
   dropLegacyCustomerColumns,
   customerNameSplitAndAddressAdmin,
   renormalizeCustomerPhones,
+  cleanupSoftDeletedCategories,
+  mustChangePassword,
 ];
