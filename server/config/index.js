@@ -105,6 +105,18 @@ export default {
   },
   storeTimezone: process.env.STORE_TIMEZONE || 'Europe/Istanbul',
 
+  /**
+   * Sentry hata + performans izleme.
+   * DSN boşsa init no-op (kod kırılmaz). Detay: docs/runbooks/sentry-setup-runbook.md
+   */
+  sentry: {
+    dsn: process.env.SENTRY_DSN || '',
+    environment: process.env.SENTRY_ENVIRONMENT || nodeEnv,
+    release: process.env.SENTRY_RELEASE || '',
+    tracesSampleRate: Number.parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE ?? '0.1'),
+    profilesSampleRate: Number.parseFloat(process.env.SENTRY_PROFILES_SAMPLE_RATE ?? '0.1'),
+  },
+
   /** true ise processPendingJobsSync sunucu içi mock yazdırmayı yapmaz (StoreBridge kullanılır).
    *  Varsayılan: true (mock KAPALI, gerçek yazdırma AÇIK).
    *  Geliştirme ortamında mock açmak için DISABLE_PRINT_JOB_MOCK=false veya =0 set et. */

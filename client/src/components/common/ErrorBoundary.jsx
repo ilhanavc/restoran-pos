@@ -1,4 +1,5 @@
 import { Component } from 'react';
+import { Sentry, isSentryEnabled } from '../../services/sentry.js';
 
 /**
  * React Error Boundary — uygulamanın herhangi bir yerinde yakalanmamış
@@ -29,6 +30,13 @@ export default class ErrorBoundary extends Component {
   componentDidCatch(error, info) {
     // Electron log dosyasına da düşer (stdout → userData/logs/electron-main.log)
     console.error('[ErrorBoundary] Yakalanmamış render hatası:', error, info.componentStack);
+    if (isSentryEnabled()) {
+      Sentry.withScope((scope) => {
+        scope.setTag('source', 'ErrorBoundary');
+        scope.setContext('react', { componentStack: info?.componentStack });
+        Sentry.captureException(error);
+      });
+    }
   }
 
   handleReload() {

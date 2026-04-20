@@ -12,8 +12,13 @@ import { randomUUID } from 'crypto';
 import config from './config/index.js';
 import { buildCorsOriginCallback } from './utils/corsOrigin.js';
 import { logger } from './utils/logger.js';
+import { initSentry, Sentry, isSentryEnabled } from './utils/sentry.js';
 import { runMigrations } from './migrations/run.js';
 import { initSocket } from './socket.js';
+
+// Sentry init'i diğer middleware'lerden ÖNCE çağrılmalı ki
+// Sentry.setupExpressErrorHandler(app) doğru çalışsın.
+initSentry();
 
 // Routes
 import authRoutes from './routes/auth.js';
@@ -76,6 +81,14 @@ app.use(express.json({ limit: '10mb' }));
 
 // Her request'e izlenebilir kimlik ata (X-Request-Id header)
 app.use(requestIdMiddleware);
+
+// Her request'in Sentry isolation scope'una requestId tag'i ekle (log correlation).
+if (isSentryEnabled()) {
+  app.use((req, _res, next) => {
+    Sentry.getCurrentScope().setTag('requestId', req.requestId || null);
+    next();
+  });
+}
 
 // Structured access log — pino-http, NDJSON (electron-main.log uyumlu).
 // D-3 şeması korunur: her satır {ts, level, method, path, status, ms, requestId}.
@@ -225,14 +238,22 @@ if (config.nodeEnv === 'production') {
   }
 }
 
+// Sentry error handler — 500 catch-all'dan ÖNCE olmalı (olay yakalar, sonra next'e geçer).
+// DSN yoksa setupExpressErrorHandler yine güvenli (internal no-op).
+if (isSentryEnabled()) {
+  Sentry.setupExpressErrorHandler(app);
+}
+
 // Error handler (en sonda)
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   const requestId = req.requestId || null;
-  logger.error({ err, requestId }, 'Unhandled error');
+  const sentryEventId = res.sentry || null;
+  logger.error({ err, requestId, sentryEventId }, 'Unhandled error');
   res.status(500).json({
     error: 'Beklenmeyen bir hata oluştu',
     ...(requestId ? { requestId } : {}),
+    ...(sentryEventId ? { sentryEventId } : {}),
   });
 });
 
