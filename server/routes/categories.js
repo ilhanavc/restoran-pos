@@ -1,7 +1,12 @@
 import { Router } from 'express';
+import path from 'path';
+import fs from 'fs';
 import db from '../config/database.js';
+import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
+
+const UPLOADS_DIR = path.join(config.userDataPath, 'uploads', 'products');
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -89,38 +94,69 @@ router.patch('/:id', staffMenu, (req, res) => {
   }
 });
 
-// DELETE /api/categories/:id — hard delete; kategori ve tüm ürünleri kalıcı silinir
+// DELETE /api/categories/:id — hybrid: hard-delete if no order history, soft-delete otherwise
 router.delete('/:id', staffMenu, (req, res) => {
   try {
     const row = db.prepare('SELECT id, name FROM categories WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!row) return res.status(404).json({ error: 'Kategori bulunamadı' });
 
-    const txn = db.transaction(() => {
-      // Kategoriye ait ürün ID'lerini topla
-      const productIds = db.prepare(
-        'SELECT id FROM products WHERE category_id = ? AND business_id = ?',
-      ).all(req.params.id, req.businessId).map((p) => p.id);
+    const products = db.prepare(
+      'SELECT id, image_url FROM products WHERE category_id = ? AND business_id = ?',
+    ).all(req.params.id, req.businessId);
 
-      if (productIds.length > 0) {
-        const ph = productIds.map(() => '?').join(',');
-        // Ürünlere bağlı modifier ve combo kayıtlarını sil (CASCADE yok)
-        db.prepare(`DELETE FROM product_modifiers WHERE product_id IN (${ph})`).run(...productIds);
-        db.prepare(`DELETE FROM product_combos WHERE parent_product_id IN (${ph}) OR child_product_id IN (${ph})`).run(...productIds, ...productIds);
+    // Separate products into those with and without order history
+    const hardDeleteIds = [];
+    const softDeleteIds = [];
+    for (const p of products) {
+      const hasOrders = db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(p.id);
+      if (hasOrders) softDeleteIds.push(p.id);
+      else hardDeleteIds.push(p.id);
+    }
+
+    const imagesToDelete = products
+      .filter((p) => hardDeleteIds.includes(p.id) && p.image_url)
+      .map((p) => p.image_url);
+
+    db.transaction(() => {
+      // Hard-delete products with no order history
+      if (hardDeleteIds.length > 0) {
+        const ph = hardDeleteIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM product_modifiers WHERE product_id IN (${ph})`).run(...hardDeleteIds);
+        db.prepare(`DELETE FROM product_combos WHERE parent_product_id IN (${ph}) OR child_product_id IN (${ph})`).run(...hardDeleteIds, ...hardDeleteIds);
+        db.prepare(`DELETE FROM product_portions WHERE product_id IN (${ph})`).run(...hardDeleteIds);
+        db.prepare(`DELETE FROM product_attribute_groups WHERE product_id IN (${ph})`).run(...hardDeleteIds);
+        db.prepare(`DELETE FROM products WHERE id IN (${ph})`).run(...hardDeleteIds);
       }
 
-      // Yazıcı yönlendirmesindeki kategori referansını temizle (nullable FK)
+      // Soft-delete products that have order history (FK constraint)
+      if (softDeleteIds.length > 0) {
+        const ph = softDeleteIds.map(() => '?').join(',');
+        db.prepare(`DELETE FROM product_modifiers WHERE product_id IN (${ph})`).run(...softDeleteIds);
+        db.prepare(`DELETE FROM product_combos WHERE parent_product_id IN (${ph}) OR child_product_id IN (${ph})`).run(...softDeleteIds, ...softDeleteIds);
+        db.prepare(`UPDATE products SET is_deleted = 1, is_active = 0, updated_at = datetime('now') WHERE id IN (${ph})`).run(...softDeleteIds);
+      }
+
       db.prepare('UPDATE printer_routing SET category_id = NULL WHERE category_id = ? AND business_id = ?').run(req.params.id, req.businessId);
+      db.prepare('DELETE FROM category_attribute_groups WHERE category_id = ?').run(req.params.id);
 
-      // Ürünleri sil (product_portions, product_attribute_groups CASCADE ile silinir)
-      db.prepare('DELETE FROM products WHERE category_id = ? AND business_id = ?').run(req.params.id, req.businessId);
+      if (softDeleteIds.length === 0) {
+        // All products removed — safe to hard-delete the category
+        db.prepare('DELETE FROM categories WHERE id = ? AND business_id = ?').run(req.params.id, req.businessId);
+      } else {
+        // Some products must remain due to FK — deactivate category instead
+        db.prepare("UPDATE categories SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?")
+          .run(req.params.id, req.businessId);
+      }
+    })();
 
-      // Kategoriyi sil (category_attribute_groups CASCADE ile silinir)
-      db.prepare('DELETE FROM categories WHERE id = ? AND business_id = ?').run(req.params.id, req.businessId);
-    });
-    txn();
+    for (const imageUrl of imagesToDelete) {
+      const imgFile = path.join(UPLOADS_DIR, path.basename(imageUrl));
+      fs.unlink(imgFile, () => {});
+    }
 
-    auditLog(req.businessId, req.user.id, 'category_delete', 'category', req.params.id, { name: row.name, hard_delete: true });
-    res.json({ success: true });
+    const hard_delete = softDeleteIds.length === 0;
+    auditLog(req.businessId, req.user.id, 'category_delete', 'category', req.params.id, { name: row.name, hard_delete });
+    res.json({ success: true, hard_delete });
   } catch (err) {
     console.error('Category delete:', err);
     res.status(500).json({ error: 'Sunucu hatası' });

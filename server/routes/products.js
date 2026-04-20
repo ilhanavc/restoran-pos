@@ -429,16 +429,41 @@ router.delete('/:id/combos/:comboId', staffMenu, (req, res) => {
   }
 });
 
-// DELETE /api/products/:id — soft delete (is_deleted=1, is_active=0)
+// DELETE /api/products/:id — hybrid: hard-delete if no order history, soft-delete otherwise
 router.delete('/:id', staffMenu, (req, res) => {
   try {
     const product = db.prepare('SELECT * FROM products WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!product) return res.status(404).json({ error: 'Ürün bulunamadı' });
 
-    db.prepare(`UPDATE products SET is_deleted = 1, is_active = 0, updated_at = datetime('now')
-      WHERE id = ? AND business_id = ?`).run(req.params.id, req.businessId);
+    const hasOrders = db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(req.params.id);
 
-    auditLog(req.businessId, req.user.id, 'product_delete', 'product', req.params.id, {});
+    let deleted = false;
+    if (hasOrders) {
+      // Soft-delete: preserve FK integrity with order history
+      db.transaction(() => {
+        db.prepare('DELETE FROM product_modifiers WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM product_combos WHERE parent_product_id = ? OR child_product_id = ?').run(req.params.id, req.params.id);
+        db.prepare("UPDATE products SET is_deleted = 1, is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?")
+          .run(req.params.id, req.businessId);
+      })();
+    } else {
+      // Hard-delete: no order history, safe to remove permanently
+      db.transaction(() => {
+        db.prepare('DELETE FROM product_modifiers WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM product_combos WHERE parent_product_id = ? OR child_product_id = ?').run(req.params.id, req.params.id);
+        db.prepare('DELETE FROM product_portions WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM product_attribute_groups WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM products WHERE id = ? AND business_id = ?').run(req.params.id, req.businessId);
+      })();
+      deleted = true;
+
+      if (product.image_url) {
+        const imgFile = path.join(UPLOADS_DIR, path.basename(product.image_url));
+        fs.unlink(imgFile, () => {});
+      }
+    }
+
+    auditLog(req.businessId, req.user.id, 'product_delete', 'product', req.params.id, { hard_delete: deleted });
     recordEntityMutation({
       businessId: req.businessId,
       entityTable: 'products',
@@ -448,7 +473,7 @@ router.delete('/:id', staffMenu, (req, res) => {
       actorUserId: req.user.id,
       requestId: req.requestId,
     });
-    res.json({ success: true });
+    res.json({ success: true, hard_delete: deleted });
   } catch (err) {
     console.error('Product delete:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
