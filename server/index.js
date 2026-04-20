@@ -7,8 +7,11 @@ import cors from 'cors';
 import compression from 'compression';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import pinoHttp from 'pino-http';
+import { randomUUID } from 'crypto';
 import config from './config/index.js';
 import { buildCorsOriginCallback } from './utils/corsOrigin.js';
+import { logger } from './utils/logger.js';
 import { runMigrations } from './migrations/run.js';
 import { initSocket } from './socket.js';
 
@@ -74,22 +77,38 @@ app.use(express.json({ limit: '10mb' }));
 // Her request'e izlenebilir kimlik ata (X-Request-Id header)
 app.use(requestIdMiddleware);
 
-// Structured access log — JSON-line, electron-main.log'a akar (health check hariç)
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    if (req.path === '/api/health') return;
-    console.log('[access]', JSON.stringify({
-      ts: new Date().toISOString(),
-      method: req.method,
-      path: req.path,
-      status: res.statusCode,
-      ms: Date.now() - start,
-      requestId: req.requestId || null,
-    }));
-  });
-  next();
-});
+// Structured access log — pino-http, NDJSON (electron-main.log uyumlu).
+// D-3 şeması korunur: her satır {ts, level, method, path, status, ms, requestId}.
+// /api/health probe gürültüsü susturulur.
+app.use(pinoHttp({
+  logger,
+  genReqId: (req) => req.requestId || randomUUID(),
+  customLogLevel: (req, res, err) => {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'info';
+  },
+  customSuccessMessage: () => 'access',
+  customErrorMessage: () => 'access',
+  autoLogging: {
+    ignore: (req) => req.url === '/api/health',
+  },
+  // D-3 şeması: mevcut alan adlarını koru (method/path/status/ms/requestId)
+  customProps: (req, res) => ({
+    method: req.method,
+    path: req.url?.split('?')[0],
+    status: res.statusCode,
+    requestId: req.requestId || req.id || null,
+  }),
+  customAttributeKeys: {
+    responseTime: 'ms',
+  },
+  // Varsayılan req/res/responseTime alanlarını bastır (customProps zaten yazıyor)
+  serializers: {
+    req: () => undefined,
+    res: () => undefined,
+  },
+}));
 
 // Rate limiting
 // Auth endpoint'leri: 15 dakikada 50 deneme (brute-force koruması)
@@ -172,7 +191,7 @@ app.use('/api/dashboard', dashboardRoutes);
 // Bilinmeyen /api yolları için JSON 404 (HTML dönmesin)
 app.use('/api', (req, res) => {
   if (config.nodeEnv !== 'production') {
-    console.warn('[api 404]', req.method, req.originalUrl);
+    logger.warn({ method: req.method, path: req.originalUrl }, 'api 404');
   }
   res.status(404).json({
     error: 'İstek bulunamadı',
@@ -199,7 +218,8 @@ if (config.nodeEnv === 'production') {
       });
     });
   } else {
-    console.warn(
+    logger.warn(
+      { clientDist: config.clientDist },
       `[prod] React build bulunamadı (${config.clientDist}). Önce proje kökünde "npm run build" çalıştırın.`,
     );
   }
@@ -209,7 +229,7 @@ if (config.nodeEnv === 'production') {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   const requestId = req.requestId || null;
-  console.error('Unhandled error:', err, requestId ? { requestId } : undefined);
+  logger.error({ err, requestId }, 'Unhandled error');
   res.status(500).json({
     error: 'Beklenmeyen bir hata oluştu',
     ...(requestId ? { requestId } : {}),
@@ -223,14 +243,10 @@ const httpServer = createServer(app);
 initSocket(httpServer);
 
 httpServer.listen(config.port, config.host, () => {
-  console.log(`
-  ╔══════════════════════════════════════╗
-  ║   🍽️  Restoran POS Server           ║
-  ║   Host: ${config.host}                 ║
-  ║   Port: ${config.port}                        ║
-  ║   Env:  ${config.nodeEnv}               ║
-  ╚══════════════════════════════════════╝
-  `);
+  logger.info(
+    { host: config.host, port: config.port, env: config.nodeEnv },
+    `Restoran POS Server ${config.host}:${config.port} (${config.nodeEnv})`,
+  );
 });
 
 export default app;
