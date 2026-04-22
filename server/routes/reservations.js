@@ -5,6 +5,7 @@ import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { genId } from '../utils/helpers.js';
 import { createOrder } from '../services/orderService.js';
+import { getStoreDate } from '../utils/time.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -39,7 +40,7 @@ router.get('/', authorize('admin', 'cashier'), (req, res) => {
         ORDER BY r.reservation_date, r.reservation_time
       `).all(req.businessId, from, to);
     } else {
-      const targetDate = date || new Date().toISOString().slice(0, 10);
+      const targetDate = date || getStoreDate();
       rows = db.prepare(`
         SELECT r.*, t.name as table_name
         FROM reservations r LEFT JOIN tables t ON r.table_id = t.id

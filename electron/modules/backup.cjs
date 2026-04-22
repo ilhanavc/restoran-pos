@@ -4,6 +4,7 @@ const fs = require('fs');
 
 const { getPosConfigPath, getCodeRoot, getPackagedServerRoot } = require('./config.cjs');
 const { getMainWindow } = require('./window.cjs');
+const { todayInIstanbul, dateTimeStampInIstanbul, msUntilNextHourInIstanbul } = require('./time.cjs');
 
 const BACKUP_KEEP_DAYS = 30;
 const BACKUP_HOUR = 2;
@@ -61,7 +62,7 @@ async function performBackup(dbPath) {
 
     await checkDiskSpaceForBackup(dbPath, backupsDir);
 
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = todayInIstanbul();
     const backupPath = path.join(backupsDir, `pos-${dateStr}.db`);
     if (fs.existsSync(backupPath)) {
       console.log('[backup] Bugünkü yedek zaten mevcut:', backupPath);
@@ -184,11 +185,7 @@ function cleanOldBackups(backupsDir) {
 }
 
 function msUntilNextBackupHour() {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(BACKUP_HOUR, 0, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  return next.getTime() - now.getTime();
+  return msUntilNextHourInIstanbul(BACKUP_HOUR);
 }
 
 function scheduleBackup(dbPath) {
@@ -231,7 +228,7 @@ function removeSqliteSidecars(dbPath) {
 
 async function createRestoreSafetyBackup(Database, dbPath, backupsDir) {
   if (!fs.existsSync(dbPath)) return null;
-  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const stamp = dateTimeStampInIstanbul();
   const safetyPath = path.join(backupsDir, `restore-safety-${stamp}.db`);
   const liveDb = new Database(dbPath, { readonly: true, fileMustExist: true });
   try { await liveDb.backup(safetyPath); } finally { liveDb.close(); }

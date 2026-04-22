@@ -82,8 +82,8 @@ export default {
    * windowMs: milisaniye; max: pencere başına izin verilen istek sayısı.
    */
   globalRateLimit: {
-    windowMs: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || '900000', 10), // 15 dakika
-    max: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_MAX || '300', 10),              // 15 dk'da 300 istek
+    windowMs: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || '60000', 10), // 1 dakika
+    max: Number.parseInt(process.env.GLOBAL_RATE_LIMIT_MAX || '300', 10),              // dk'da 300 istek
   },
 
   get userDataPath() {

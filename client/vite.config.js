@@ -20,6 +20,7 @@ const sentryPlugin = process.env.SENTRY_AUTH_TOKEN
 
 export default defineConfig({
   plugins: [react(), ...(sentryPlugin ? [sentryPlugin] : [])],
+  base: './',
   build: {
     // Source map sadece Sentry upload için üretilir. Auth token yoksa .map dosyaları
     // dist'e sızmasın diye sourcemap kapalı tutulur (önceki davranış).

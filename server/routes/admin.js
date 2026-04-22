@@ -11,6 +11,7 @@ import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { validatePassword } from '../utils/password.js';
+import { dateTimeStampInIstanbul } from '../utils/time.js';
 import { recordEntityMutation } from '../services/entityMutationService.js';
 import { ORDER_STATUSES_CLOSED } from '../constants/orderStatus.js';
 
@@ -542,7 +543,7 @@ async function createManualBackup() {
     throw err;
   }
 
-  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const stamp = dateTimeStampInIstanbul().replace(/ /g, '-').replace(/:/g, '-');
   const fileName = `pos-manual-${stamp}.db`;
   const backupPath = path.join(backupsDir, fileName);
   const tempPath = `${backupPath}.tmp-${process.pid}`;
@@ -1101,8 +1102,7 @@ router.patch('/business', (req, res) => {
     const n = (name ?? '').trim();
     if (!n) return res.status(400).json({ error: 'İşletme adı boş olamaz' });
     const tax = (tax_id ?? '').trim();
-    if (!tax) return res.status(400).json({ error: 'Vergi numarası zorunludur' });
-    if (tax.length < 5 || !/^[\dA-Za-z]+$/.test(tax)) {
+    if (tax && (tax.length < 5 || !/^[\dA-Za-z]+$/.test(tax))) {
       return res.status(400).json({ error: 'Vergi numarası en az 5 karakter ve yalnızca harf/rakam olmalıdır' });
     }
     const beforeBusiness = db.prepare(

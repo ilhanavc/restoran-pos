@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import config from './index.js';
+import { registerSqliteTimeFunctions } from '../utils/time.js';
 
 const dbDir = path.dirname(config.db.path);
 if (!fs.existsSync(dbDir)) {
@@ -14,5 +15,6 @@ const db = new Database(config.db.path);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.pragma('busy_timeout = 5000');
+registerSqliteTimeFunctions(db, config.storeTimezone);
 
 export default db;

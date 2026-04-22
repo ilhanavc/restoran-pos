@@ -1,7 +1,7 @@
 const { app, BrowserWindow, dialog } = require('electron');
 const path = require('path');
 
-const { HEALTH_HOST } = require('./serverProcess.cjs');
+const { getCodeRoot } = require('./config.cjs');
 
 /** @type {BrowserWindow | null} */
 let mainWindow = null;
@@ -24,10 +24,16 @@ function createWindow(port, cloudServerUrl = null) {
     },
   });
 
-  const url = cloudServerUrl || `http://${HEALTH_HOST}:${port}/`;
-  mainWindow.loadURL(url).catch((err) => {
-    dialog.showErrorBox('Yükleme hatası', `Sayfa açılamadı: ${err.message}`);
-  });
+  if (cloudServerUrl) {
+    mainWindow.loadURL(cloudServerUrl).catch((err) => {
+      dialog.showErrorBox('Yükleme hatası', `Sayfa açılamadı: ${err.message}`);
+    });
+  } else {
+    const clientIndex = path.join(getCodeRoot(), 'client', 'dist', 'index.html');
+    mainWindow.loadFile(clientIndex).catch((err) => {
+      dialog.showErrorBox('Yükleme hatası', `Sayfa açılamadı: ${err.message}`);
+    });
+  }
 
   mainWindow.once('ready-to-show', () => {
     if (mainWindow) mainWindow.show();

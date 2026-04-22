@@ -1,3 +1,5 @@
+import { formatDateTimeInIstanbul } from './time.js';
+
 export const FIELD_LABELS = {
   id: 'ID',
   created_at: 'Oluşturulma',
@@ -174,7 +176,7 @@ function formatMoney(n) {
 function formatDate(v) {
   if (!v) return '—';
   try {
-    return new Date(v).toLocaleString('tr-TR', {
+    return formatDateTimeInIstanbul(v, {
       day: '2-digit', month: '2-digit', year: 'numeric',
       hour: '2-digit', minute: '2-digit',
     });

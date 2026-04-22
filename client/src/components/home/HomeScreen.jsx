@@ -5,6 +5,7 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { formatCurrency, PAYMENT_TYPES } from '../../constants/index.js';
 import api from '../../services/api.js';
 import { useSocket } from '../../context/SocketContext.jsx';
+import { addDaysToDateString, formatTimeInIstanbul, parseDateLike, todayInIstanbul } from '../../utils/time.js';
 
 const PAYMENT_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'];
 const LIVE_REFRESH_MS = 20000;
@@ -12,27 +13,24 @@ const ALERTS_REFRESH_MS = 60000;
 
 const OP_HOURS = ['06','07','08','09','10','11','12','13','14','15','16','17','18','19','20','21','22','23','00','01','02'];
 
-function todayStr() { return new Date().toISOString().slice(0, 10); }
-function addDaysStr(days) {
-  const d = new Date(); d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+function todayStr() { return todayInIstanbul(); }
+function addDaysStr(days) { return addDaysToDateString(todayInIstanbul(), days); }
 function formatPctDelta(a, b) {
   if (!Number.isFinite(a) || !Number.isFinite(b) || b <= 0) return null;
   return Math.round(((a - b) / b) * 100);
 }
 function parseIso(iso) {
   if (!iso) return null;
-  const t = new Date(iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`);
-  return Number.isFinite(t.getTime()) ? t : null;
+  const t = parseDateLike(iso);
+  return t && Number.isFinite(t.getTime()) ? t : null;
 }
 function formatHms(iso) {
   const d = parseIso(iso);
-  return d ? d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+  return d ? formatTimeInIstanbul(d, { second: '2-digit' }) : '';
 }
 function formatHm(iso) {
   const d = parseIso(iso);
-  return d ? d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
+  return d ? formatTimeInIstanbul(d) : '';
 }
 
 // ── KPI Kart ──────────────────────────────────────────────────────────────────

@@ -26,6 +26,7 @@ import ClipboardEmpty from './ClipboardEmpty.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import CustomerDetailsModal from './CustomerDetailsModal.jsx';
 import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
+import { formatTimeInIstanbul, parseDateLike } from '../../utils/time.js';
 
 function toOrderAttributePayload(selectedAttributes = []) {
   const byGroup = new Map();
@@ -1031,9 +1032,9 @@ export default function OrderScreen({
                           const parts = [];
                           if (item.created_by_name) parts.push(item.created_by_name);
                           if (item.created_at) {
-                            const d = new Date(item.created_at.includes('T') ? item.created_at : item.created_at.replace(' ', 'T') + 'Z');
-                            if (!Number.isNaN(d.getTime())) {
-                              parts.push(d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }));
+                            const d = parseDateLike(item.created_at);
+                            if (d && !Number.isNaN(d.getTime())) {
+                              parts.push(formatTimeInIstanbul(d));
                             }
                           }
                           return parts.length > 0 ? (
@@ -1497,6 +1498,7 @@ export default function OrderScreen({
                   onChange={(e) => handleCustomerSearchInput(e.target.value)}
                   autoComplete="off"
                   spellCheck={false}
+                  autoFocus
                 />
               </div>
               {selectedCustomer && (

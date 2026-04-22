@@ -1,7 +1,8 @@
 const { expect } = require('@playwright/test');
 
 async function loginAsCashier(page) {
-  await page.goto('/login');
+  // HashRouter kullanıldığı için URL'ler /#/path formatında
+  await page.goto('/#/login');
   await page.getByTestId('login-email-input').waitFor({ state: 'visible', timeout: 30_000 });
   await page.getByTestId('login-email-input').fill('kasiyer@demo.com');
   await page.getByTestId('login-password-input').fill('123456');
@@ -17,8 +18,8 @@ async function loginAsCashier(page) {
     }
   }
 
-  // Hedef: /tables. Readiness'a yönlenmişsek direkt /tables'a yönlendir.
-  await page.goto('/tables');
+  // Hedef: /#/tables. Readiness'a yönlenmişsek direkt /#/tables'a yönlendir.
+  await page.goto('/#/tables');
   await expect(page).toHaveURL(/\/tables/, { timeout: 15_000 });
 }
 

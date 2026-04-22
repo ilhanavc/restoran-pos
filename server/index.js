@@ -50,6 +50,19 @@ const app = express();
 // TRUST_PROXY_HOPS env'i ile ayarlanır (varsayılan 0 = doğrudan erişim).
 app.set('trust proxy', config.trustProxyHops);
 
+// CORS origin callback: prod'da yalnızca `config.corsOrigins` whitelist'i;
+// dev'de ek olarak localhost / 127.0.0.1 / LAN (192.168.x, 10.x) otomatik izin verir.
+// Bilinmeyen origin → `CORS: origin not allowed` (403). Detay: utils/corsOrigin.js
+// NOT: cors() rate-limit'ten ÖNCE çağrılmalı — aksi halde 429 yanıtlarında
+// Access-Control-Allow-Origin header'ı olmaz ve tarayıcı "No CORS header" der.
+app.use(cors({
+  origin: buildCorsOriginCallback({
+    origins: config.corsOrigins,
+    isProduction: config.nodeEnv === 'production',
+  }),
+  credentials: true,
+}));
+
 // Global rate-limit — /api/health hariç tüm endpoint'lere uygulanır.
 // Monitoring probe'larının ve per-route limiter'ların etkisiz kalmaması için
 // health endpoint skip edilir; gerçek IP için trust proxy ayarının doğru
@@ -67,16 +80,6 @@ app.use(globalLimiter);
 // Middleware
 app.use(compression());
 app.use(helmet({ contentSecurityPolicy: false }));
-// CORS origin callback: prod'da yalnızca `config.corsOrigins` whitelist'i;
-// dev'de ek olarak localhost / 127.0.0.1 / LAN (192.168.x, 10.x) otomatik izin verir.
-// Bilinmeyen origin → `CORS: origin not allowed` (403). Detay: utils/corsOrigin.js
-app.use(cors({
-  origin: buildCorsOriginCallback({
-    origins: config.corsOrigins,
-    isProduction: config.nodeEnv === 'production',
-  }),
-  credentials: true,
-}));
 app.use(express.json({ limit: '10mb' }));
 
 // Her request'e izlenebilir kimlik ata (X-Request-Id header)

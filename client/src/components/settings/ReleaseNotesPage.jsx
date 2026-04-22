@@ -16,14 +16,45 @@ import {
   ScrollText, RefreshCw, Copy, Check, Tag,
   Sparkles, Bug, Zap, Shield, Package,
 } from 'lucide-react';
+import { formatDateInIstanbul } from '../../utils/time.js';
 
 /* ── Statik changelog — her release'e eklenir ──────────────────────────── */
 
 const RELEASES = [
   {
+    version: '1.1.0',
+    date: '2026-04-20',
+    tag: 'latest',
+    sections: [
+      {
+        type: 'security',
+        title: 'FAZ 0 — Online Öncesi Güvenlik Sertleştirmesi',
+        items: [
+          'JWT_SECRET prod fail-fast: eksik veya < 32 karakter secret reddediliyor.',
+          'CORS whitelist sertleştirildi: prod\'da yalnızca CORS_ORIGINS env\'i geçerli.',
+          'Trust proxy hop sayısı env-driven (TRUST_PROXY_HOPS) — rate-limit gerçek IP üzerinden.',
+          'Global rate-limit env ile ayarlanabilir; /api/health muaf.',
+          'Şifre politikası: min 8 karakter + büyük harf + rakam; zorunlu ilk giriş şifre değişimi.',
+          'Pino yapılandırılmış log + Sentry entegrasyonu (backend + frontend, GDPR redact).',
+          '.gitignore sertleştirmesi: .env, pos-config.json, *.db, uploads/, backups/ artık commit edilemez.',
+          'CI timeout + concurrency guard + client build doğrulama job\'u eklendi.',
+        ],
+      },
+      {
+        type: 'fix',
+        title: 'Düzeltmeler',
+        items: [
+          'Paket teslim ödemeleri artık kullanıcının seçtiği Nakit/Kart altında grafiklerde toplanıyor (system_takeaway_delivery ayrı grup olarak görünmüyor).',
+          'CORS + rate-limit middleware sırası düzeltildi: 429 yanıtlarında CORS header\'ı artık mevcut.',
+          'Global rate-limit pencere varsayılanı 15 dk → 1 dk (dev polling uyumu).',
+          'Migration 0010 FK çakışması giderildi: sipariş geçmişi olan pasif kategoriler korunuyor, gerçekten orphan olanlar hard-delete ediliyor.',
+        ],
+      },
+    ],
+  },
+  {
     version: '1.0.9',
     date: '2026-04-18',
-    tag: 'latest',
     sections: [
       {
         type: 'improvement',
@@ -136,7 +167,7 @@ function sectionMeta(type) {
 
 /* ── Ana bileşen ────────────────────────────────────────────────────────── */
 
-const APP_VERSION_FALLBACK = '1.0.9';
+const APP_VERSION_FALLBACK = '1.1.0';
 
 export default function ReleaseNotesPage() {
   const [appVersion, setAppVersion] = useState(null);
@@ -332,7 +363,7 @@ export default function ReleaseNotesPage() {
               )}
               <span style={{ flex: 1 }} />
               <span style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                {new Date(release.date).toLocaleDateString('tr-TR', {
+                {formatDateInIstanbul(release.date, {
                   year: 'numeric', month: 'long', day: 'numeric',
                 })}
               </span>

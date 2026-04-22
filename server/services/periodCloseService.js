@@ -1,16 +1,16 @@
 import db from '../config/database.js';
 import { genId, auditLog } from '../utils/helpers.js';
+import { addDaysToDateString, dayBoundsInStoreTime, getStoreDate, getStoreDateFromDbTimestamp } from '../utils/time.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
 export function isValidPeriodDate(date) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) return false;
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+  return addDaysToDateString(date, 0) === date;
 }
 
 export function normalizePeriodDate(date) {
-  const targetDate = date || new Date().toISOString().slice(0, 10);
+  const targetDate = date || getStoreDate();
   if (!isValidPeriodDate(targetDate)) {
     const err = new Error('Geçersiz tarih');
     err.status = 400;
@@ -20,24 +20,18 @@ export function normalizePeriodDate(date) {
   return targetDate;
 }
 
-export function addDays(date, days) {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+export const addDays = addDaysToDateString;
 
 export function dayBounds(date) {
-  return [`${date} 00:00:00`, `${addDays(date, 1)} 00:00:00`];
+  return dayBoundsInStoreTime(date);
 }
 
 function dateFromTimestampOrDate(timestampOrDate) {
-  if (!timestampOrDate) return new Date().toISOString().slice(0, 10);
+  if (!timestampOrDate) return getStoreDate();
   const text = String(timestampOrDate);
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  if (/^\d{4}-\d{2}-\d{2}[ T]/.test(text)) return text.slice(0, 10);
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
-  return parsed.toISOString().slice(0, 10);
+  const normalized = getStoreDateFromDbTimestamp(text);
+  return normalized || getStoreDate();
 }
 
 function mapPaymentType(type) {
@@ -87,9 +81,7 @@ export function buildPeriodReport(businessId, date) {
     const amount = Number(payment.amount) || 0;
     totalRevenue = round2(totalRevenue + amount);
 
-    const paymentType = payment.source === 'system_takeaway_delivery'
-      ? 'system_takeaway_delivery'
-      : mapPaymentType(payment.payment_type);
+    const paymentType = mapPaymentType(payment.payment_type);
     const pBucket = paymentBuckets.get(paymentType) || { payment_type: paymentType, count: 0, total: 0 };
     pBucket.count += 1;
     pBucket.total = round2(pBucket.total + amount);

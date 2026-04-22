@@ -1,23 +1,10 @@
 import { Router } from 'express';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
+import { addDaysToDateString, dayBoundsInStoreTime, getStoreDate, rangeBoundsInStoreTime } from '../utils/time.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
-
-function addDays(date, days) {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function dayBounds(date) {
-  return [`${date} 00:00:00`, `${addDays(date, 1)} 00:00:00`];
-}
-
-function rangeBounds(from, to) {
-  return [`${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`];
-}
 
 const paymentAmountCents = 'COALESCE(amount_cents, ROUND(amount * 100))';
 const paymentTipCents = 'COALESCE(tip_cents, ROUND(COALESCE(tip_amount, 0) * 100))';
@@ -31,8 +18,8 @@ const orderItemSubtotalCents = 'COALESCE(oi.subtotal_cents, ROUND((oi.unit_price
 router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { date } = req.query;
-    const targetDate = date || new Date().toISOString().slice(0, 10);
-    const [startAt, endAt] = dayBounds(targetDate);
+    const targetDate = date || getStoreDate();
+    const [startAt, endAt] = dayBoundsInStoreTime(targetDate);
 
     const revenue = db.prepare(`
       SELECT COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total FROM payments
@@ -62,18 +49,12 @@ router.get('/daily', authorize('admin', 'cashier'), (req, res) => {
 
     const paymentBreakdown = db.prepare(`
       SELECT
-        CASE
-          WHEN source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
-          ELSE payment_type
-        END AS payment_type,
+        payment_type,
         COUNT(*) as count,
         COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total
       FROM payments
       WHERE business_id = ? AND created_at >= ? AND created_at < ?
-      GROUP BY CASE
-        WHEN source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
-        ELSE payment_type
-      END
+      GROUP BY payment_type
     `).all(req.businessId, startAt, endAt);
 
     const topProducts = db.prepare(`
@@ -164,9 +145,9 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
     const offset = (page - 1) * limit;
 
     // Tarih aralığı: from/to > date > bugün
-    const fromDate = from || date || new Date().toISOString().slice(0, 10);
+    const fromDate = from || date || getStoreDate();
     const toDate = to || fromDate;
-    const [startAt, endAt] = rangeBounds(fromDate, toDate);
+    const [startAt, endAt] = rangeBoundsInStoreTime(fromDate, toDate);
 
     const whereParts = [
       'o.business_id = ?',
@@ -203,10 +184,7 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
         COALESCE((SELECT SUM(COALESCE(r.amount_cents, ROUND(r.amount * 100))) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) / 100.0 AS refunded_total,
-        (SELECT CASE
-            WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
-            ELSE p.payment_type
-          END
+        (SELECT p.payment_type
          FROM payments p
          WHERE p.order_id = o.id
          ORDER BY p.created_at
@@ -240,9 +218,9 @@ router.get('/closed-orders', authorize('admin', 'cashier'), (req, res) => {
 router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { date, from, to, customer, min_amount, max_amount } = req.query;
-    const fromDate = from || date || new Date().toISOString().slice(0, 10);
+    const fromDate = from || date || getStoreDate();
     const toDate = to || fromDate;
-    const [startAt, endAt] = rangeBounds(fromDate, toDate);
+    const [startAt, endAt] = rangeBoundsInStoreTime(fromDate, toDate);
 
     const whereParts = [
       'o.business_id = ?',
@@ -272,10 +250,7 @@ router.get('/closed-orders/export', authorize('admin', 'cashier'), (req, res) =>
         COALESCE(o.user_name_snapshot, u.full_name) AS user_name,
         COALESCE(o.customer_name_snapshot, c.full_name) AS customer_name,
         COALESCE((SELECT SUM(COALESCE(r.amount_cents, ROUND(r.amount * 100))) FROM refunds r WHERE r.order_id = o.id AND r.status = 'completed'), 0) / 100.0 AS refunded_total,
-        (SELECT CASE
-            WHEN p.source = 'system_takeaway_delivery' THEN 'system_takeaway_delivery'
-            ELSE p.payment_type
-          END
+        (SELECT p.payment_type
          FROM payments p
          WHERE p.order_id = o.id
          ORDER BY p.created_at
@@ -301,12 +276,12 @@ router.get('/range', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'Tarih aralığı gerekli' });
-    const [startAt, endAt] = rangeBounds(from, to);
+    const [startAt, endAt] = rangeBoundsInStoreTime(from, to);
 
     const revenue = db.prepare(`
-      SELECT date(created_at) as date, COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total
+      SELECT store_date(created_at) as date, COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as total
       FROM payments WHERE business_id = ? AND created_at >= ? AND created_at < ?
-      GROUP BY date(created_at) ORDER BY date
+      GROUP BY store_date(created_at) ORDER BY date
     `).all(req.businessId, startAt, endAt);
 
     const summary = db.prepare(`
@@ -329,11 +304,11 @@ router.get('/range', authorize('admin', 'cashier'), (req, res) => {
 router.get('/hourly', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { date } = req.query;
-    const targetDate = date || new Date().toISOString().slice(0, 10);
-    const [startAt, endAt] = dayBounds(targetDate);
+    const targetDate = date || getStoreDate();
+    const [startAt, endAt] = dayBoundsInStoreTime(targetDate);
 
     const rows = db.prepare(`
-      SELECT strftime('%H', created_at) as hour,
+      SELECT store_hour(created_at) as hour,
              COUNT(*) as order_count,
              COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 as revenue
       FROM payments
@@ -362,7 +337,7 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { from, to } = req.query;
     if (!from || !to) return res.status(400).json({ error: 'from ve to parametreleri gerekli' });
-    const [startAt, endAt] = rangeBounds(from, to);
+    const [startAt, endAt] = rangeBoundsInStoreTime(from, to);
 
     // Top 10 ürün (adet bazlı)
     const topProducts = db.prepare(`
@@ -378,7 +353,7 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
 
     // Saatlik yoğunluk (0-23)
     const hourlyRows = db.prepare(`
-      SELECT strftime('%H', p.created_at) AS hour,
+      SELECT store_hour(p.created_at) AS hour,
              COUNT(*) AS order_count,
              COALESCE(SUM(COALESCE(p.amount_cents, ROUND(p.amount * 100))), 0) / 100.0 AS revenue
       FROM payments p
@@ -395,10 +370,10 @@ router.get('/analytics', authorize('admin', 'cashier'), (req, res) => {
 
     // Günlük ciro (seçilen dönem)
     const dailyRevenue = db.prepare(`
-      SELECT date(p.created_at) AS date, COALESCE(SUM(COALESCE(p.amount_cents, ROUND(p.amount * 100))), 0) / 100.0 AS revenue, COUNT(*) AS order_count
+      SELECT store_date(p.created_at) AS date, COALESCE(SUM(COALESCE(p.amount_cents, ROUND(p.amount * 100))), 0) / 100.0 AS revenue, COUNT(*) AS order_count
       FROM payments p
       WHERE p.business_id = ? AND p.created_at >= ? AND p.created_at < ?
-      GROUP BY date(p.created_at) ORDER BY date
+      GROUP BY store_date(p.created_at) ORDER BY date
     `).all(req.businessId, startAt, endAt);
 
     // Dönem özeti

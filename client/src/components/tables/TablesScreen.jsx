@@ -8,6 +8,7 @@ import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constant
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import { isOrderFullyPaid } from '../../utils/orderPaymentState.js';
 import { getPrintErrorMessage } from '../../utils/printErrorMessages.js';
+import { formatDateTimeInIstanbul } from '../../utils/time.js';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 import {
@@ -221,15 +222,13 @@ export default function TablesScreen({
 
   const formatCallDateTime = (value) => {
     if (!value) return '-';
-    const dt = new Date(value);
-    if (Number.isNaN(dt.getTime())) return '-';
-    return dt.toLocaleString('tr-TR', {
+    return formatDateTimeInIstanbul(value, {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    });
+    }) || '-';
   };
 
   const getCallStatusLabel = (status) => {

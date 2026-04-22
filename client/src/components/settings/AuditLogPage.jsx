@@ -8,6 +8,7 @@ import { useToast } from '../../context/ToastContext.jsx';
 import {
   labelForField, formatValue, entityLabel, activitySentence, actionIcon, isHiddenField,
 } from '../../utils/auditFormat.js';
+import { formatDateTimeInIstanbul, formatTimeInIstanbul, todayInIstanbul } from '../../utils/time.js';
 
 const TABLE_LABELS = {
   products: 'Ürün',
@@ -159,7 +160,7 @@ function ActivityCard({ row, onActorClick, onCopyId, toast }) {
   const diff = useMemo(() => diffFields(row.before_json, row.after_json), [row.before_json, row.after_json]);
   const sentence = useMemo(() => activitySentence(row), [row]);
   const icon = actionIcon(row.action);
-  const when = new Date(row.created_at).toLocaleString('tr-TR', {
+  const when = formatDateTimeInIstanbul(row.created_at, {
     day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
@@ -294,7 +295,7 @@ function downloadCsv(rows) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  const ts = `${todayInIstanbul()}-${formatTimeInIstanbul(new Date(), { second: '2-digit', hourCycle: 'h23' }).replace(/:/g, '-')}`;
   a.download = `denetim-gunlugu-${ts}.csv`;
   document.body.appendChild(a);
   a.click();
@@ -584,7 +585,7 @@ export default function AuditLogPage() {
               {rows.map((r) => (
                 <tr key={r.id} className="audit-row" style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 14px', whiteSpace: 'nowrap', color: 'var(--text-secondary)', fontSize: 12 }}>
-                    {new Date(r.created_at).toLocaleString('tr-TR')}
+                    {formatDateTimeInIstanbul(r.created_at)}
                   </td>
                   <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
                     {TABLE_LABELS[r.entity_table] || r.entity_table}

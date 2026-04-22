@@ -3,6 +3,7 @@ import { genId, auditLog } from '../utils/helpers.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
 import { recordEntityMutation } from './entityMutationService.js';
 import { toCents } from '../utils/money.js';
+import { getStoreDate } from '../utils/time.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
@@ -45,7 +46,7 @@ function assertPaymentRefundable(payment, businessId, amount) {
   }
   if (payment.order_status === 'cancelled') throw badRequest('İptal sipariş için iade oluşturulamaz');
 
-  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
+  assertPeriodOpenForMutation(businessId, getStoreDate());
   assertPeriodOpenForMutation(businessId, payment.created_at);
 
   const remaining = round2(Math.max(0, Number(payment.amount || 0) - paymentRefundedTotal(payment.id)));
@@ -105,7 +106,7 @@ export function createFullRefundForOrder(businessId, userId, orderId, reason, au
   const refundablePayments = payments.filter((payment) => payment.refundable_amount > 0.02);
   if (!refundablePayments.length) throw badRequest('Bu sipariş için iade edilebilir ödeme bulunmuyor');
 
-  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
+  assertPeriodOpenForMutation(businessId, getStoreDate());
   for (const payment of refundablePayments) {
     assertPeriodOpenForMutation(businessId, payment.created_at);
   }

@@ -4,6 +4,7 @@ import { AlertTriangle, DatabaseBackup, Download, FolderSync, RefreshCw, RotateC
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
+import { formatDateInIstanbul, formatDateTimeInIstanbul } from '../../utils/time.js';
 
 function formatBytes(value) {
   const n = Number(value) || 0;
@@ -252,7 +253,7 @@ export default function MaintenancePage() {
             <strong>Güncel yedek yok</strong>
             <p>
               {latest
-                ? `Son yedek ${new Date(latest.modified_at).toLocaleDateString('tr-TR')} tarihinde alındı. Otomatik yedekleme çalışmıyor olabilir.`
+                ? `Son yedek ${formatDateInIstanbul(latest.modified_at)} tarihinde alındı. Otomatik yedekleme çalışmıyor olabilir.`
                 : 'Hiç yedek bulunamadı. Servis öncesi manuel yedek alın.'}
             </p>
           </div>
@@ -306,7 +307,7 @@ export default function MaintenancePage() {
               <div className="maintenance-backup-main">
                 <div className="maintenance-backup-title">{backup.name}</div>
                 <div className="maintenance-backup-meta">
-                  {backupKindLabel(backup.kind)} · {formatBytes(backup.size)} · {new Date(backup.modified_at).toLocaleString('tr-TR')}
+                  {backupKindLabel(backup.kind)} · {formatBytes(backup.size)} · {formatDateTimeInIstanbul(backup.modified_at)}
                   {backup.meta?.rowCounts ? (
                     <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontSize: 12 }}>
                       · {backup.meta.rowCounts.orders ?? '?'} sipariş · {backup.meta.rowCounts.customers ?? '?'} müşteri
@@ -359,7 +360,7 @@ export default function MaintenancePage() {
                 <strong>Hedef klasör:</strong> {scheduler.destFolder}
                 <br />
                 <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                  Kurulum: {new Date(scheduler.createdAt).toLocaleString('tr-TR')}
+                  Kurulum: {formatDateTimeInIstanbul(scheduler.createdAt)}
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -428,7 +429,7 @@ export default function MaintenancePage() {
                     <ul style={{ margin: '10px 0 0', padding: '0 0 0 18px', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
                       <li>Uygulama sürümü: v{restoreStep.backup.meta.appVersion}</li>
                       <li>Şema sürümü: {restoreStep.backup.meta.schemaVersion}</li>
-                      <li>Oluşturulma: {new Date(restoreStep.backup.meta.createdAt).toLocaleString('tr-TR')}</li>
+                      <li>Oluşturulma: {formatDateTimeInIstanbul(restoreStep.backup.meta.createdAt)}</li>
                       <li>
                         Sipariş: {restoreStep.backup.meta.rowCounts?.orders ?? '?'} ·{' '}
                         Ödeme: {restoreStep.backup.meta.rowCounts?.payments ?? '?'} ·{' '}

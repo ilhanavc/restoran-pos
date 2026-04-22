@@ -8,6 +8,7 @@ import {
   normalizeIdempotencyKey, rangeBounds,
   buildSplitState, createPayment, createSplitPayment,
 } from '../services/paymentService.js';
+import { getStoreDate } from '../utils/time.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -110,7 +111,7 @@ router.post('/split', authorize('admin', 'cashier'), validate(createSplitPayment
 router.get('/summary', authorize('admin', 'cashier'), (req, res) => {
   try {
     const { date_from, date_to } = req.query;
-    const from = date_from || new Date().toISOString().slice(0, 10);
+    const from = date_from || getStoreDate();
     const to = date_to || from;
     const [startAt, endAt] = rangeBounds(from, to);
 

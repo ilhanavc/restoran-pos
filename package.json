@@ -1,6 +1,6 @@
 {
   "name": "restoran-pos",
-  "version": "1.0.9",
+  "version": "1.1.0",
   "private": true,
   "description": "Modern Restoran POS Sistemi",
   "author": "Restoran POS",
@@ -40,7 +40,7 @@
     "smoke:server-health": "node scripts/smoke-server-health.cjs",
     "postinstall": "node scripts/rebuild-server-native.cjs",
     "dist": "npm install --prefix server && npm run rebuild:server-native && npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --x64 --publish never",
-    "dist:prepare": "npm run build && npm install --prefix server --omit=dev && npm install --prefix store-bridge --omit=dev && npm run build:callerid-helper && npm run rebuild:server-native && npm run smoke:electron-sqlite && npm run smoke:server-health && npm run desktop:preflight && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --dir --publish never",
+    "dist:prepare": "npm run build && npm install --prefix server --omit=dev && npm install --prefix store-bridge --omit=dev && npm run build:callerid-helper && npm rebuild better-sqlite3 --prefix server --quiet && npm run smoke:server-health && npm run rebuild:server-native && npm run smoke:electron-sqlite && npm run desktop:preflight && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win --dir --publish never",
     "dist:nsis": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged dist-electron/win-unpacked --win nsis --publish never",
     "dist:portable": "cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --prepackaged dist-electron/win-unpacked --win portable --publish never",
     "dist:win": "npm run dist:prepare && npm run dist:nsis && npm run dist:portable",
@@ -53,6 +53,7 @@
   "build": {
     "appId": "com.restoranpos.desktop",
     "productName": "Restoran POS",
+    "asar": false,
     "directories": {
       "output": "dist-electron",
       "buildResources": "resources"

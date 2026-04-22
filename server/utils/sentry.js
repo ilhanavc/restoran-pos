@@ -1,5 +1,4 @@
 import * as Sentry from '@sentry/node';
-import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import config from '../config/index.js';
 import { logger } from './logger.js';
 
@@ -87,9 +86,7 @@ export function initSentry() {
     tracesSampleRate: config.sentry.tracesSampleRate,
     profilesSampleRate: config.sentry.profilesSampleRate,
     sendDefaultPii: false,
-    integrations: [
-      nodeProfilingIntegration(),
-    ],
+    integrations: [],
     ignoreErrors: IGNORED_ERROR_MESSAGES,
     beforeSend: beforeSendRedact,
   });

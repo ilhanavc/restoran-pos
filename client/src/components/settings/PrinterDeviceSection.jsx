@@ -1,4 +1,5 @@
 import { toneColor } from './printerDiscoveryStatus.js';
+import { formatDateTimeInIstanbul } from '../../utils/time.js';
 
 export default function PrinterDeviceSection({
   physicalName,
@@ -28,7 +29,7 @@ export default function PrinterDeviceSection({
         </button>
         {discoveryUpdatedAt ? (
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            Son tarama: {new Date(discoveryUpdatedAt).toLocaleString('tr-TR')}
+            Son tarama: {formatDateTimeInIstanbul(discoveryUpdatedAt)}
           </span>
         ) : null}
       </div>

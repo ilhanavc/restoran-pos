@@ -9,6 +9,7 @@ import { formatCurrency } from '../../constants/index.js';
 import { BarChart3, TrendingUp, CreditCard, ShoppingBag, Award, Calendar, Receipt, Clock, Search, ChevronDown, Download, Printer } from 'lucide-react';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import useConfirmDialog from '../common/useConfirmDialog.js';
+import { addDaysToDateString, todayInIstanbul } from '../../utils/time.js';
 
 // ── Export yardımcıları ──────────────────────────────────────────────────────
 
@@ -219,11 +220,8 @@ const PIE_COLORS = ['var(--accent)', 'var(--success)', 'var(--warning)', 'var(--
 
 function buildTrendDates(anchorDate) {
   const dates = [];
-  const base = new Date(anchorDate);
   for (let i = 6; i >= 0; i--) {
-    const d = new Date(base);
-    d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(addDaysToDateString(anchorDate, -i));
   }
   return dates;
 }
@@ -255,7 +253,7 @@ export default function ReportsScreen() {
   const [exportingOrders, setExportingOrders] = useState(false);
   const [hourlyData, setHourlyData] = useState([]);
   const [trendData, setTrendData] = useState([]);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [selectedDate, setSelectedDate] = useState(todayInIstanbul());
   const [loading, setLoading] = useState(true);
   // Sipariş geçmişi filtreleri
   const [orderFrom, setOrderFrom] = useState('');
@@ -265,10 +263,9 @@ export default function ReportsScreen() {
   const [orderMaxAmount, setOrderMaxAmount] = useState('');
   const [orderFilterOpen, setOrderFilterOpen] = useState(false);
   const [analyticsFrom, setAnalyticsFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 6);
-    return d.toISOString().slice(0, 10);
+    return addDaysToDateString(todayInIstanbul(), -6);
   });
-  const [analyticsTo, setAnalyticsTo] = useState(new Date().toISOString().slice(0, 10));
+  const [analyticsTo, setAnalyticsTo] = useState(todayInIstanbul());
   const [analyticsData, setAnalyticsData] = useState(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [periodReport, setPeriodReport] = useState(null);

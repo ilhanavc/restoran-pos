@@ -5,17 +5,14 @@ import { AUTO_PRINT_EVENTS } from './printerAutoPrintPolicy.js';
 import { assertPeriodOpenForMutation } from './periodCloseService.js';
 import { recordEntityMutation } from './entityMutationService.js';
 import { toCents } from '../utils/money.js';
+import { addDaysToDateString, getStoreDate, rangeBoundsInStoreTime } from '../utils/time.js';
 
 export const round2 = (value) => Math.round((Number(value) || 0) * 100) / 100;
 
-export function addDays(date, days) {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+export const addDays = addDaysToDateString;
 
 export function rangeBounds(from, to) {
-  return [`${from} 00:00:00`, `${addDays(to, 1)} 00:00:00`];
+  return rangeBoundsInStoreTime(from, to);
 }
 
 export function normalizeIdempotencyKey(bodyKey, headerKey) {
@@ -205,7 +202,7 @@ export function createPayment(businessId, userId, paymentData, idempotencyKey, a
     err.isBadRequest = true;
     throw err;
   }
-  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
+  assertPeriodOpenForMutation(businessId, getStoreDate());
 
   const paymentId = genId();
   const cashIn = cash_received != null ? cash_received : amount + tipAmount;
@@ -326,7 +323,7 @@ export function createSplitPayment(businessId, userId, paymentData, idempotencyK
     err.isBadRequest = true;
     throw err;
   }
-  assertPeriodOpenForMutation(businessId, new Date().toISOString().slice(0, 10));
+  assertPeriodOpenForMutation(businessId, getStoreDate());
 
   const paymentId = genId();
   let createdPayment = null;

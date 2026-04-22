@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, CircleAlert, RefreshCw, ShieldCheck } from
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
+import { formatDateTimeInIstanbul } from '../../utils/time.js';
 
 function checkClass(status) {
   if (status === 'ok') return 'setup-check setup-check--ok';
@@ -160,7 +161,7 @@ export default function SetupReadinessPage() {
 
       {readiness?.completed ? (
         <div className="setup-readiness-note">
-          Son tamamlanma: {new Date(readiness.completed_at).toLocaleString('tr-TR')}
+          Son tamamlanma: {formatDateTimeInIstanbul(readiness.completed_at)}
         </div>
       ) : null}
     </div>

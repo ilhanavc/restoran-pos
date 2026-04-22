@@ -4,6 +4,7 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import ConfirmDialog from '../common/ConfirmDialog.jsx';
 import useConfirmDialog from '../common/useConfirmDialog.js';
+import { todayInIstanbul } from '../../utils/time.js';
 
 const STATUS_LABELS = {
   confirmed: { label: 'Onaylı', color: 'var(--info)', bg: 'var(--info-muted)' },
@@ -12,7 +13,7 @@ const STATUS_LABELS = {
   no_show:   { label: 'Gelmedi', color: 'var(--text-muted)', bg: 'var(--bg-tertiary)' },
 };
 
-function today() { return new Date().toISOString().slice(0, 10); }
+function today() { return todayInIstanbul(); }
 
 function ReservationModal({ reservation, tables, onClose, onSave }) {
   const [form, setForm] = useState({

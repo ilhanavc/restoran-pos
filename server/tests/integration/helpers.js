@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 import { migrateDatabase } from '../../migrations/run.js';
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
+import { registerSqliteTimeFunctions } from '../../utils/time.js';
 
 export const TEST_JWT_SECRET = 'integration-test-secret-key-32chars!';
 
@@ -31,6 +32,7 @@ export const testConfig = {
  */
 export function createTestDb() {
   const db = new Database(':memory:');
+  registerSqliteTimeFunctions(db, testConfig.storeTimezone);
   migrateDatabase(db);
   return db;
 }

@@ -4,6 +4,8 @@ import { Activity, AlertTriangle, CheckCircle2, Download, RefreshCw, XCircle } f
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
+import { BASE_URL } from '../../services/api/core.js';
+import { formatDateTimeInIstanbul, todayInIstanbul } from '../../utils/time.js';
 
 function StatusBadge({ status }) {
   if (status === 'ok')
@@ -33,7 +35,7 @@ function StatusBadge({ status }) {
 
 function fmtTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('tr-TR');
+  return formatDateTimeInIstanbul(iso) || '—';
 }
 
 export default function StoreBridgePage() {
@@ -74,11 +76,10 @@ export default function StoreBridgePage() {
   const downloadSupportBundle = useCallback(async () => {
     setDownloading(true);
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('pos_token');
       // process.env.VITE_API_URL mantığına uygun bir API prefiksi için tam path kullanılmalı
       // Uygulamada proxy /api'ye devrettiğine göre doğrudan /api/admin/support-bundle kullanıyoruz.
-      const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      const res = await fetch(`${baseUrl}/api/admin/support-bundle`, {
+      const res = await fetch(`${BASE_URL}/api/admin/support-bundle`, {
         headers: { Authorization: 'Bearer ' + token }
       });
       if (!res.ok) throw new Error('Destek paketi alınamadı');
@@ -86,7 +87,7 @@ export default function StoreBridgePage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `destek-paketi-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.download = `destek-paketi-${todayInIstanbul()}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();

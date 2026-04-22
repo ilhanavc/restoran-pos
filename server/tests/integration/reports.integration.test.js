@@ -108,7 +108,7 @@ describe('GET /api/reports/daily', () => {
     expect(res.status).toBe(401);
   });
 
-  it('system_takeaway_delivery ödemesini gerçek other ödemeden ayrı gruplar', async () => {
+  it('paket teslim ödemesini (source=system_takeaway_delivery) gerçek payment_type (card) altında gruplar', async () => {
     dbRef.current.prepare(`
       INSERT OR IGNORE INTO orders
       (id, business_id, user_id, order_type, status, grand_total, created_at, updated_at, closed_at)
@@ -117,7 +117,7 @@ describe('GET /api/reports/daily', () => {
     dbRef.current.prepare(`
       INSERT OR IGNORE INTO payments
       (id, order_id, business_id, amount, payment_type, source, created_at, created_by)
-      VALUES ('rpt-pay-system-delivery', 'rpt-order-system-delivery', ?, 140, 'other', 'system_takeaway_delivery', datetime('now'), ?)
+      VALUES ('rpt-pay-system-delivery', 'rpt-order-system-delivery', ?, 140, 'card', 'system_takeaway_delivery', datetime('now'), ?)
     `).run(seeds.businessId, seeds.userId);
 
     const res = await request(app)
@@ -128,9 +128,10 @@ describe('GET /api/reports/daily', () => {
     expect(res.body.paymentBreakdown).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ payment_type: 'cash', total: 250 }),
-        expect.objectContaining({ payment_type: 'system_takeaway_delivery', total: 140 }),
+        expect.objectContaining({ payment_type: 'card', total: 140 }),
       ]),
     );
+    expect(res.body.paymentBreakdown.find((p) => p.payment_type === 'system_takeaway_delivery')).toBeUndefined();
   });
 });
 
@@ -179,7 +180,7 @@ describe('GET /api/reports/closed-orders', () => {
     expect(res.body.limit).toBe(10);
   });
 
-  it('system_takeaway_delivery siparişini payment_type alanında ayrı gösterir', async () => {
+  it('paket teslim siparişinin payment_type alanı seçilen kart/nakit değerini yansıtır', async () => {
     const today = new Date().toISOString().slice(0, 10);
     const res = await request(app)
       .get(`/api/reports/closed-orders?date=${today}`)
@@ -187,7 +188,7 @@ describe('GET /api/reports/closed-orders', () => {
 
     expect(res.status).toBe(200);
     const systemOrder = res.body.orders.find((order) => order.id === 'rpt-order-system-delivery');
-    expect(systemOrder?.payment_type).toBe('system_takeaway_delivery');
+    expect(systemOrder?.payment_type).toBe('card');
   });
 });
 

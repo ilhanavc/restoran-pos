@@ -1,6 +1,6 @@
 /**
- * Electron main: child process'te Express (server/index.js), BrowserWindow ile http://127.0.0.1:PORT
- * Express kodu Electron içine gömülmez; file:// kullanılmaz.
+ * Electron main: child process'te Express (server/index.js), BrowserWindow ile renderer yüklenir.
+ * Local modda arayüz preload üzerinden API base URL alır; cloud modda doğrudan remote URL açılır.
  * pos-config.json mevcutsa ayarlar oradan okunur; Store Bridge otomatik başlatılır.
  */
 const { app, dialog, ipcMain } = require('electron');
@@ -17,6 +17,7 @@ const { startServerAndWaitForHealth, stopServerProcess } = require('./modules/se
 const { startStoreBridge, stopBridge } = require('./modules/bridgeProcess.cjs');
 const { startCallerIdHelper, stopCallerIdHelper } = require('./modules/callerIdProcess.cjs');
 const { createWindow, getMainWindow } = require('./modules/window.cjs');
+const { dateTimeStampInIstanbul } = require('./modules/time.cjs');
 const {
   scheduleBackup, applyPendingRestoreIfAny,
   performBackup, verifySqliteBackup, requireBetterSqlite3ForBackup, safeRestoreBackupName,
@@ -65,6 +66,7 @@ app.whenReady().then(async () => {
     copyLegacySqliteToUserDataIfNeeded(userDataDbPath, legacyDbMain);
     await applyPendingRestoreIfAny(userDataDbPath);
     const port = await startServerAndWaitForHealth(userDataDbPath);
+    _localServerPort = port;
     scheduleBackup(userDataDbPath);
     createWindow(port);
     startStoreBridge(port);
@@ -119,6 +121,8 @@ function initAutoUpdater() {
   autoUpdater.on('error', (err) => {
     const msg = err?.message || String(err);
     console.error('[updater] Hata:', msg);
+    // app-update.yml yoksa (win-unpacked doğrudan çalıştırma) sessizce geç
+    if (msg.includes('app-update.yml') || msg.includes('ENOENT')) return;
     getMainWindow()?.webContents.send('update-error', { message: msg });
   });
 
@@ -144,9 +148,12 @@ ipcMain.on('restart-app', () => { app.relaunch(); app.quit(); });
 // Mevcut uygulama versiyonu — package.json'dan
 ipcMain.handle('app:get-version', () => app.getVersion());
 
+let _localServerPort = null;
+
 ipcMain.on('config:get-electron-config', (event) => {
+  const cloudUrl = getCloudServerUrl();
   event.returnValue = {
-    apiBaseUrl: getCloudServerUrl(),
+    apiBaseUrl: cloudUrl || (_localServerPort ? `http://127.0.0.1:${_localServerPort}` : null),
   };
 });
 
@@ -308,7 +315,7 @@ ipcMain.handle('backup:pick-external-db', async () => {
   const Database = requireBetterSqlite3ForBackup();
   const backupsDir = path.join(app.getPath('userData'), 'backups');
   fs.mkdirSync(backupsDir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const stamp = dateTimeStampInIstanbul();
   const fileName = `pos-manual-${stamp}.db`;
   const destPath = path.join(backupsDir, fileName);
   fs.copyFileSync(srcPath, destPath);

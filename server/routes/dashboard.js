@@ -1,6 +1,15 @@
 import { Router } from 'express';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
+import {
+  addDaysToDateString,
+  dayBoundsInStoreTime,
+  getStoreDate,
+  getStoreDateTime,
+  getStoreTime,
+  toSqliteUtcTimestamp,
+  zonedDateTimeToUtc,
+} from '../utils/time.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -8,25 +17,14 @@ router.use(authenticate, businessScope);
 const paymentAmountCents = 'COALESCE(amount_cents, ROUND(amount * 100))';
 const orderGrandTotalCents = 'COALESCE(grand_total_cents, ROUND(grand_total * 100))';
 
-function addDays(date, days) {
-  const d = new Date(`${date}T00:00:00.000Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 /**
  * GET /api/dashboard/live
  * Canlı operasyon şeridi için hızlı sayımlar (<50 ms hedefi).
  */
 router.get('/live', authorize('admin', 'cashier', 'waiter'), (req, res) => {
   try {
-    const today = todayStr();
-    const startAt = `${today} 00:00:00`;
-    const endAt = `${addDays(today, 1)} 00:00:00`;
+    const today = getStoreDate();
+    const [startAt, endAt] = dayBoundsInStoreTime(today);
 
     const occupiedTables = db.prepare(`
       SELECT COUNT(*) as cnt FROM tables
@@ -70,7 +68,7 @@ router.get('/live', authorize('admin', 'cashier', 'waiter'), (req, res) => {
     `).get(req.businessId);
 
     res.json({
-      asOf: new Date().toISOString(),
+      asOf: getStoreDateTime(),
       occupiedTables: occupiedTables.cnt,
       kitchenInProgress: kitchenAgg.total || 0,
       kitchenOldYellow: kitchenAgg.yellow || 0,
@@ -92,15 +90,15 @@ router.get('/live', authorize('admin', 'cashier', 'waiter'), (req, res) => {
 router.get('/compare', authorize('admin', 'cashier'), (req, res) => {
   try {
     const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-    const currentTime = now.toTimeString().slice(0, 8);
+    const today = getStoreDate(now);
+    const currentTime = getStoreTime(now);
     const cutoff = `${today} ${currentTime}`;
-    const yesterday = addDays(today, -1);
-    const lastWeek = addDays(today, -7);
+    const yesterday = addDaysToDateString(today, -1);
+    const lastWeek = addDaysToDateString(today, -7);
 
     function sliceFor(date) {
-      const startAt = `${date} 00:00:00`;
-      const endAt = `${date} ${currentTime}`;
+      const startAt = toSqliteUtcTimestamp(zonedDateTimeToUtc(date, '00:00:00'));
+      const endAt = toSqliteUtcTimestamp(zonedDateTimeToUtc(date, currentTime));
       const rev = db.prepare(`
         SELECT COALESCE(SUM(${paymentAmountCents}), 0) / 100.0 AS total, COUNT(*) AS count
         FROM payments
@@ -166,9 +164,8 @@ router.get('/alerts', authorize('admin', 'cashier'), (req, res) => {
       });
     }
 
-    const today = todayStr();
-    const startAt = `${today} 00:00:00`;
-    const endAt = `${addDays(today, 1)} 00:00:00`;
+    const today = getStoreDate();
+    const [startAt, endAt] = dayBoundsInStoreTime(today);
     const staleKitchen = db.prepare(`
       SELECT COUNT(*) AS cnt
       FROM order_items oi

@@ -1,3 +1,5 @@
+import { formatDateInIstanbul, formatDateTimeInIstanbul, formatTimeInIstanbul } from '../utils/time.js';
+
 /** Sipariş satırı (order_items) durum rozetleri — sipariş alma ekranı */
 export const ORDER_ITEM_LINE_STATUS = {
   new: { label: 'Yeni', short: 'YENİ', bg: 'var(--info-muted)', color: 'var(--info)' },
@@ -58,21 +60,21 @@ export function formatTime(dateStr) {
   if (!dateStr) return '';
   const ms = parseDbTimestampMs(dateStr);
   if (!Number.isFinite(ms)) return '';
-  return new Date(ms).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+  return formatTimeInIstanbul(new Date(ms));
 }
 
 export function formatDate(dateStr) {
   if (!dateStr) return '';
   const ms = parseDbTimestampMs(dateStr);
   if (!Number.isFinite(ms)) return '';
-  return new Date(ms).toLocaleDateString('tr-TR');
+  return formatDateInIstanbul(new Date(ms));
 }
 
 export function formatDateTime(dateStr) {
   if (!dateStr) return '';
   const ms = parseDbTimestampMs(dateStr);
   if (!Number.isFinite(ms)) return '';
-  return new Date(ms).toLocaleString('tr-TR');
+  return formatDateTimeInIstanbul(new Date(ms));
 }
 
 /** Sunucu (SQLite datetime('now')) UTC string'leri; tarayıcı "YYYY-MM-DD HH:MM:SS"i yerel sanıp ~3 saat sapma yapmasın diye ms. */

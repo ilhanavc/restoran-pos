@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Smartphone, Plus, Trash2, ToggleLeft, ToggleRight, RefreshCw, Copy, Check } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import { formatDateTimeInIstanbul, formatTimeInIstanbul } from '../../utils/time.js';
 
 function PlatformBadge({ platform }) {
   const map = { android: { label: 'Android', color: 'var(--green, #22c55e)' }, ios: { label: 'iOS', color: '#7c5af7' }, unknown: { label: 'Bilinmiyor', color: 'var(--text-muted)' } };
@@ -133,7 +134,7 @@ export default function DevicesPage() {
             </div>
 
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
-              Geçerlilik: {new Date(pairingToken.expires_at).toLocaleTimeString('tr-TR')}
+              Geçerlilik: {formatTimeInIstanbul(pairingToken.expires_at)}
             </div>
 
             <button className="btn btn-secondary" style={{ width: '100%' }} onClick={() => setPairingToken(null)}>
@@ -178,7 +179,7 @@ export default function DevicesPage() {
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{d.user_email}</div>
                   </td>
                   <td style={{ padding: '11px 14px', fontSize: 12, color: 'var(--text-muted)' }}>
-                    {d.last_seen_at ? new Date(d.last_seen_at).toLocaleString('tr-TR') : '—'}
+                    {d.last_seen_at ? formatDateTimeInIstanbul(d.last_seen_at) : '—'}
                   </td>
                   <td style={{ padding: '11px 14px' }}><StatusBadge isActive={Boolean(d.is_active)} /></td>
                   <td style={{ padding: '11px 14px' }}>
