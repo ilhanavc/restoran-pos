@@ -133,6 +133,31 @@ describe('bridge print job lease behavior', () => {
 });
 
 describe('bridge health and discovery contract', () => {
+  it('falls back to the legacy printer record name for usb printers when physicalName is missing', async () => {
+    dbRef.current.prepare(`
+      INSERT INTO printers (
+        id, business_id, branch_id, name, type, connection_type, ip_address, port, is_active, print_options, created_at
+      ) VALUES (?, ?, ?, ?, 'receipt', 'usb', NULL, 9100, 1, ?, datetime('now'))
+    `).run(
+      'printer-usb-legacy',
+      seeds.businessId,
+      seeds.branchId,
+      'EPSON TM-T20III USB',
+      JSON.stringify({ device: { physicalName: '' } }),
+    );
+
+    const res = await withBridgeAuth(request(app).get('/api/bridge/printers/printer-usb-legacy'));
+
+    expect(res.status).toBe(200);
+    expect(res.body.printer).toEqual(
+      expect.objectContaining({
+        id: 'printer-usb-legacy',
+        connection_type: 'usb',
+        printer_name: 'EPSON TM-T20III USB',
+      }),
+    );
+  });
+
   it('returns structured health with discovery, refresh request and queue summary', async () => {
     insertPrintJob({ id: 'health-pending', status: 'pending' });
     dbRef.current.prepare(`

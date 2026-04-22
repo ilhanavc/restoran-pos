@@ -94,17 +94,23 @@ function mapPrinterRow(row) {
   if (!row) return null;
   const type = row.type || 'receipt';
   const print_options = normalizeBridgePrintOptions(row.print_options, type);
+  const connectionType = row.connection_type || 'network';
+  const physicalName = String(print_options?.device?.physicalName || '').trim();
+  const legacyPrinterName = String(row.name || '').trim();
   return {
     id: row.id,
     business_id: row.business_id,
     name: row.name,
     type,
-    connection_type: row.connection_type || 'network',
+    connection_type: connectionType,
     ip_address: row.ip_address,
     port: row.port ?? 9100,
     is_active: row.is_active === 1 || row.is_active === true,
-    // USB yazıcı için Windows yazıcı adı — PrinterDetailPage'de fiziksel yazıcı seçiminden gelir
-    printer_name: String(print_options?.device?.physicalName || '').trim() || null,
+    // USB yazıcı için önce açıkça seçilmiş fiziksel adı kullan;
+    // eski kurulumlarda bu alan boş olabilir, o durumda kayıt adını geriye dönük
+    // uyumluluk amacıyla Windows yazıcı adı olarak dene.
+    printer_name:
+      physicalName || (String(connectionType).toLowerCase() === 'usb' && legacyPrinterName ? legacyPrinterName : null),
     print_options,
   };
 }

@@ -63,6 +63,9 @@ export class ApiHttpClient {
       err.status = res.status;
       if (data.requireBusinessId) err.requireBusinessId = data.requireBusinessId;
       if (data.businesses) err.businesses = data.businesses;
+      if (data.must_change_password) err.mustChangePassword = true;
+      if (data.email) err.email = data.email;
+      if (data.businessId || data.business_id) err.businessId = data.businessId || data.business_id;
       if (Array.isArray(data.blockers)) err.blockers = data.blockers;
       if (data.usage) err.usage = data.usage;
       if (data.readiness) err.readiness = data.readiness;

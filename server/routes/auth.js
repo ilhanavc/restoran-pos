@@ -57,6 +57,13 @@ const changePasswordSchema = {
   }),
 };
 
+const forgotPasswordSchema = {
+  body: z.object({
+    email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
+    business_id: z.string().trim().min(1).optional(),
+  }),
+};
+
 function signAccessToken(user, expiresIn) {
   return jwt.sign(
     { userId: user.id, role: user.role_slug, businessId: user.business_id },
@@ -76,6 +83,16 @@ function createRefreshTokenRecord({ userId, clientType = 'mobile', deviceId = nu
     VALUES (?, ?, ?, ?, ?, datetime('now', '+30 days'))
   `).run(genId(), userId, hashToken(refreshToken), deviceId, clientType);
   return refreshToken;
+}
+
+function getActiveUsersByEmail(email) {
+  return db.prepare(`
+    SELECT u.id, u.business_id, u.email, u.full_name,
+           b.name as business_name
+    FROM users u
+    JOIN businesses b ON b.id = u.business_id
+    WHERE u.email = ? AND u.is_active = 1
+  `).all(email.toLowerCase().trim());
 }
 
 // POST /api/auth/login
@@ -316,6 +333,62 @@ router.post('/change-password', validate(changePasswordSchema), (req, res) => {
     res.json({ success: true, message: 'Şifre güncellendi. Yeni şifre ile giriş yapabilirsiniz.' });
   } catch (err) {
     console.error('Change password error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/forgot-password
+// E-posta altyapısı olmadığı için talep kaydı oluşturulur; yönetici geçici şifre
+// tanımladığında kullanıcı mevcut change-password akışıyla kalıcı şifresini seçer.
+router.post('/forgot-password', validate(forgotPasswordSchema), (req, res) => {
+  try {
+    const { email, business_id } = req.body;
+    const emNorm = email.toLowerCase().trim();
+    const rows = getActiveUsersByEmail(emNorm);
+    const matchedRows = business_id
+      ? rows.filter((row) => row.business_id === business_id)
+      : rows;
+
+    for (const row of matchedRows) {
+      const existingPending = db.prepare(`
+        SELECT id
+        FROM password_reset_requests
+        WHERE user_id = ? AND status = 'pending'
+        ORDER BY requested_at DESC
+        LIMIT 1
+      `).get(row.id);
+
+      if (existingPending) {
+        db.prepare(`
+          UPDATE password_reset_requests
+          SET requested_at = datetime('now'), updated_at = datetime('now')
+          WHERE id = ?
+        `).run(existingPending.id);
+      } else {
+        db.prepare(`
+          INSERT INTO password_reset_requests (
+            id, business_id, user_id, email, status, requested_at, channel, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 'pending', datetime('now'), 'login_screen', datetime('now'), datetime('now'))
+        `).run(genId(), row.business_id, row.id, row.email);
+      }
+
+      try {
+        auditLog(row.business_id, null, 'forgot_password_requested', 'user', row.id, {
+          email: row.email,
+          businessName: row.business_name,
+        });
+      } catch (_e) {
+        // Audit kaydı başarısız olsa bile kullanıcı akışını bozma.
+      }
+    }
+
+    res.json({
+      success: true,
+      message:
+        'Eğer bu e-posta sistemde kayıtlıysa şifre sıfırlama talebiniz kaydedildi. İşletme yöneticiniz geçici şifre tanımladığında giriş yapıp yeni şifrenizi belirleyebilirsiniz.',
+    });
+  } catch (err) {
+    console.error('Forgot password error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });

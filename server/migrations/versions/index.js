@@ -10,6 +10,7 @@ import * as customerNameSplitAndAddressAdmin from './0008_customer_name_split_an
 import * as renormalizeCustomerPhones from './0009_renormalize_customer_phones.js';
 import * as cleanupSoftDeletedCategories from './0010_cleanup_soft_deleted_categories.js';
 import * as mustChangePassword from './0011_must_change_password.js';
+import * as passwordResetRequests from './0012_password_reset_requests.js';
 
 export const BASELINE_SCHEMA_VERSION = baselineLegacySchema.version;
 
@@ -26,4 +27,5 @@ export const versionedMigrations = [
   renormalizeCustomerPhones,
   cleanupSoftDeletedCategories,
   mustChangePassword,
+  passwordResetRequests,
 ];

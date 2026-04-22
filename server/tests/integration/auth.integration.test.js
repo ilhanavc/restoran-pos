@@ -95,6 +95,96 @@ describe('POST /api/auth/login', () => {
 
     expect(res.status).toBe(400);
   });
+
+  it('must_change_password aktifse 403 ve yönlendirici veri döner', async () => {
+    dbRef.current.prepare(`
+      UPDATE users
+      SET must_change_password = 1
+      WHERE email = 'admin@test.com'
+    `).run();
+
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@test.com', password: 'test123' });
+
+    expect(res.status).toBe(403);
+    expect(res.body.must_change_password).toBe(true);
+    expect(res.body.email).toBe('admin@test.com');
+    expect(res.body.businessId).toBeTruthy();
+  });
+});
+
+describe('POST /api/auth/forgot-password', () => {
+  it('kayıtlı kullanıcı için pending reset request oluşturur', async () => {
+    const res = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'admin@test.com' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+
+    const row = dbRef.current.prepare(`
+      SELECT email, status
+      FROM password_reset_requests
+      WHERE user_id = ?
+    `).get(userId);
+
+    expect(row.email).toBe('admin@test.com');
+    expect(row.status).toBe('pending');
+  });
+
+  it('aynı kullanıcı için ikinci talepte yeni pending kayıt açmaz', async () => {
+    await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'admin@test.com' });
+
+    const second = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'admin@test.com' });
+
+    expect(second.status).toBe(200);
+    const count = dbRef.current.prepare(`
+      SELECT COUNT(*) AS c
+      FROM password_reset_requests
+      WHERE user_id = ? AND status = 'pending'
+    `).get(userId).c;
+    expect(count).toBe(1);
+  });
+});
+
+describe('POST /api/auth/change-password', () => {
+  it('geçici şifre sonrası yeni şifreyi kaydedip flagi sıfırlar', async () => {
+    dbRef.current.prepare(`
+      UPDATE users
+      SET must_change_password = 1
+      WHERE id = ?
+    `).run(userId);
+
+    const changeRes = await request(app)
+      .post('/api/auth/change-password')
+      .send({
+        email: 'admin@test.com',
+        oldPassword: 'test123',
+        newPassword: 'YeniSifre9',
+      });
+
+    expect(changeRes.status).toBe(200);
+    expect(changeRes.body.success).toBe(true);
+
+    const user = dbRef.current.prepare(`
+      SELECT must_change_password
+      FROM users
+      WHERE id = ?
+    `).get(userId);
+    expect(user.must_change_password).toBe(0);
+
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'admin@test.com', password: 'YeniSifre9' });
+
+    expect(loginRes.status).toBe(200);
+    expect(loginRes.body.user.email).toBe('admin@test.com');
+  });
 });
 
 // ── GET /api/auth/me ──────────────────────────────────────────────────────────
