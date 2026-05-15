@@ -13,15 +13,25 @@ try {
   
   console.log('Seeding database...');
 
-  // Önceleri mevcut verileri temizle
-  const tablesToClear = ['call_logs', 'incoming_calls', 'entity_mutations', 'audit_logs', 'settings', 'print_jobs', 'printer_routing', 'printers',
-    'payments', 'order_items', 'orders', 'customer_addresses', 'customer_phones', 'customers',
-    'product_modifiers', 'product_portions', 'products', 'categories', 'tables', 'dining_areas', 'users', 'roles', 'branches', 'businesses'];
-  
+  // Önceleri mevcut verileri temizle — FK'ları kapatarak garanti temizlik
+  db.pragma('foreign_keys = OFF');
+  const tablesToClear = [
+    'refresh_tokens', 'device_pairing_tokens', 'devices',
+    'call_logs', 'incoming_calls', 'entity_mutations', 'audit_logs', 'settings',
+    'print_jobs', 'printer_routing', 'printers',
+    'refunds', 'payments', 'order_items', 'orders',
+    'reservations', 'stock_movements', 'stock_items',
+    'customer_addresses', 'customer_phones', 'customers',
+    'product_modifiers', 'product_combos', 'product_portions', 'product_attribute_groups',
+    'category_attribute_groups', 'attribute_options', 'attribute_groups',
+    'products', 'categories', 'tables', 'dining_areas',
+    'users', 'roles', 'branches', 'businesses',
+  ];
   for (const t of tablesToClear) {
-    try { db.prepare(`DELETE FROM ${t}`).run(); } catch(e) { /* skip */ }
+    try { db.prepare(`DELETE FROM ${t}`).run(); } catch (e) { /* table may not exist, skip */ }
   }
-  console.log('   Eski veriler temizlendi');
+  db.pragma('foreign_keys = ON');
+  console.log('   Eski veriler temizlendi (FK güvenli)');
 
   const businessId = uuid();
   const branchId = uuid();
@@ -129,6 +139,68 @@ try {
     0,
   );
   console.log('   Smoke fixture kategori/ürün oluşturuldu');
+
+  // Realistic Demo Menu — 4 kategori + 18 ürün
+  const menuCategories = [
+    { name: 'Çorbalar',     color: '#dc2626', icon: '🍲', target: 'kitchen', order: 1 },
+    { name: 'Pideler',      color: '#f59e0b', icon: '🥙', target: 'kitchen', order: 2 },
+    { name: 'Ana Yemekler', color: '#16a34a', icon: '🍖', target: 'kitchen', order: 3 },
+    { name: 'İçecekler',    color: '#0891b2', icon: '🥤', target: 'bar',     order: 4 },
+  ];
+
+  const menuProducts = {
+    'Çorbalar': [
+      { name: 'Mercimek Çorbası',   price: 85,  desc: 'Geleneksel kırmızı mercimek çorbası, limon ve tereyağı ile' },
+      { name: 'Ezogelin Çorbası',   price: 90,  desc: 'Bulgur, mercimek ve nane ile zenginleştirilmiş klasik çorba' },
+      { name: 'Domates Çorbası',    price: 80,  desc: 'Taze domates ve kekik ile hazırlanmış kremalı çorba' },
+      { name: 'İşkembe Çorbası',    price: 110, desc: 'Sarımsaklı sirke ve acı biber sosu yanında' },
+    ],
+    'Pideler': [
+      { name: 'Kaşarlı Pide',           price: 220, desc: 'Bol kaşar peyniri ile geleneksel açma pide' },
+      { name: 'Kavurmalı Kaşarlı Pide', price: 290, desc: 'Et kavurması ve kaşar peyniri ile özel karışım' },
+      { name: 'Kıymalı Pide',           price: 240, desc: 'Baharatlı kıyma ve sebzeli iç harç ile' },
+      { name: 'Karışık Pide',           price: 310, desc: 'Sucuk, kaşar, salam ve sosis ile dolu pide' },
+      { name: 'Ispanaklı Pide',         price: 200, desc: 'Taze ıspanak ve beyaz peynir ile sağlıklı seçenek' },
+    ],
+    'Ana Yemekler': [
+      { name: 'Adana Kebap',     price: 380, desc: 'Acılı kıyma kebabı, lavaş ve közlenmiş sebze yanında' },
+      { name: 'Urfa Kebap',      price: 380, desc: 'Acısız kıyma kebabı, ayran tabağı ile' },
+      { name: 'Tavuk Şiş',       price: 320, desc: 'Marine edilmiş tavuk şişler, pilav ve salata ile' },
+      { name: 'İskender',        price: 420, desc: 'Tereyağlı pide üzerinde döner, tomato sos ve yoğurt' },
+      { name: 'Karışık Izgara',  price: 480, desc: 'Adana, urfa, tavuk şiş ve köfteden oluşan tabak' },
+      { name: 'Mantı',           price: 280, desc: 'El açması mantı, yoğurt ve naneli tereyağı sosu ile' },
+    ],
+    'İçecekler': [
+      { name: 'Ayran',          price: 40, desc: 'Geleneksel tuzlu ev ayranı' },
+      { name: 'Şalgam Suyu',    price: 50, desc: 'Acılı / acısız seçeneği ile' },
+      { name: 'Türk Kahvesi',   price: 60, desc: 'Az şekerli, orta veya sade' },
+      { name: 'Çay',            price: 25, desc: 'Geleneksel bardak çay' },
+      { name: 'Kola',           price: 55, desc: '330 ml kutu' },
+    ],
+  };
+
+  const categoryIds = {};
+  for (const cat of menuCategories) {
+    const catId = uuid();
+    categoryIds[cat.name] = catId;
+    db.prepare(`INSERT INTO categories (id, business_id, name, color, icon, sort_order, printer_target, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1)`).run(catId, businessId, cat.name, cat.color, cat.icon, cat.order, cat.target);
+  }
+
+  let demoProductCount = 0;
+  for (const [catName, items] of Object.entries(menuProducts)) {
+    let order = 0;
+    for (const p of items) {
+      db.prepare(`INSERT INTO products (id, business_id, category_id, name, description, price, vat_rate, printer_target, sort_order, is_active, is_deleted)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)`).run(
+        uuid(), businessId, categoryIds[catName], p.name, p.desc, p.price, 10,
+        menuCategories.find(c => c.name === catName).target, order,
+      );
+      order++;
+      demoProductCount++;
+    }
+  }
+  console.log('   ' + menuCategories.length + ' kategori + ' + demoProductCount + ' ürün eklendi (gerçekçi demo menü)');
 
   // Demo Customers
   const cust1 = uuid(), cust2 = uuid(), cust3 = uuid();
