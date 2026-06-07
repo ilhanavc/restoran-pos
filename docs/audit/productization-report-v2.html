@@ -1,0 +1,1057 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restoran POS — Ürün Yol Haritası v2</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --bg2: #161b27;
+    --bg3: #1e2535;
+    --border: #2a3347;
+    --accent: #4f8ef7;
+    --accent2: #7c5af7;
+    --green: #22c55e;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --text: #e2e8f0;
+    --muted: #7a8499;
+    --card-hover: #212b3d;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* HEADER */
+  .hero {
+    background: linear-gradient(135deg, #0f1117 0%, #1a1f36 50%, #0f1117 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 56px 40px 48px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -80px; right: -80px;
+    width: 380px; height: 380px;
+    background: radial-gradient(circle, rgba(79,142,247,0.12) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    bottom: -60px; left: 20%;
+    width: 260px; height: 260px;
+    background: radial-gradient(circle, rgba(124,90,247,0.08) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .hero-inner { max-width: 1100px; margin: 0 auto; position: relative; z-index: 1; }
+  .hero-tag {
+    display: inline-block;
+    background: rgba(79,142,247,0.15);
+    border: 1px solid rgba(79,142,247,0.3);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 4px 12px;
+    border-radius: 20px;
+    margin-bottom: 16px;
+  }
+  .hero h1 {
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1.15;
+    margin-bottom: 12px;
+    background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .hero-sub {
+    color: var(--muted);
+    font-size: 15px;
+    margin-bottom: 32px;
+    max-width: 560px;
+  }
+  .hero-stats {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .stat-chip {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 20px;
+    min-width: 130px;
+  }
+  .stat-chip .val {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-chip .lbl {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* LAYOUT */
+  .main { max-width: 1100px; margin: 0 auto; padding: 40px; }
+  .section { margin-bottom: 56px; }
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title .num {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 800;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    color: var(--text);
+  }
+
+  /* BADGES */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+  }
+  .badge-green { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .badge-yellow { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); }
+  .badge-blue { background: rgba(79,142,247,0.15); color: #7eb3ff; border: 1px solid rgba(79,142,247,0.3); }
+  .badge-gray { background: rgba(122,132,153,0.15); color: var(--muted); border: 1px solid rgba(122,132,153,0.2); }
+  .badge-red { background: rgba(239,68,68,0.12); color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+
+  /* COMPLETED GRID */
+  .completed-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+  .completed-item {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .completed-item:hover { border-color: rgba(34,197,94,0.3); background: var(--card-hover); }
+  .check-icon {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(34,197,94,0.15);
+    border: 1.5px solid rgba(34,197,94,0.4);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+    font-size: 11px;
+    color: #4ade80;
+  }
+  .completed-item .item-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .completed-item .item-desc { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
+  /* GOAL CARDS */
+  .goals-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 32px; }
+  .goal-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .goal-card.active { border-color: rgba(79,142,247,0.4); }
+  .goal-card.future { border-color: rgba(124,90,247,0.3); }
+  .goal-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .goal-card.active::before { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .goal-card.future::before { background: linear-gradient(90deg, var(--accent2), #a855f7); }
+  .goal-card .phase-tag {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .goal-card.active .phase-tag { color: var(--accent); }
+  .goal-card.future .phase-tag { color: #a78bfa; }
+  .goal-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+  .goal-card p { font-size: 13px; color: var(--muted); }
+
+  /* TIMELINE */
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 10px; top: 8px; bottom: 8px;
+    width: 2px;
+    background: linear-gradient(180deg, var(--accent), var(--accent2), rgba(124,90,247,0.2));
+    border-radius: 2px;
+  }
+  .tl-item {
+    position: relative;
+    margin-bottom: 6px;
+  }
+  .tl-item::before {
+    content: '';
+    position: absolute;
+    left: -22px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    border: 2px solid var(--bg);
+  }
+  .tl-item.done::before { background: var(--green); border-color: rgba(34,197,94,0.4); }
+  .tl-item.active::before { background: var(--accent); border-color: rgba(79,142,247,0.4); box-shadow: 0 0 0 4px rgba(79,142,247,0.15); }
+  .tl-item.pending::before { background: var(--bg3); border-color: var(--border); }
+  .tl-item.future::before { background: var(--bg3); border-color: rgba(124,90,247,0.3); }
+  .tl-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .tl-item.done .tl-card { border-color: rgba(34,197,94,0.2); }
+  .tl-item.active .tl-card { border-color: rgba(79,142,247,0.35); background: rgba(79,142,247,0.04); }
+  .tl-card:hover { background: var(--card-hover); }
+  .tl-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+  .tl-code { font-size: 11px; font-weight: 800; letter-spacing: 0.06em; color: var(--accent); font-family: monospace; }
+  .tl-title { font-size: 14px; font-weight: 700; }
+  .tl-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .tl-tasks {
+    margin-top: 10px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .task-chip {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--muted);
+    padding: 3px 9px;
+  }
+
+  /* PHASE DIVIDER */
+  .phase-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0 8px 0;
+    padding-left: 0;
+  }
+  .phase-divider span {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .phase-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* GATES */
+  .gates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
+  .gate-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+  .gate-card:hover { background: var(--card-hover); }
+  .gate-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .gate-icon {
+    width: 36px; height: 36px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .gate-icon.green { background: rgba(34,197,94,0.12); }
+  .gate-icon.yellow { background: rgba(245,158,11,0.12); }
+  .gate-icon.red { background: rgba(239,68,68,0.1); }
+  .gate-icon.purple { background: rgba(124,90,247,0.12); }
+  .gate-name { font-size: 13px; font-weight: 700; line-height: 1.3; }
+  .gate-items { list-style: none; }
+  .gate-items li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(42,51,71,0.5);
+  }
+  .gate-items li:last-child { border-bottom: none; }
+  .gate-items li .dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px;
+  }
+  .dot-ok { background: rgba(34,197,94,0.2); color: #4ade80; border: 1.5px solid rgba(34,197,94,0.4); }
+  .dot-wait { background: rgba(79,142,247,0.15); color: var(--accent); border: 1.5px solid rgba(79,142,247,0.3); }
+  .dot-skip { background: rgba(245,158,11,0.15); color: #fbbf24; border: 1.5px solid rgba(245,158,11,0.3); }
+  .dot-empty { background: var(--bg3); border: 1.5px solid var(--border); }
+
+  /* ARCH DIAGRAM */
+  .arch {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .arch-cloud {
+    background: linear-gradient(135deg, rgba(79,142,247,0.12), rgba(124,90,247,0.08));
+    border: 1.5px solid rgba(79,142,247,0.35);
+    border-radius: 14px;
+    padding: 20px 40px;
+    text-align: center;
+    width: 100%;
+    max-width: 480px;
+  }
+  .arch-cloud .arch-label { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+  .arch-cloud h4 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .arch-cloud p { font-size: 11px; color: var(--muted); }
+  .arch-arrow {
+    width: 2px;
+    height: 32px;
+    background: linear-gradient(180deg, rgba(79,142,247,0.5), rgba(79,142,247,0.1));
+    position: relative;
+    margin: 4px 0;
+  }
+  .arch-arrow::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid rgba(79,142,247,0.5);
+  }
+  .arch-split { display: flex; gap: 32px; justify-content: center; width: 100%; }
+  .arch-node {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 24px;
+    text-align: center;
+    flex: 1;
+    max-width: 220px;
+  }
+  .arch-node .arch-label { font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .arch-node h4 { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .arch-node p { font-size: 11px; color: var(--muted); }
+
+  /* DONT DO TABLE */
+  .dont-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+  .dont-item {
+    background: var(--bg2);
+    border: 1px solid rgba(239,68,68,0.15);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .dont-icon {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: rgba(239,68,68,0.12);
+    border: 1.5px solid rgba(239,68,68,0.25);
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+    color: #f87171;
+    margin-top: 1px;
+  }
+  .dont-item .item-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .dont-item .item-desc { font-size: 11px; color: var(--muted); }
+
+  /* DEBT TABLE */
+  .debt-table { width: 100%; border-collapse: collapse; }
+  .debt-table th {
+    text-align: left;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+  }
+  .debt-table th:first-child { border-radius: 8px 0 0 0; }
+  .debt-table th:last-child { border-radius: 0 8px 0 0; }
+  .debt-table td {
+    padding: 11px 14px;
+    font-size: 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .debt-table tr:last-child td { border-bottom: none; }
+  .debt-table tr:hover td { background: var(--card-hover); }
+  .debt-table td:first-child { font-weight: 600; color: var(--text); font-family: monospace; font-size: 11px; }
+  .debt-table td:nth-child(2) { color: var(--muted); }
+  .debt-table td:last-child { color: #7eb3ff; }
+  .debt-table-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  /* FOOTER */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 24px 40px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+  footer span { font-size: 12px; color: var(--muted); }
+
+  @media (max-width: 720px) {
+    .hero { padding: 32px 20px; }
+    .main { padding: 24px 16px; }
+    .goals-row { grid-template-columns: 1fr; }
+    .arch-split { flex-direction: column; align-items: center; }
+    .hero h1 { font-size: 26px; }
+    footer { padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-inner">
+    <div class="hero-tag">Yol Haritası Raporu · v2 · 18 Nisan 2026</div>
+    <h1>Restoran POS<br>Ürün Yol Haritası</h1>
+    <p class="hero-sub">Tek restoranından buluta, mobil cihazlara ve çoklu şubeye giden yolun tam planı.</p>
+    <div class="hero-stats">
+      <div class="stat-chip">
+        <div class="val">352</div>
+        <div class="lbl">Otomatik Test</div>
+      </div>
+      <div class="stat-chip">
+        <div class="val">9.3</div>
+        <div class="lbl">Genel Skor</div>
+      </div>
+      <div class="stat-chip">
+        <div class="val">0</div>
+        <div class="lbl">Lint Uyarısı</div>
+      </div>
+      <div class="stat-chip">
+        <div class="val">15/15</div>
+        <div class="lbl">Prodüksiyon Listesi</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- TAMAMLANDI -->
+  <div class="section">
+    <div class="section-title"><span class="num">1</span> Şu Ana Kadar Yapılanlar</div>
+    <div class="completed-grid">
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Çekirdek POS Sistemi</div>
+          <div class="item-desc">Masa → Sipariş → Ödeme → Mutfak → Yazıcı akışı. Prodüksiyon kalitesinde.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Yedekleme & Geri Yükleme</div>
+          <div class="item-desc">SHA-256 doğrulama, otomatik gece yedeği, güvenli geri yükleme akışı.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Güvenlik Altyapısı</div>
+          <div class="item-desc">JWT kalıcı oturum, API rate limiting, CORS koruma, güvenli log maskeleme.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Yazıcı Sistemi</div>
+          <div class="item-desc">Türkçe karakter (PC857), kuyruklama, hata kodları, manuel yeniden deneme.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Test & CI Pipeline</div>
+          <div class="item-desc">352 otomatik test, GitHub Actions CI, Playwright uçtan uca testler.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">İlk Kurulum Sihirbazı</div>
+          <div class="item-desc">4 adımlı kurulum, sürüm notları ekranı, otomatik güncelleme bildirimi.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Yapısal Loglama</div>
+          <div class="item-desc">JSON satır formatı, crash reporter, request-id korelasyonu.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Ürün Eksikleri Tamamlandı</div>
+          <div class="item-desc">X/Z raporu, iade akışı, bahşiş takibi, rezervasyon → masa bağlantısı.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Denetim Geçmişi (Audit Trail)</div>
+          <div class="item-desc">Tüm değişiklikler kayıt altında: ürün, stok, müşteri, kullanıcı, ayarlar.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Para Birimi Doğruluğu</div>
+          <div class="item-desc">Kuruş hassasiyeti (tamsayı), çift yazma, geriye dönük uyumluluk.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Fiyat Anlık Görüntüsü</div>
+          <div class="item-desc">Sipariş anındaki menü versiyonu, KDV oranı ve servis ücreti snapshot'ı.</div>
+        </div>
+      </div>
+
+      <div class="completed-item">
+        <div class="check-icon">✓</div>
+        <div>
+          <div class="item-title">Veritabanı Disiplini (O-1)</div>
+          <div class="item-desc">Numaralı migration runner, idempotent şema yükseltmeleri. Tüm DB hedefleri tamamlandı.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- HEDEF -->
+  <div class="section">
+    <div class="section-title"><span class="num">2</span> Hedef & Strateji</div>
+    <div class="goals-row">
+      <div class="goal-card active">
+        <div class="phase-tag">0 – 4 Ay · Aktif Hedef</div>
+        <h3>Tek Restoran<br>Bulut + Mobil</h3>
+        <p>Sistemi internete taşı. Garsonlar kendi iOS/Android telefonlarından sipariş alsın. Ana bilgisayar kapalı olsa bile çalışsın.</p>
+      </div>
+      <div class="goal-card future">
+        <div class="phase-tag">4 Ay Sonrası · Gelecek Faz</div>
+        <h3>Çoklu Şube<br>Genişlemesi</h3>
+        <p>4 aylık pilot tamamlandıktan sonra birden fazla restorana açılım. Merkezi yönetim, şubeler arası raporlama.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- YOL HARİTASI -->
+  <div class="section">
+    <div class="section-title"><span class="num">3</span> Bağımlılık Sıralı Yol Haritası</div>
+
+    <div class="phase-divider"><span>Tamamlandı</span></div>
+    <div class="timeline" style="margin-bottom:0">
+
+      <div class="tl-item done">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">O-1</span>
+            <span class="tl-title">Veri Modeli Sağlamlaştırma</span>
+            <span class="badge badge-green">✓ Tamamlandı</span>
+          </div>
+          <div class="tl-desc">Migration disiplini, denetim geçmişi, para birimi kesinliği ve fiyat anlık görüntüsü. Tüm mobil altyapının temeli.</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="phase-divider"><span>0 – 4 Ay Hedefi</span></div>
+    <div class="timeline">
+
+      <div class="tl-item active">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">C-1</span>
+            <span class="tl-title">Bulut Deployment (Railway)</span>
+            <span class="badge badge-blue">▶ Sıradaki</span>
+          </div>
+          <div class="tl-desc">Sunucuyu Railway platformuna taşı. Ana bilgisayar kapalı olsa mobil cihazlar sisteme erişebilir. Tüm mobil geliştirmenin temeli.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">railway.json ayarları</span>
+            <span class="task-chip">HOST=0.0.0.0</span>
+            <span class="task-chip">Kalıcı depolama alanı</span>
+            <span class="task-chip">CORS güncelleme</span>
+            <span class="task-chip">Electron bulut modu</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item pending">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">C-2</span>
+            <span class="tl-title">Kimlik Doğrulama Güçlendirme</span>
+            <span class="badge badge-gray">C-1 sonrası</span>
+          </div>
+          <div class="tl-desc">Mobil cihazlarda oturum günde bir sona erer — kabul edilemez. Yenileme token'ı ile 30 günlük oturum, güvenli cihaz depolama.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">Yenileme token tablosu</span>
+            <span class="task-chip">15dk erişim / 30gün yenileme</span>
+            <span class="task-chip">Masaüstü akışını bozmaz</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item pending">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">M-1.1</span>
+            <span class="tl-title">Mobil Garson API Endpoint'leri</span>
+            <span class="badge badge-gray">C-2 sonrası</span>
+          </div>
+          <div class="tl-desc">Mevcut API masaüstü odaklı. Garson telefonuna özel minimal ve hızlı endpoint seti. Sadece garson iş akışı — ödeme ve mutfak yönetimi masaüstünde kalır.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">Masa durumu listesi</span>
+            <span class="task-chip">Sipariş görüntüle / kalem ekle</span>
+            <span class="task-chip">Menü listesi (optimize)</span>
+            <span class="task-chip">Garson çağrısı</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item pending">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">M-1.2</span>
+            <span class="tl-title">Cihaz Eşleştirme (QR Kod)</span>
+            <span class="badge badge-gray">M-1.1 sonrası</span>
+          </div>
+          <div class="tl-desc">Her telefon sistemde kayıtlı. Admin panelden QR okut → telefon otomatik kaydolur. Kayıtsız cihazdan erişim engellenir.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">Cihaz kayıt tablosu</span>
+            <span class="task-chip">QR kod eşleştirme</span>
+            <span class="task-chip">Admin cihaz yönetim ekranı</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item pending">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">M-1.3</span>
+            <span class="tl-title">Anlık Bildirimler (FCM / APNs)</span>
+            <span class="badge badge-gray">M-1.2 sonrası · Firebase gerekli</span>
+          </div>
+          <div class="tl-desc">Mutfak onayı, yeni sipariş, masa çağrısı gibi olaylar garson telefonuna bildirim olarak düşsün. Firebase kurulumu önceden yapılmalı.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">Firebase Admin SDK</span>
+            <span class="task-chip">Bildirim servisi</span>
+            <span class="task-chip">Android FCM + iOS APNs</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item pending">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">M-2</span>
+            <span class="tl-title">Android Garson Uygulaması</span>
+            <span class="badge badge-gray">M-1.1+ sonrası</span>
+          </div>
+          <div class="tl-desc">Garsonların Android telefonda kullanacağı sipariş alma uygulaması. React Native (Expo) ile geliştirilir. Önce Android, 3 ay saha testi sonra iOS.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">Expo (React Native)</span>
+            <span class="task-chip">Masa listesi & sipariş akışı</span>
+            <span class="task-chip">Gerçek zamanlı Socket.io</span>
+            <span class="task-chip">Çevrimdışı uyarı</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tl-item pending">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">M-3</span>
+            <span class="tl-title">iOS Garson Uygulaması</span>
+            <span class="badge badge-gray">M-2 + 3 ay saha testi sonrası</span>
+          </div>
+          <div class="tl-desc">Aynı Expo uygulamasının iOS derlemesi. Apple geliştirici hesabı, APNs sertifikası, TestFlight beta süreci gerektirir.</div>
+          <div class="tl-tasks">
+            <span class="task-chip">Apple Developer hesabı</span>
+            <span class="task-chip">TestFlight beta</span>
+            <span class="task-chip">App Store yayını</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="phase-divider"><span>4 Ay Sonrası — Çoklu Şube</span></div>
+    <div class="timeline">
+
+      <div class="tl-item future">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">O-2</span>
+            <span class="tl-title">Kiracı Kimliği & Abonelik</span>
+            <span class="badge badge-gray">Pilot tamamlandıktan sonra</span>
+          </div>
+          <div class="tl-desc">Birden fazla restoran aynı sistemde. Her işletme kendi verisini görür. Plan limitleri, abonelik yönetimi (iyzico — TR market).</div>
+        </div>
+      </div>
+
+      <div class="tl-item future">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">O-3</span>
+            <span class="tl-title">Şubeler Arası Senkronizasyon</span>
+            <span class="badge badge-gray">O-2 sonrası</span>
+          </div>
+          <div class="tl-desc">Şubeler arası menü, müşteri ve stok senkronizasyonu. Çevrimdışı çalışma + çakışma çözümü.</div>
+        </div>
+      </div>
+
+      <div class="tl-item future">
+        <div class="tl-card">
+          <div class="tl-header">
+            <span class="tl-code">O-4</span>
+            <span class="tl-title">Bulut DB + Tam Çok Kiracılı</span>
+            <span class="badge badge-gray">O-3 sonrası</span>
+          </div>
+          <div class="tl-desc">SQLite'tan Postgres'e geçiş. Tenant izolasyonu, Redis ile gerçek zamanlı ölçekleme, izleme altyapısı (Grafana/Sentry).</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- GATES -->
+  <div class="section">
+    <div class="section-title"><span class="num">4</span> Geçiş Kapıları</div>
+    <div class="gates-grid">
+
+      <div class="gate-card">
+        <div class="gate-header">
+          <div class="gate-icon yellow">🟡</div>
+          <div>
+            <div class="gate-name">Kapı 1 — Pilot Müşteri</div>
+            <span class="badge badge-yellow">Neredeyse Hazır</span>
+          </div>
+        </div>
+        <ul class="gate-items">
+          <li><div class="dot dot-ok">✓</div>352 test geçiyor</li>
+          <li><div class="dot dot-ok">✓</div>Backup/restore hazır</li>
+          <li><div class="dot dot-ok">✓</div>İlk kurulum sihirbazı</li>
+          <li><div class="dot dot-ok">✓</div>Destek paketi ve loglar</li>
+          <li><div class="dot dot-ok">✓</div>Kurulum kılavuzu</li>
+          <li><div class="dot dot-skip">⏸</div>Kod imzası (ertelendi)</li>
+          <li><div class="dot dot-empty"></div>Pilot eğitimi & kurulum</li>
+        </ul>
+      </div>
+
+      <div class="gate-card">
+        <div class="gate-header">
+          <div class="gate-icon yellow">🟡</div>
+          <div>
+            <div class="gate-name">Kapı 2 — Online Faza Geçiş</div>
+            <span class="badge badge-yellow">Altyapı Hazır</span>
+          </div>
+        </div>
+        <ul class="gate-items">
+          <li><div class="dot dot-ok">✓</div>Veri modeli (O-1) tamamlandı</li>
+          <li><div class="dot dot-ok">✓</div>Migration disiplini (DB-1)</li>
+          <li><div class="dot dot-ok">✓</div>Denetim geçmişi (DB-2)</li>
+          <li><div class="dot dot-ok">✓</div>Para kesinliği (DB-3+4)</li>
+          <li><div class="dot dot-wait">▶</div>Bulut deployment (C-1)</li>
+          <li><div class="dot dot-empty"></div>Yenileme token (C-2)</li>
+          <li><div class="dot dot-empty"></div>Mobil API (M-1.1)</li>
+        </ul>
+      </div>
+
+      <div class="gate-card">
+        <div class="gate-header">
+          <div class="gate-icon red">❌</div>
+          <div>
+            <div class="gate-name">Kapı 3 — Mobil Garson App</div>
+            <span class="badge badge-red">C-1 Bekleniyor</span>
+          </div>
+        </div>
+        <ul class="gate-items">
+          <li><div class="dot dot-empty"></div>Kapı 2 tamamlandı</li>
+          <li><div class="dot dot-empty"></div>Cihaz eşleştirme (M-1.2)</li>
+          <li><div class="dot dot-empty"></div>Bildirimler (M-1.3)</li>
+          <li><div class="dot dot-empty"></div>Android uygulaması (M-2)</li>
+          <li><div class="dot dot-empty"></div>iOS uygulaması (M-3)</li>
+        </ul>
+      </div>
+
+      <div class="gate-card">
+        <div class="gate-header">
+          <div class="gate-icon purple">❌</div>
+          <div>
+            <div class="gate-name">Kapı 4 — Çoklu Şube</div>
+            <span class="badge badge-gray">4 Ay Sonrası</span>
+          </div>
+        </div>
+        <ul class="gate-items">
+          <li><div class="dot dot-empty"></div>Kapı 2 + 3 tamamlandı</li>
+          <li><div class="dot dot-empty"></div>4 ay pilot bitti</li>
+          <li><div class="dot dot-empty"></div>Kiracı kimliği (O-2)</li>
+          <li><div class="dot dot-empty"></div>Senkronizasyon (O-3)</li>
+          <li><div class="dot dot-empty"></div>Bulut DB + ölçekleme (O-4)</li>
+        </ul>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MİMARİ -->
+  <div class="section">
+    <div class="section-title"><span class="num">5</span> 4 Ay Sonu Hedef Mimari</div>
+    <div class="arch">
+      <div class="arch-cloud">
+        <div class="arch-label">Railway Cloud</div>
+        <h4>Sunucu (Express + SQLite)</h4>
+        <p>Gerçek zamanlı · Socket.io · REST API · Ana bilgisayar bağımsız</p>
+      </div>
+      <div class="arch-arrow"></div>
+      <div style="display:flex;gap:40px;justify-content:center;width:100%">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div class="arch-arrow" style="height:20px"></div>
+          <div class="arch-node">
+            <div class="arch-label">Masaüstü</div>
+            <h4>Electron (Windows)</h4>
+            <p>Kasa · Yazıcı · Raporlama · Bulut URL ile bağlanır</p>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div class="arch-arrow" style="height:20px"></div>
+          <div class="arch-node">
+            <div class="arch-label">Mobil</div>
+            <h4>Garson Uygulaması</h4>
+            <p>React Native (Expo) · iOS + Android · FCM bildirim</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p style="margin-top:14px;font-size:12px;color:var(--muted);text-align:center;">Her iki istemci de aynı Railway sunucusuna bağlanır. Ana bilgisayar kapalı olsa mobil çalışmaya devam eder.</p>
+  </div>
+
+  <!-- YAPILMAMASI GEREKENLER -->
+  <div class="section">
+    <div class="section-title"><span class="num">6</span> Yapılmaması Gerekenler</div>
+    <div class="dont-grid">
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">SQLite → Postgres şimdi</div>
+          <div class="item-desc">Tek restoran için gerek yok. O-3/O-4 zamanı gelince yapılacak.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Çoklu şube altyapısı şimdi</div>
+          <div class="item-desc">4 aylık pilot tek işletme. O-2 zamanı gelince yapılacak.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Mobil uygulama C-1 olmadan</div>
+          <div class="item-desc">Bulut backend olmadan mobil uygulama anlamsız.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Firebase olmadan bildirim</div>
+          <div class="item-desc">Dış bağımlılık; önce Firebase Console kurulumu gerekli.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Tam UI yeniden tasarım</div>
+          <div class="item-desc">Tasarım sistemi olmadan yapılan redesign → yeniden redesign.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Yemeksepeti / Getir entegrasyonu</div>
+          <div class="item-desc">Outbox ve OpenAPI altyapısı hazır olmadan başlanmaz.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Sadakat / kampanya modülü</div>
+          <div class="item-desc">Para modeli tam oturmadan puan ve iade kaçağı riski var.</div>
+        </div>
+      </div>
+
+      <div class="dont-item">
+        <div class="dont-icon">✗</div>
+        <div>
+          <div class="item-title">Kod imzası şimdi</div>
+          <div class="item-desc">Maliyet yüksek, ilk etapta ertelendi ve kabul edildi.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- TEKNİK BORÇ -->
+  <div class="section">
+    <div class="section-title"><span class="num">7</span> Düşük Öncelikli Teknik Borç</div>
+    <div class="debt-table-wrap">
+      <table class="debt-table">
+        <thead>
+          <tr>
+            <th>Dosya</th>
+            <th>Neden önemli</th>
+            <th>Ne zaman çözülür</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>admin.js (~2300 satır)</td>
+            <td>Yeni özellik eklemek zorlaşıyor</td>
+            <td>O-2 öncesi alan bazlı bölünme</td>
+          </tr>
+          <tr>
+            <td>OrderScreen.jsx (~1600 satır)</td>
+            <td>React hook çıkartmaları adım adım devam</td>
+            <td>Her sprint 1 dosya</td>
+          </tr>
+          <tr>
+            <td>TablesScreen.jsx (~1550 satır)</td>
+            <td>Bileşen ayrıştırması bekliyor</td>
+            <td>O-2 öncesi</td>
+          </tr>
+          <tr>
+            <td>Frontend bileşen testi yok</td>
+            <td>Mobil uygulama için kritik hale gelecek</td>
+            <td>M-2 ile paralel başla</td>
+          </tr>
+          <tr>
+            <td>_cents sütunları tam primary değil</td>
+            <td>REAL sütunlar hâlâ read path'te</td>
+            <td>O-3 öncesi cutover</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <span>Restoran POS v3 · Yol Haritası Raporu v2</span>
+  <span>18 Nisan 2026 · 352 test · 0 lint uyarısı</span>
+</footer>
+
+</body>
+</html>

@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import db from '../config/database.js';
 import { normalizePhoneDigits } from './phoneNormalize.js';
+import { getStoreDate } from './time.js';
 
 export const genId = () => uuidv4();
 
@@ -27,10 +28,10 @@ export function normalizePhone(phone) {
 }
 
 export function getNextOrderNo(businessId) {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getStoreDate();
   const result = db.prepare(`
     SELECT COALESCE(MAX(order_no), 0) as maxNo FROM orders 
-    WHERE business_id = ? AND date(created_at) = ?
+    WHERE business_id = ? AND store_date(created_at) = ?
   `).get(businessId, today);
   return (result?.maxNo || 0) + 1;
 }

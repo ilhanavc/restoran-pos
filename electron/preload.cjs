@@ -5,6 +5,15 @@
  */
 const { contextBridge, ipcRenderer } = require('electron');
 
+let electronConfig = { apiBaseUrl: null };
+try {
+  electronConfig = ipcRenderer.sendSync('config:get-electron-config') || electronConfig;
+} catch {
+  electronConfig = { apiBaseUrl: null };
+}
+
+contextBridge.exposeInMainWorld('electronConfig', electronConfig);
+
 contextBridge.exposeInMainWorld('electronAPI', {
   /** Güncelleme mevcut olduğunda callback'i çağırır. Dönen fonksiyon ile dinleyici kaldırılır. */
   onUpdateAvailable: (callback) => {
@@ -40,6 +49,59 @@ contextBridge.exposeInMainWorld('electronAPI', {
   /** Manuel güncelleme kontrolü tetikle. */
   checkForUpdates: () => ipcRenderer.send('check-for-updates'),
 
+  /** Bakım/restore sonrası uygulamayı kontrollü yeniden başlat. */
+  restartApp: () => ipcRenderer.send('restart-app'),
+
+  /** Otomatik yedekleme başarısız olduğunda callback'i çağırır. */
+  onBackupFailed: (callback) => {
+    const handler = (_, info) => callback(info);
+    ipcRenderer.on('backup-failed', handler);
+    return () => ipcRenderer.removeListener('backup-failed', handler);
+  },
+
+  /** Disk alanı yetersiz uyarısı geldiğinde callback'i çağırır. */
+  onBackupDiskWarning: (callback) => {
+    const handler = (_, info) => callback(info);
+    ipcRenderer.on('backup-disk-warning', handler);
+    return () => ipcRenderer.removeListener('backup-disk-warning', handler);
+  },
+
+  /** Kullanıcı dışarıdan .db dosyası seçer; yedekler klasörüne eklenir. Seçilen dosyanın adını döner. */
+  pickExternalDb: () => ipcRenderer.invoke('backup:pick-external-db'),
+
+  /** Belirtilen yedek dosyasını kullanıcının seçtiği konuma kopyalar. */
+  exportBackup: (backupFileName) => ipcRenderer.invoke('backup:export', backupFileName),
+
+  /** Harici yedek kopyalama için hedef klasör seçim dialogu açar. */
+  pickExternalFolder: () => ipcRenderer.invoke('backup:pick-external-folder'),
+
+  /** Kaydedilmiş Görev Zamanlayıcı yapılandırmasını döner (destFolder, taskName, createdAt). */
+  schedulerConfig: () => ipcRenderer.invoke('backup:scheduler-config'),
+
+  /** Görev Zamanlayıcı görevinin mevcut durumunu sorgular. */
+  schedulerStatus: () => ipcRenderer.invoke('backup:scheduler-status'),
+
+  /** Verilen hedef klasör için Görev Zamanlayıcı görevi oluşturur/günceller (her gece 03:00). */
+  schedulerSave: (destFolder) => ipcRenderer.invoke('backup:scheduler-save', destFolder),
+
+  /** Görev Zamanlayıcı görevini kaldırır. */
+  schedulerRemove: () => ipcRenderer.invoke('backup:scheduler-remove'),
+
+  /** Görevi hemen bir kez çalıştırır (robocopy test). */
+  schedulerRunNow: () => ipcRenderer.invoke('backup:scheduler-run-now'),
+
+  /** İlk kurulum wizard tamamlandı mı? */
+  setupIsCompleted: () => ipcRenderer.invoke('setup:is-completed'),
+
+  /** İlk kurulum tamamlandı olarak işaretle; businessName opsiyonel. */
+  setupComplete: (data) => ipcRenderer.invoke('setup:complete', data),
+
+  /** Mevcut uygulama versiyonunu döner — package.json version. */
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+
   /** Electron ortamında çalışıp çalışmadığını döner (browser'dan ayırt etmek için). */
   isElectron: true,
+
+  /** Sentry DSN yapılandırılmışsa döner — renderer crash reporter için. */
+  sentryDsn: process.env.SENTRY_DSN || null,
 });

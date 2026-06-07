@@ -6,8 +6,13 @@ import { useIncomingCall } from '../../context/IncomingCallContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
 import { TABLE_STATUS, formatCurrency, parseDbTimestampMs } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
+import { isOrderFullyPaid } from '../../utils/orderPaymentState.js';
+import { getPrintErrorMessage } from '../../utils/printErrorMessages.js';
+import { formatDateTimeInIstanbul } from '../../utils/time.js';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 import {
-  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2,
+  RefreshCw, Users, Clock, ArrowRightLeft, Phone, X, MoreVertical, Printer, Undo2, CreditCard, CheckCircle2, Package, AlertTriangle,
 } from 'lucide-react';
 
 function formatOrderElapsed(dateStr, now = Date.now()) {
@@ -35,6 +40,7 @@ export default function TablesScreen({
   onQuickPayment,
   showTakeawaySidebar = false,
   onOpenTakeawayOrder,
+  onNewTakeawayOrder,
 }) {
   const [areas, setAreas] = useState([]);
   const [activeArea, setActiveArea] = useState(null);
@@ -51,23 +57,38 @@ export default function TablesScreen({
   const [openTakeawayMenuId, setOpenTakeawayMenuId] = useState(null);
   const [takeawayConfirmTarget, setTakeawayConfirmTarget] = useState(null);
   const [takeawayActionLoading, setTakeawayActionLoading] = useState(null);
+  const [recentlyMovedTableId, setRecentlyMovedTableId] = useState(null);
+  const [tableConfirm, setTableConfirm] = useState(null);
+  const [manualPrintDialog, setManualPrintDialog] = useState({ open: false, orderId: null, role: 'receipt', kind: 'receipt', title: '' });
+  const [printHealth, setPrintHealth] = useState(null);
+  const [retryingPrintJobId, setRetryingPrintJobId] = useState(null);
+  const [printAlertOpen, setPrintAlertOpen] = useState(false);
   const takeawayMenuRef = useRef(null);
   const toast = useToast();
   const { openOrder: openIncomingCallOrder } = useIncomingCall() || {};
   const location = useLocation();
   const { isConnected, subscribe } = useSocket();
+  const highlightedTableId = location.state?.highlightTableId || null;
+  const activeHighlightTableId = recentlyMovedTableId || highlightedTableId;
 
   const loadTables = useCallback(async () => {
     try {
       const data = await api.getTables();
       setAreas(data);
-      if (!activeArea && data.length > 0) setActiveArea(data[0].id);
-    } catch (err) {
+      const highlightedArea = activeHighlightTableId
+        ? data.find((area) => (area.tables || []).some((table) => table.id === activeHighlightTableId))
+        : null;
+      if (highlightedArea) {
+        setActiveArea(highlightedArea.id);
+      } else if (!activeArea && data.length > 0) {
+        setActiveArea(data[0].id);
+      }
+    } catch {
       toast.error('Masalar yüklenemedi');
     } finally {
       setLoading(false);
     }
-  }, [activeArea, toast]);
+  }, [activeArea, activeHighlightTableId, toast]);
 
   const loadTakeaway = useCallback(async () => {
     if (!showTakeawaySidebar) return;
@@ -79,10 +100,20 @@ export default function TablesScreen({
     }
   }, [showTakeawaySidebar, toast]);
 
+  const loadPrintHealth = useCallback(async () => {
+    try {
+      const data = await api.getPrintHealth();
+      setPrintHealth(data);
+    } catch {
+      setPrintHealth(null);
+    }
+  }, []);
+
   useEffect(() => {
     loadTables();
     if (showTakeawaySidebar) loadTakeaway();
-  }, [location.key, location.state?.refreshTables, loadTables, loadTakeaway, showTakeawaySidebar]);
+    loadPrintHealth();
+  }, [location.key, location.state?.refreshTables, loadTables, loadTakeaway, loadPrintHealth, showTakeawaySidebar]);
 
   useEffect(() => {
     if (!showTakeawaySidebar) {
@@ -101,9 +132,10 @@ export default function TablesScreen({
     const unsubs = events.map(ev => subscribe(ev, () => {
       loadTables();
       loadTakeaway();
+      loadPrintHealth();
     }));
     return () => unsubs.forEach(fn => fn());
-  }, [subscribe, loadTables, loadTakeaway]);
+  }, [subscribe, loadTables, loadTakeaway, loadPrintHealth]);
 
   // Fallback polling: socket kopuksa 30s'de bir
   useEffect(() => {
@@ -111,9 +143,10 @@ export default function TablesScreen({
     const interval = setInterval(() => {
       loadTables();
       loadTakeaway();
+      loadPrintHealth();
     }, 30000);
     return () => clearInterval(interval);
-  }, [isConnected, loadTables, loadTakeaway]);
+  }, [isConnected, loadTables, loadTakeaway, loadPrintHealth]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -121,16 +154,23 @@ export default function TablesScreen({
   }, []);
 
   useEffect(() => {
-    if (!openTakeawayMenuId && !takeawayConfirmTarget && !tableCancelTarget) return undefined;
+    if (!recentlyMovedTableId) return undefined;
+    const timer = setTimeout(() => setRecentlyMovedTableId(null), 6000);
+    return () => clearTimeout(timer);
+  }, [recentlyMovedTableId]);
+
+  useEffect(() => {
+    if (!openTakeawayMenuId && !takeawayConfirmTarget && !tableCancelTarget && !tableConfirm) return undefined;
     const onKeyDown = (e) => {
       if (e.key !== 'Escape') return;
       if (!tableCancelLoading) setTableCancelTarget(null);
       setOpenTakeawayMenuId(null);
       setTakeawayConfirmTarget(null);
+      setTableConfirm(null);
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openTakeawayMenuId, takeawayConfirmTarget, tableCancelTarget, tableCancelLoading]);
+  }, [openTakeawayMenuId, takeawayConfirmTarget, tableCancelTarget, tableConfirm, tableCancelLoading]);
 
   useEffect(() => {
     if (!openTakeawayMenuId) return undefined;
@@ -145,6 +185,22 @@ export default function TablesScreen({
   const refreshAll = () => {
     loadTables();
     loadTakeaway();
+    loadPrintHealth();
+  };
+
+  const retryFirstFailedPrintJob = async ({ silent = false } = {}) => {
+    const job = printHealth?.recentFailed?.[0];
+    if (!job?.id || retryingPrintJobId) return;
+    setRetryingPrintJobId(job.id);
+    try {
+      await api.retryPrintJob(job.id);
+      if (!silent) toast.success('Yazdırma işi yeniden kuyruğa alındı');
+      await loadPrintHealth();
+    } catch (err) {
+      toast.error(err.message || 'Yazdırma işi yeniden denenemedi');
+    } finally {
+      setRetryingPrintJobId(null);
+    }
   };
 
   const loadCallHistory = useCallback(async () => {
@@ -152,7 +208,7 @@ export default function TablesScreen({
     try {
       const data = await api.getCallHistory();
       setCallHistory(data || []);
-    } catch (err) {
+    } catch {
       toast.error('Arama geçmişi yüklenemedi');
     } finally {
       setCallHistoryLoading(false);
@@ -166,15 +222,13 @@ export default function TablesScreen({
 
   const formatCallDateTime = (value) => {
     if (!value) return '-';
-    const dt = new Date(value);
-    if (Number.isNaN(dt.getTime())) return '-';
-    return dt.toLocaleString('tr-TR', {
+    return formatDateTimeInIstanbul(value, {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    });
+    }) || '-';
   };
 
   const getCallStatusLabel = (status) => {
@@ -189,6 +243,18 @@ export default function TablesScreen({
 
   const currentArea = areas.find(a => a.id === activeArea);
 
+  const performTableTransfer = async (sourceTableId, targetTable) => {
+    try {
+      await api.transferTable(sourceTableId, targetTable.id);
+      toast.success('Masa transfer edildi');
+      setTransferMode(null);
+      setRecentlyMovedTableId(targetTable.id);
+      loadTables();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   const handleTableClick = async (table) => {
     const areaTables = currentArea?.tables || [];
     if (transferMode) {
@@ -202,17 +268,34 @@ export default function TablesScreen({
         setTransferMode(null);
         return;
       }
+      if (table.status !== 'empty') {
+        toast.error(table.status === 'reserved' ? 'Rezerve masaya taşıma yapılamaz' : 'Hedef masa boş olmalı');
+        return;
+      }
       const fromLabel = masaLabelInArea(sourceTable, areaTables);
       const toLabel = masaLabelInArea(table, areaTables);
-      if (!window.confirm(`${fromLabel} → ${toLabel} masasına taşınsın mı?`)) return;
-      try {
-        await api.transferTable(transferMode, table.id);
-        toast.success('Masa transfer edildi');
-        setTransferMode(null);
-        loadTables();
-      } catch (err) {
-        toast.error(err.message);
-      }
+      setTableConfirm({
+        title: 'Masa taşınsın mı?',
+        body: `${fromLabel} siparişi ${toLabel} masasına taşınacak.`,
+        confirmLabel: 'Masayı Taşı',
+        tone: 'primary',
+        onConfirm: () => performTableTransfer(transferMode, table),
+      });
+      return;
+    }
+    if (table.status === 'reserved' && !table.current_order_id) {
+      const label = masaLabelInArea(table, areaTables);
+      setTableConfirm({
+        title: 'Rezerve masa açılsın mı?',
+        body: `${label} rezerve görünüyor. Rezervasyonu kullanarak sipariş açılacak.`,
+        confirmLabel: 'Sipariş Aç',
+        tone: 'primary',
+        onConfirm: () => onOpenOrder({
+          ...table,
+          area_name: currentArea?.name,
+          displayName: masaLabelInArea(table, areaTables),
+        }),
+      });
       return;
     }
     onOpenOrder({
@@ -234,15 +317,14 @@ export default function TablesScreen({
     };
   };
 
-  const isTableBillPaid = (table) => (
-    table?.status === 'occupied'
-    && Boolean(table?.current_order_id)
-    && Number(table?.order_total || 0) > 0
-    && Number(table?.order_paid_total || 0) + 0.02 >= Number(table?.order_total || 0)
-  );
+  const isTableBillPaid = (table) => table?.status === 'occupied' && isOrderFullyPaid(table);
 
   const handleTableMenuAction = async (action, table, e) => {
-    e.stopPropagation();
+    e?.stopPropagation();
+    if (action === 'open') {
+      handleTableClick(table);
+      return;
+    }
     if (action === 'transfer') {
       if (!table.current_order_id) {
         toast.error('Taşınacak sipariş yok');
@@ -323,13 +405,13 @@ export default function TablesScreen({
         toast.error('Sipariş bulunamadı');
         return;
       }
-      try {
-        await api.printReceipt(orderId);
-        toast.success('Yazdırma isteği gönderildi');
-        setOpenMenuTableId(null);
-      } catch (err) {
-        toast.error(err.message);
-      }
+      setManualPrintDialog({
+        open: true,
+        orderId,
+        role: 'receipt',
+        kind: 'receipt',
+        title: 'Adisyon yazdır',
+      });
     }
   };
 
@@ -370,15 +452,13 @@ export default function TablesScreen({
     e?.stopPropagation();
     if (takeawayActionLoading) return;
     setOpenTakeawayMenuId(null);
-    setTakeawayActionLoading({ orderId, action: 'print' });
-    try {
-      await api.printTakeawayLabel(orderId);
-      toast.success('Yazdırma isteği gönderildi');
-    } catch (err) {
-      toast.error(err.message || 'Yazdırma isteği gönderilemedi');
-    } finally {
-      setTakeawayActionLoading(null);
-    }
+    setManualPrintDialog({
+      open: true,
+      orderId,
+      role: 'kitchen',
+      kind: 'takeaway',
+      title: 'Paket etiketi yazdır',
+    });
   };
 
   const requestTakeawayCancel = (order, e) => {
@@ -421,6 +501,11 @@ export default function TablesScreen({
       return (now - parseDbTimestampMs(t.order_started_at)) / 60000 > 60;
     }).length,
   };
+  const printSummary = printHealth?.summary || {};
+  const failedPrintCount = Number(printSummary.failed) || 0;
+  const stalePrintCount = Number(printSummary.stale_claimed) || 0;
+  const pendingPrintCount = Number(printSummary.pending) || 0;
+  const firstFailedPrintJob = printHealth?.recentFailed?.[0] || null;
 
   const btnBase = {
     padding: '8px 10px',
@@ -452,42 +537,74 @@ export default function TablesScreen({
   };
 
   return (
-    <div className="page-container" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 0 }}>
-      <div style={{ padding: '16px 24px 0', flexShrink: 0 }}>
-        <div className="page-header">
-          <div>
+    <div className="page-container page-container--flush tables-page" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="page-top-safe" style={{ flexShrink: 0 }}>
+        <div className="page-header tables-page-header">
+          <div className="tables-header-main">
             <h1 className="page-title">Masalar</h1>
-            <div style={{ display: 'flex', gap: 16, marginTop: 6 }}>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.empty}</span> Boş
-              </span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{stats.occupied}</span> Dolu
-              </span>
-              {stats.paid > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.paid}</span> Hesap Ödendi
-                </span>
-              )}
-              {stats.hot > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{stats.hot}</span> Uzun Süre
-                </span>
-              )}
-            </div>
           </div>
-          <div className="tables-header-actions">
-            <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
-              <Phone size={16} />
-            </button>
-            {transferMode && (
-              <button className="btn btn-ghost btn-sm" onClick={() => setTransferMode(null)}>
-                İptal
-              </button>
+          <div className="tables-header-stats">
+            <span className="tables-header-stat">
+              <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.empty}</span> Boş
+            </span>
+            <span className="tables-header-stat">
+              <span style={{ color: 'var(--warning)', fontWeight: 700 }}>{stats.occupied}</span> Dolu
+            </span>
+            {stats.paid > 0 && (
+              <span className="tables-header-stat">
+                <span style={{ color: 'var(--success)', fontWeight: 700 }}>{stats.paid}</span> Hesap Ödendi
+              </span>
             )}
-            <button className="btn btn-ghost btn-icon tables-action-btn" onClick={refreshAll} title="Yenile">
-              <RefreshCw size={16} />
-            </button>
+            {stats.hot > 0 && (
+              <span className="tables-header-stat">
+                <span style={{ color: 'var(--danger)', fontWeight: 700 }}>{stats.hot}</span> Uzun Süre
+              </span>
+            )}
+          </div>
+          {onNewTakeawayOrder && (
+            <div className="tables-header-primary">
+              <button
+                type="button"
+                className="btn btn-ghost tables-paket-btn"
+                data-testid="tables-new-takeaway-button"
+                onClick={onNewTakeawayOrder}
+                title="Yeni paket siparişi"
+              >
+                <Package size={18} />
+                Paket
+              </button>
+            </div>
+          )}
+          <div className="tables-header-actions page-header-actions">
+            <div className="tables-header-secondary">
+              <button className="btn btn-ghost btn-icon tables-action-btn calls-trigger-btn" onClick={openCallHistoryModal} title="Aramalar">
+                <Phone size={16} />
+              </button>
+              {(failedPrintCount > 0 || stalePrintCount > 0) && (
+                <button
+                  type="button"
+                  className="btn btn-icon tables-action-btn tables-print-alert-btn"
+                  onClick={() => setPrintAlertOpen(true)}
+                  title="Yazdırma sorunu var"
+                  aria-label="Yazdırma sorunu var, detay için tıklayın"
+                  style={{
+                    background: 'var(--danger)',
+                    color: 'var(--text-on-accent, #fff)',
+                    borderColor: 'var(--danger)',
+                  }}
+                >
+                  <AlertTriangle size={16} />
+                </button>
+              )}
+              {transferMode && (
+                <button className="btn btn-ghost btn-sm" onClick={() => setTransferMode(null)}>
+                  İptal
+                </button>
+              )}
+              <button className="btn btn-ghost btn-icon tables-action-btn" onClick={refreshAll} title="Yenile">
+                <RefreshCw size={16} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -502,25 +619,24 @@ export default function TablesScreen({
             Hedef masayı seçin
           </div>
         )}
-
-        <div className="tabs" style={{ marginBottom: 0 }}>
-          {areas.map(area => (
-            <button key={area.id} className={`tab ${activeArea === area.id ? 'active' : ''}`}
-              onClick={() => setActiveArea(area.id)}>
-              {area.name}
-              <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>
-                ({(area.tables || []).filter(t => t.status === 'occupied').length}/{(area.tables || []).length})
-              </span>
-            </button>
-          ))}
-        </div>
       </div>
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0, overflow: 'hidden' }}>
         <div style={{
-          flex: 1, overflow: 'auto', padding: '16px 24px 24px',
+          flex: 1, overflow: 'auto', padding: '16px var(--page-padding-x) 24px var(--page-safe-left)',
           paddingRight: showTakeawaySidebar ? 12 : 24,
         }}>
+          <div className="tabs" style={{ marginBottom: 12 }}>
+            {areas.map(area => (
+              <button key={area.id} className={`tab ${activeArea === area.id ? 'active' : ''}`}
+                onClick={() => setActiveArea(area.id)}>
+                {area.name}
+                <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>
+                  ({(area.tables || []).filter(t => t.status === 'occupied').length}/{(area.tables || []).length})
+                </span>
+              </button>
+            ))}
+          </div>
           {loading ? (
             <div className="empty-state"><div style={{ animation: 'pulse 1.5s infinite' }}>Yükleniyor...</div></div>
           ) : (
@@ -529,6 +645,7 @@ export default function TablesScreen({
               style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                gridAutoRows: 180,
                 gap: 18,
               }}
             >
@@ -537,6 +654,7 @@ export default function TablesScreen({
                 const isOccupied = table.status === 'occupied';
                 const isReserved = table.status === 'reserved';
                 const isTransferSource = transferMode === table.id;
+                const isHighlighted = activeHighlightTableId === table.id;
                 const hasReady = isOccupied && (Number(table.has_ready_items) === 1 || table.has_ready_items === true);
                 const isPaid = isOccupied
                   && Number(table.order_total || 0) > 0
@@ -579,17 +697,22 @@ export default function TablesScreen({
                   <div
                     key={table.id}
                     onClick={() => handleTableClick(table)}
+                    data-testid={`table-card-${table.id}`}
+                    data-table-status={table.status}
                     style={{
                       background: bg,
                       border: `1.5px solid ${borderColor}`,
                       borderRadius: 'var(--radius-md)',
                       padding: '22px',
                       cursor: 'pointer',
-                      transition: 'all var(--transition-fast)',
+                      transition: 'border-color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast)',
                       position: 'relative',
-                      minHeight: 150,
+                      height: 180,
+                      boxSizing: 'border-box',
+                      overflow: 'hidden',
                       display: 'flex',
                       flexDirection: 'column',
+                      boxShadow: isHighlighted ? '0 0 0 3px var(--accent-muted), var(--shadow-lg)' : 'var(--shadow-soft)',
                     }}
                     onMouseEnter={e => {
                       if (!isTransferSource) {
@@ -658,7 +781,7 @@ export default function TablesScreen({
                           <button
                             type="button"
                             className="btn btn-ghost btn-icon"
-                            style={{ padding: 4, minHeight: 'auto', flexShrink: 0 }}
+                            style={{ flexShrink: 0 }}
                             title="İşlemler"
                             onClick={(e) => {
                               e.stopPropagation();
@@ -749,6 +872,7 @@ export default function TablesScreen({
             )}
             {takeawayOrders.map((o) => {
               const isOut = Boolean(o.takeaway_out_at);
+              const canMarkDelivered = isOut;
               const isBusy = takeawayActionLoading?.orderId === o.id;
               const isPrinting = isBusy && takeawayActionLoading?.action === 'print';
               const isCancelling = isBusy && takeawayActionLoading?.action === 'cancel';
@@ -758,6 +882,7 @@ export default function TablesScreen({
                 <div
                   key={o.id}
                   className="takeaway-order-card"
+                  data-testid={`takeaway-order-card-${o.id}`}
                   style={{
                     borderRadius: 8,
                     border: isOut ? '1px solid var(--info)' : '1px solid var(--border)',
@@ -767,6 +892,7 @@ export default function TablesScreen({
                     overflow: 'hidden',
                     position: 'relative',
                     minHeight: 184,
+                    flexShrink: 0,
                     boxShadow: openTakeawayMenuId === o.id ? 'var(--shadow-lg)' : 'var(--shadow-soft)',
                   }}
                 >
@@ -982,15 +1108,15 @@ export default function TablesScreen({
                     </button>
                     <button
                       type="button"
-                      disabled={!isOut || isBusy}
+                      disabled={!canMarkDelivered || isBusy}
                       onClick={(e) => handleTakeawayDelivery(o.id, 'delivered', e)}
                       style={{
                         ...btnBase,
-                        background: isOut ? 'var(--success-muted)' : 'var(--bg-tertiary)',
-                        color: isOut ? 'var(--success)' : 'var(--text-muted)',
-                        borderColor: isOut ? 'var(--success)' : 'var(--border)',
-                        cursor: isOut && !isBusy ? 'pointer' : 'not-allowed',
-                        opacity: isOut && !isBusy ? 1 : 0.65,
+                        background: canMarkDelivered ? 'var(--success-muted)' : 'var(--bg-tertiary)',
+                        color: canMarkDelivered ? 'var(--success)' : 'var(--text-muted)',
+                        borderColor: canMarkDelivered ? 'var(--success)' : 'var(--border)',
+                        cursor: canMarkDelivered && !isBusy ? 'pointer' : 'not-allowed',
+                        opacity: canMarkDelivered && !isBusy ? 1 : 0.65,
                       }}
                     >
                       {isMarkingDelivered ? 'İşleniyor...' : 'Teslim Edildi'}
@@ -1052,26 +1178,39 @@ export default function TablesScreen({
             </div>
             <div className="modal-body" style={{ paddingTop: 8 }}>
               <div className="table-action-sheet-grid">
-                {actionTable.current_order_id && (
+                {isTableBillPaid(actionTable) ? (
                   <button
                     type="button"
-                    style={actionTileBase}
-                    onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
+                    style={{
+                      ...actionTileBase,
+                      gridColumn: '1 / -1',
+                      minHeight: 72,
+                      borderColor: 'var(--success)',
+                      color: 'var(--success)',
+                      background: 'var(--success-muted)',
+                    }}
+                    onClick={(e) => handleTableMenuAction('close-paid-table', actionTable, e)}
                   >
-                    <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
-                    Masayı Taşı
+                    <CheckCircle2 size={26} color="var(--success)" strokeWidth={2} />
+                    Masayı Kapat
                   </button>
-                )}
-                {onPayment && actionTable.current_order_id && (
+                ) : onPayment && actionTable.current_order_id ? (
                   <button
                     type="button"
-                    style={actionTileBase}
+                    style={{
+                      ...actionTileBase,
+                      gridColumn: '1 / -1',
+                      minHeight: 72,
+                      borderColor: 'var(--accent)',
+                      color: 'var(--accent)',
+                      background: 'var(--accent-muted)',
+                    }}
                     onClick={(e) => handleTableMenuAction('payment', actionTable, e)}
                   >
                     <CreditCard size={26} color="var(--accent)" strokeWidth={2} />
                     Öde
                   </button>
-                )}
+                ) : null}
                 {onQuickPayment && actionTable.current_order_id && (
                   <button
                     type="button"
@@ -1082,6 +1221,16 @@ export default function TablesScreen({
                     Hızlı Öde
                   </button>
                 )}
+                {actionTable.current_order_id && (
+                  <button
+                    type="button"
+                    style={actionTileBase}
+                    onClick={(e) => handleTableMenuAction('transfer', actionTable, e)}
+                  >
+                    <ArrowRightLeft size={26} color="var(--accent)" strokeWidth={2} />
+                    Masayı Taşı
+                  </button>
+                )}
                 <button
                   type="button"
                   style={actionTileBase}
@@ -1090,25 +1239,12 @@ export default function TablesScreen({
                   <Printer size={26} color="var(--accent)" strokeWidth={2} />
                   Yazdır
                 </button>
-                {isTableBillPaid(actionTable) && (
-                  <button
-                    type="button"
-                    style={{
-                      ...actionTileBase,
-                      borderColor: 'var(--success)',
-                      color: 'var(--success)',
-                      background: 'var(--success-muted)',
-                    }}
-                    onClick={(e) => handleTableMenuAction('close-paid-table', actionTable, e)}
-                  >
-                    <CheckCircle2 size={26} color="var(--success)" strokeWidth={2} />
-                    Masayı Kapat
-                  </button>
-                )}
                 <button
                   type="button"
                   style={{
                     ...actionTileBase,
+                    gridColumn: '1 / -1',
+                    minHeight: 68,
                     borderColor: 'var(--danger)',
                     color: 'var(--danger)',
                     background: 'var(--danger-muted)',
@@ -1123,6 +1259,20 @@ export default function TablesScreen({
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!tableConfirm}
+        title={tableConfirm?.title}
+        body={tableConfirm?.body}
+        confirmLabel={tableConfirm?.confirmLabel}
+        tone={tableConfirm?.tone}
+        onCancel={() => setTableConfirm(null)}
+        onConfirm={() => {
+          const onConfirm = tableConfirm?.onConfirm;
+          setTableConfirm(null);
+          onConfirm?.();
+        }}
+      />
 
       {tableCancelTarget && (
         <div
@@ -1261,6 +1411,154 @@ export default function TablesScreen({
           </div>
         </div>
       )}
+
+      {printAlertOpen && (
+        <div className="modal-overlay" onClick={() => setPrintAlertOpen(false)}>
+          <div
+            className="modal modal-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="print-alert-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10,
+                  background: 'var(--danger-muted)', color: 'var(--danger)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <h2 id="print-alert-title" style={{ margin: 0, fontSize: 18 }}>Yazdırma sorunu var</h2>
+                  <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.45 }}>
+                    Kuyrukta bekleyen ya da başarısız olan yazdırma işleri tespit edildi.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setPrintAlertOpen(false)}
+                title="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 8,
+                marginBottom: 14,
+              }}>
+                {failedPrintCount > 0 && (
+                  <span className="badge badge-danger" style={{ fontSize: 12 }}>
+                    {failedPrintCount} başarısız iş
+                  </span>
+                )}
+                {stalePrintCount > 0 && (
+                  <span className="badge badge-warning" style={{ fontSize: 12 }}>
+                    {stalePrintCount} süresi geçmiş iş
+                  </span>
+                )}
+                {pendingPrintCount > 0 && (
+                  <span className="badge" style={{ fontSize: 12 }}>
+                    {pendingPrintCount} bekleyen
+                  </span>
+                )}
+              </div>
+
+              {firstFailedPrintJob && (() => {
+                const { label, action } = getPrintErrorMessage(firstFailedPrintJob.last_error_code);
+                return (
+                  <div style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    padding: 14,
+                    background: 'var(--bg-tertiary)',
+                    marginBottom: 12,
+                  }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                      Son başarısız iş
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--text-primary)', marginBottom: 4 }}>
+                      {firstFailedPrintJob.printer_name || 'Yazıcı'}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 700, marginBottom: 6 }}>
+                      {label}
+                    </div>
+                    <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                      {action}
+                    </div>
+                    {firstFailedPrintJob.last_error_code && (
+                      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                        Hata kodu: <code>{firstFailedPrintJob.last_error_code}</code>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                Daha fazla teşhis için Ayarlar → StoreBridge Durumu sayfasını açabilir veya Destek Paketini indirebilirsiniz.
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPrintAlertOpen(false)}
+              >
+                Kapat
+              </button>
+              {firstFailedPrintJob && (
+                <button
+                  type="button"
+                  className="btn btn-warning"
+                  disabled={!!retryingPrintJobId}
+                  onClick={async () => {
+                    await retryFirstFailedPrintJob({ silent: true });
+                  }}
+                >
+                  {retryingPrintJobId ? 'Deneniyor...' : 'Tekrar Dene'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <ManualPrintSelectorModal
+        open={!!manualPrintDialog.open}
+        onClose={() => setManualPrintDialog({ open: false, orderId: null, role: 'receipt', kind: 'receipt', title: '' })}
+        printRole={manualPrintDialog.role || 'receipt'}
+        title={manualPrintDialog.title || 'Yazdır'}
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          const orderId = manualPrintDialog.orderId;
+          if (!orderId) return;
+          if (manualPrintDialog.kind === 'takeaway') {
+            setTakeawayActionLoading({ orderId, action: 'print' });
+            try {
+              await api.printTakeawayLabel(orderId, { printer_id: printerId });
+              toast.success('Yazdırma isteği gönderildi');
+            } catch (err) {
+              toast.error(err.message || 'Yazdırma isteği gönderilemedi');
+            } finally {
+              setTakeawayActionLoading(null);
+            }
+            return;
+          }
+          try {
+            await api.printOrderReceipt(orderId, { printer_id: printerId });
+            toast.success('Yazdırma isteği gönderildi');
+            setOpenMenuTableId(null);
+          } catch (err) {
+            toast.error(err.message || 'Yazdırma isteği gönderilemedi');
+          }
+        }}
+      />
 
       {callModalOpen && (
         <div className="modal-overlay" onClick={() => setCallModalOpen(false)}>

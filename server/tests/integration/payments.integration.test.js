@@ -155,3 +155,255 @@ describe('split payments', () => {
     expect(table.guest_count).toBe(4);
   });
 });
+
+describe('full payments', () => {
+  it('rejects payments above the remaining order total', async () => {
+    const { orderId } = createOrder({ quantity: 2, total: 160 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'card',
+        amount: 200,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('kalan bakiyeyi aşıyor');
+
+    const payments = dbRef.current.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(orderId);
+    expect(payments.c).toBe(0);
+  });
+
+  it('deduplicates repeated full payment requests with an idempotency key', async () => {
+    const { orderId } = createOrder({ quantity: 2, total: 160 });
+    const payload = {
+      order_id: orderId,
+      payment_type: 'cash',
+      amount: 160,
+      cash_received: 200,
+      close_order: true,
+    };
+
+    const first = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .set('Idempotency-Key', 'pay-order-160')
+      .send(payload);
+
+    expect(first.status).toBe(201);
+    expect(first.body.payment.amount).toBe(160);
+    expect(first.body.order.status).toBe('closed');
+
+    const replay = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .set('Idempotency-Key', 'pay-order-160')
+      .send(payload);
+
+    expect(replay.status).toBe(200);
+    expect(replay.body.idempotent_replay).toBe(true);
+    expect(replay.body.payment.id).toBe(first.body.payment.id);
+
+    const payments = dbRef.current.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(orderId);
+    expect(payments.c).toBe(1);
+
+    const mutation = dbRef.current.prepare(`
+      SELECT * FROM entity_mutations WHERE entity_table = 'payments' AND entity_id = ?
+    `).get(first.body.payment.id);
+    expect(mutation).toMatchObject({
+      business_id: seeds.businessId,
+      action: 'create',
+      actor_user_id: seeds.userId,
+      request_id: null,
+      source: 'api.payments.create',
+    });
+    expect(JSON.parse(mutation.after_json)).toMatchObject({
+      id: first.body.payment.id,
+      order_id: orderId,
+      amount: 160,
+    });
+
+    const mutationCount = dbRef.current.prepare(`
+      SELECT COUNT(*) AS c FROM entity_mutations WHERE entity_table = 'payments' AND entity_id = ?
+    `).get(first.body.payment.id);
+    expect(mutationCount.c).toBe(1);
+  });
+
+  it('deduplicates repeated split payment requests with an idempotency key', async () => {
+    const { orderId, itemId } = createOrder();
+    const payload = {
+      order_id: orderId,
+      payment_type: 'card',
+      payer_no: 1,
+      allocations: [{ order_item_id: itemId, quantity: 2 }],
+    };
+
+    const first = await request(app)
+      .post('/api/payments/split')
+      .set('Authorization', authHeader)
+      .set('Idempotency-Key', 'split-person-1')
+      .send(payload);
+
+    expect(first.status).toBe(201);
+    expect(first.body.payment.amount).toBe(160);
+
+    const replay = await request(app)
+      .post('/api/payments/split')
+      .set('Authorization', authHeader)
+      .set('Idempotency-Key', 'split-person-1')
+      .send(payload);
+
+    expect(replay.status).toBe(200);
+    expect(replay.body.idempotent_replay).toBe(true);
+    expect(replay.body.payment.id).toBe(first.body.payment.id);
+    expect(replay.body.split.totals.paid_total).toBe(160);
+
+    const payments = dbRef.current.prepare('SELECT COUNT(*) AS c FROM payments WHERE order_id = ?').get(orderId);
+    const allocations = dbRef.current.prepare('SELECT COUNT(*) AS c FROM payment_allocations WHERE order_id = ?').get(orderId);
+    expect(payments.c).toBe(1);
+    expect(allocations.c).toBe(1);
+
+    const mutation = dbRef.current.prepare(`
+      SELECT action, source, after_json FROM entity_mutations WHERE entity_table = 'payments' AND entity_id = ?
+    `).get(first.body.payment.id);
+    expect(mutation.action).toBe('create');
+    expect(mutation.source).toBe('api.payments.split');
+    expect(JSON.parse(mutation.after_json)).toMatchObject({
+      id: first.body.payment.id,
+      payment_scope: 'split_item',
+      amount: 160,
+    });
+  });
+
+  it('rejects a second payment that exceeds the remaining balance after a partial payment', async () => {
+    const { orderId } = createOrder({ quantity: 2, total: 160 });
+
+    await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 100,
+        cash_received: 100,
+      })
+      .expect(201);
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'card',
+        amount: 70,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('kalan bakiyeyi aşıyor');
+  });
+});
+
+// ── P1-04: close_order=true → sipariş kapanır + masa boşalır ─────────────────
+describe('POST /api/payments — close_order=true ile masa boşaltma (P1-04)', () => {
+  it('close_order=true ile tam ödeme → sipariş closed, masa empty olur', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,
+        cash_received: 100,
+        close_order: true,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.order.status).toBe('closed');
+
+    const table = dbRef.current.prepare('SELECT status, current_order_id FROM tables WHERE id = ?').get(seeds.tableId);
+    expect(table.status).toBe('empty');
+    expect(table.current_order_id).toBeNull();
+  });
+
+  it('close_order=true ama kısmi ödeme → 400, masa hâlâ occupied', async () => {
+    const { orderId } = createOrder({ quantity: 2, total: 160 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,       // sadece yarısı
+        close_order: true,
+      });
+
+    expect(res.status).toBe(400);
+
+    const table = dbRef.current.prepare('SELECT status FROM tables WHERE id = ?').get(seeds.tableId);
+    expect(table.status).toBe('occupied');
+  });
+
+  it('close_order=false ile tam ödeme → sipariş açık kalır, masa dolu', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'card',
+        amount: 80,
+        close_order: false,
+      });
+
+    expect(res.status).toBe(201);
+    // close_order=false → sipariş hâlâ kapalı değil
+    expect(res.body.order.status).not.toBe('closed');
+
+    const table = dbRef.current.prepare('SELECT status FROM tables WHERE id = ?').get(seeds.tableId);
+    // Masa hâlâ occupied (sipariş kapanmadı)
+    expect(table.status).toBe('occupied');
+  });
+
+  it('nakit alım tutarı ödeme tutarından düşükse 400 döner', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,
+        cash_received: 50,  // 80'den az
+        close_order: true,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/nakit/i);
+  });
+
+  it('change_amount nakit para üstü doğru hesaplanır', async () => {
+    const { orderId } = createOrder({ quantity: 1, total: 80 });
+
+    const res = await request(app)
+      .post('/api/payments')
+      .set('Authorization', authHeader)
+      .send({
+        order_id: orderId,
+        payment_type: 'cash',
+        amount: 80,
+        cash_received: 100,
+        close_order: true,
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.payment.change_amount).toBe(20); // 100 - 80
+    expect(res.body.payment.cash_received).toBe(100);
+  });
+});

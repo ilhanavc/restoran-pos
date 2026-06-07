@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback } from 'react';
-import { CheckCircle, XCircle, Info, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, XCircle, Info, X } from 'lucide-react';
 
 const ToastContext = createContext(null);
 
@@ -15,11 +15,12 @@ export function ToastProvider({ children }) {
   const success = useCallback((msg) => addToast(msg, 'success'), [addToast]);
   const error = useCallback((msg) => addToast(msg, 'error'), [addToast]);
   const info = useCallback((msg) => addToast(msg, 'info'), [addToast]);
+  const warning = useCallback((msg) => addToast(msg, 'warning'), [addToast]);
 
-  const icons = { success: CheckCircle, error: XCircle, info: Info };
+  const icons = { success: CheckCircle, error: XCircle, info: Info, warning: AlertTriangle };
 
   return (
-    <ToastContext.Provider value={{ success, error, info }}>
+    <ToastContext.Provider value={{ success, error, info, warning }}>
       {children}
       <div className="toast-container">
         {toasts.map(t => {

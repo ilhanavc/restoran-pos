@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { useSocket } from '../../context/SocketContext.jsx';
-import { formatTime, timeAgo, ORDER_STATUS, parseDbTimestampMs } from '../../constants/index.js';
+import { timeAgo, parseDbTimestampMs } from '../../constants/index.js';
 import { RefreshCw, Clock, Package, ChefHat, Check, AlertCircle } from 'lucide-react';
 
 /** Web Audio API ile kısa bip sesi çalar */
@@ -51,14 +51,14 @@ export default function KitchenScreen() {
       if (prevOrderIds.current.size > 0 && hasNew) playBeep();
       prevOrderIds.current = newIds;
       setOrders(data);
-    } catch (err) {
+    } catch {
       toast.error('Siparişler yüklenemedi');
     } finally {
       setLoading(false);
     }
   }, [toast]);
 
-  useEffect(() => { loadOrders(); }, []);
+  useEffect(() => { loadOrders(); }, [loadOrders]);
 
   // Saniye sayacı — yaş renklerini canlı günceller
   useEffect(() => {
@@ -100,21 +100,14 @@ export default function KitchenScreen() {
   };
 
   return (
-    <div className="page-container" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: 0 }}>
+    <div className="page-container page-container--flush" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{
-        padding: '14px 24px', borderBottom: '1px solid var(--border)',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        background: 'var(--bg-secondary)', flexShrink: 0,
-      }}>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800 }}>
+      <div className="page-top-safe page-toolbar" style={{ flexShrink: 0 }}>
+        <div className="page-header-main">
+          <h1 className="page-toolbar-title">
             <ChefHat size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
             Mutfak Ekranı
           </h1>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-            {orders.length} aktif sipariş
-          </div>
         </div>
         <button className="btn btn-ghost" onClick={loadOrders}>
           <RefreshCw size={16} /> Yenile
@@ -122,7 +115,7 @@ export default function KitchenScreen() {
       </div>
 
       {/* Orders Grid */}
-      <div style={{ flex: 1, overflow: 'auto', padding: 16 }}>
+      <div className="page-scroll-safe" style={{ flex: 1, overflow: 'auto' }}>
         {loading ? (
           <div className="empty-state">Yükleniyor...</div>
         ) : orders.length === 0 ? (

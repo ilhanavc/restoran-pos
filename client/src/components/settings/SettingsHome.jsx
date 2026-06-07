@@ -1,12 +1,18 @@
-import { Settings, Store, Users, Printer, Monitor, Phone } from 'lucide-react';
+import { Settings, Store, Users, Printer, Monitor, Phone, CheckCircle2, DatabaseBackup, Activity, ScrollText, ClipboardList, Smartphone } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
 const sections = [
+  { icon: CheckCircle2, label: 'Kurulum Kontrolü', desc: 'İlk açılış, cihaz ve operasyon hazırlığı', to: '/settings/readiness' },
+  { icon: DatabaseBackup, label: 'Bakım ve Yedekleme', desc: 'Yedekler, manuel backup ve restore planı', to: '/settings/maintenance' },
   { icon: Store, label: 'İşletme Bilgileri', desc: 'Ad, adres, vergi bilgileri, fiş ayarları', to: '/settings/business' },
   { icon: Users, label: 'Kullanıcı Yönetimi', desc: 'Personel ekleme, rol atama, yetkilendirme', to: '/settings/users' },
-  { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller, kategori yönlendirme (Ayarlar > Yazıcılar)', to: '/settings/printers' },
+  { icon: Printer, label: 'Yazıcı Ayarları', desc: 'Yazıcı listesi, roller ve kategori yönlendirme', to: '/settings/printers' },
+  { icon: Activity, label: 'StoreBridge Durumu', desc: 'Bağlantı sağlığı, baskı kuyruğu ve son loglar', to: '/settings/bridge' },
   { icon: Monitor, label: 'Ekran Ayarları', desc: 'Tema, düzen, dil tercihleri', to: '/settings/display' },
-  { icon: Phone, label: 'Gelen arama (Caller ID)', desc: 'Arama geçmişi ve gelen arama simülasyonu (test)', to: '/settings/caller-id' },
+  { icon: Phone, label: 'Gelen arama (Caller ID)', desc: 'Arama geçmişi ve gelen arama yönetimi', to: '/settings/caller-id' },
+  { icon: ScrollText, label: 'Sürüm Notları', desc: 'Uygulama sürüm geçmişi, yenilikler ve güncelleme', to: '/settings/release-notes' },
+  { icon: ClipboardList, label: 'Denetim Günlüğü', desc: 'Ürün, kullanıcı, stok ve yapılandırma değişiklik geçmişi', to: '/settings/audit-log' },
+  { icon: Smartphone, label: 'Mobil Cihazlar', desc: 'Kayıtlı garson telefonları, eşleştirme ve yönetim', to: '/settings/devices' },
 ];
 
 export default function SettingsHome() {
@@ -15,10 +21,12 @@ export default function SettingsHome() {
   return (
     <div className="page-container">
       <div className="page-header">
-        <h1 className="page-title">
-          <Settings size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-          Ayarlar
-        </h1>
+        <div className="page-header-main page-title-line">
+          <h1 className="page-title">
+            <Settings size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
+            Ayarlar
+          </h1>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>

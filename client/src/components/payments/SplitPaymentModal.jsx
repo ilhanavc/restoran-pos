@@ -17,6 +17,7 @@ function makePayer(no) {
     items: {},
     paymentType: 'cash',
     cashReceived: '',
+    tipAmount: '',
   };
 }
 
@@ -74,6 +75,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
 
   useEffect(() => {
     loadState({ resetDraftPayers: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload on orderId change only; loadState is not memoized
   }, [orderId]);
 
   const itemMap = useMemo(() => {
@@ -181,6 +183,10 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
     updatePayer(payerId, (payer) => ({ ...payer, cashReceived }), false);
   };
 
+  const setTipAmount = (payerId, tipAmount) => {
+    updatePayer(payerId, (payer) => ({ ...payer, tipAmount }), false);
+  };
+
   const takePayment = async (payer) => {
     const entries = Object.entries(payer.items).filter(([, qty]) => Number(qty) > 0);
     if (!entries.length) {
@@ -188,10 +194,12 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
       return;
     }
     const amount = payerTotal(payer, itemMap);
+    const tipAmount = Math.max(0, Number(payer.tipAmount || 0));
+    const cashDue = amount + tipAmount;
     const cashReceived = payer.paymentType === 'cash'
-      ? Number(payer.cashReceived || amount)
-      : amount;
-    if (payer.paymentType === 'cash' && cashReceived + 0.02 < amount) {
+      ? Number(payer.cashReceived || cashDue)
+      : cashDue;
+    if (payer.paymentType === 'cash' && cashReceived + 0.02 < cashDue) {
       toast.error('Alınan nakit tutarı eksik');
       return;
     }
@@ -201,6 +209,7 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
       const result = await api.createSplitPayment({
         order_id: orderId,
         payment_type: payer.paymentType,
+        tip_amount: tipAmount,
         cash_received: cashReceived,
         payer_no: payer.no,
         payer_label: payer.label,
@@ -376,8 +385,10 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
                 const total = payerTotal(payer, itemMap);
                 const isActive = payer.id === activePayer?.id;
                 const isProcessing = processingPayerId === payer.id;
-                const cashReceived = Number(payer.cashReceived || total);
-                const change = payer.paymentType === 'cash' ? Math.max(0, cashReceived - total) : 0;
+                const tipAmount = Math.max(0, Number(payer.tipAmount || 0));
+                const cashDue = total + tipAmount;
+                const cashReceived = Number(payer.cashReceived || cashDue);
+                const change = payer.paymentType === 'cash' ? Math.max(0, cashReceived - cashDue) : 0;
                 const entries = Object.entries(payer.items).filter(([, qty]) => Number(qty) > 0);
 
                 return (
@@ -432,6 +443,19 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
                       ))}
                     </div>
 
+                    <div className="split-tip-row" onClick={(e) => e.stopPropagation()}>
+                      <label>Bahşiş</label>
+                      <input
+                        className="input"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={payer.tipAmount}
+                        onChange={(e) => setTipAmount(payer.id, e.target.value)}
+                        placeholder="0,00"
+                      />
+                    </div>
+
                     {payer.paymentType === 'cash' && total > 0 && (
                       <div className="split-cash-row" onClick={(e) => e.stopPropagation()}>
                         <input
@@ -439,9 +463,9 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
                           type="number"
                           value={payer.cashReceived}
                           onChange={(e) => setCashReceived(payer.id, e.target.value)}
-                          placeholder={formatCurrency(total)}
+                          placeholder={formatCurrency(cashDue)}
                         />
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCashReceived(payer.id, String(roundForInput(total)))}>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setCashReceived(payer.id, String(roundForInput(cashDue)))}>
                           Tam
                         </button>
                         <span>Para üstü: {formatCurrency(change)}</span>
@@ -675,12 +699,21 @@ export default function SplitPaymentModal({ orderId, onClose, onPaymentComplete 
             font-weight: 700;
           }
           .split-pay-type-row,
+          .split-tip-row,
           .split-cash-row {
             display: flex;
             align-items: center;
             flex-wrap: wrap;
             gap: 8px;
             margin-bottom: 10px;
+          }
+          .split-tip-row label {
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 800;
+          }
+          .split-tip-row .input {
+            max-width: 180px;
           }
           .split-cash-row .input {
             max-width: 180px;

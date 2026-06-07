@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { migrations } from '../migrations/run.js';
+import { migrateDatabase } from '../migrations/run.js';
 
 /**
  * Order transaction rollback testleri.
@@ -10,9 +10,7 @@ import { migrations } from '../migrations/run.js';
 
 function makeDb() {
   const db = new Database(':memory:');
-  db.transaction(() => {
-    for (const sql of migrations) db.exec(sql);
-  })();
+  migrateDatabase(db);
   return db;
 }
 

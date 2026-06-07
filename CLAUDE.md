@@ -5,19 +5,19 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 
 **Stack:** Electron + React 18/Vite (frontend) · Node.js/Express (backend) · SQLite (`better-sqlite3`) · Socket.io (real-time) · JWT/bcrypt (auth)
 
-**Overall score: 8.8/10** (up from 8.6/10) · 9 sprints completed · 104 automated tests · 15/15 production checklist items passed
+**Overall score: 9.3/10** · 12 sprints + D-1→D-5 + DB hardening · **425 automated tests** · 15/15 production checklist items passed
 
 ## Scores
 | Category            | Score  | Change |
 |---------------------|--------|--------|
 | Feature Completeness| 9/10   | ±0     |
-| Code Quality        | 8/10   | ±0     |
+| Code Quality        | 9/10   | ±0     |
 | Security            | 9/10   | ±0     |
 | Performance         | 8/10   | ±0     |
-| Test Coverage       | 8/10   | +1     |
-| Documentation       | 7/10   | ±0     |
-| Deployment          | 9/10   | +1     |
-| **Overall**         | **8.8**| **+0.2** |
+| Test Coverage       | 9/10   | ±0     |
+| Documentation       | 10/10  | ±0     |
+| Deployment          | 9/10   | ±0     |
+| **Overall**         | **9.3**| **+0.1** |
 
 ## Completed Sprints
 
@@ -32,6 +32,25 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 | 7 | Test Coverage | 65 automated tests (Vitest) covering Turkish encoding, printer deduplication, DB migration safety, order transaction integrity. Coverage 1→7/10. |
 | 8 | Production Hardening | Customer list pagination (50/page "load more"), order history search filters (date range / customer / amount), BRIDGE_TOKEN security fix, CORS hardening |
 | 9 | Feature Completion + Packaging Fix | Product image upload + combo menu, Customer 360 profile, Advanced order analytics, electron-updater auto-update, receipt template rebuild (4 templates, 48-char, PC857), **iconv-lite/store-bridge packaging bug fixed** (v1.0.3) |
+| 10 | Audit Hardening + Release Hardening | Full codebase audit (10 audit reports in `docs/audit/`: 00–09 + quality hardening), route lazy-loading (main chunk 948kB→265kB), `ConfirmDialog`/`useConfirmDialog` common component (window.confirm removed), `orderActionPolicy`/`orderPaymentState` utility layer, `api/core.js` HTTP separation, print_jobs lease-based claim + claim ownership guard + manual retry + structured error codes, StoreBridge API timeout/health-retry, CallerID reconnect + bounded POST retry + duplicate ringing guard, Electron persistent logging (`userData/logs/electron-main.log`), JWT secret persisted to `pos-config.json`, CallerID helper packaging fix (`extraResources`), `desktop:preflight` script, `build:callerid-helper` script, encoding module extracted to `store-bridge/printers/encoding.js`, password min-length guard (G-1), takeaway+table_id conflict guard (G-2), transfer Zod schema (G-3), 25 console.error context labels (admin.js), ErrorBoundary, bridge max-restart circuit-breaker, backup-restore runbook, 30 new tests (285 total) |
+| 11 | Desktop Core Hardening + Repo Cleanup | StoreBridgePage health/log/queue panel, `printErrorMessages.js` 16-code error dictionary (TR), `toast.warning` type, MaintenancePage backup staleness banner, PaymentScreen print-failure feedback, `backup-failed` IPC channel, `GET /admin/support-bundle` diagnostic endpoint, `smoke:server-health` script wired into `dist:prepare`, `dist:release` = dist:win + latest.yml, CallerID self-contained win-x64 publish (.NET 8), `printer-acceptance-checklist.md`, `code-signing-runbook.md`, ESLint 27 warnings → 0 (`lint:ci --max-warnings 0`), Playwright e2e specs (table-order-payment, takeaway), `adminBridgeObservability` integration test, **repo cleanup** (451 MB freed: old zips/artifacts/tmp), **pos-config.json removed from git** (security), 9 sprint pass docs → `docs/audit/archive/`, 33 new tests (318 total) |
+| 12 | Backup/Restore Hardening | **P1 critical gaps:** uploads folder backup + restore, backup meta.json (appVersion, schemaVersion, rowCounts, integrityCheck), open order uyarısı restore planlamadan önce (GET /maintenance/open-orders), pos-config.json snapshot backup + restore (JWT secret, bridge token). **P2 operational UX:** "Dosyadan Geri Yükle" + file picker, post-restore SHA-256+integrity-check + safety revert, "Dışa Aktar" per-backup button, disk-space pre-check warning, two-step restore modal (summary + final confirm). **P3 external protection:** SHA-256 hash in meta.json + verification on restore, Windows Task Scheduler integration (gece 03:00 robocopy, hedef klasör picker, manuel tetik, config JSON). `backup-restore-readiness-plan.md` risk matrix + runbook. 0 lint warnings. |
+| D-1 | Test + CI Kapısı | GitHub Actions CI (lint + backend tests + frontend RTL + Playwright e2e), RTL test suite (PaymentScreen, OrderScreen — 22 tests), Playwright e2e job eklendi CI'a, `db:seed` artık `app.setup` settings kaydı yazıyor (Playwright readiness yönlendirmesi engellenir). |
+| D-2 | Signing + Wizard + Update Disiplini | First-run setup wizard (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı), `setup:is-completed`/`setup:complete` IPC, `pos-config.json` `setupCompleted` flag, `UpdateNotification` toast + release notes modal (HTML/plain, progress bar, "Kur ve Yeniden Başlat"). **`ReleaseNotesPage.jsx`** (`/settings/release-notes`): statik changelog (RELEASES dizisi), uygulama versiyonu (`getAppVersion` IPC), "Güncelleme Ara" butonu, versiyon kopyalama. `getAppVersion` preload + `app:get-version` IPC handler eklendi. Kod imzası ertelendi (sertifika satın alımı gerekli). Son doğrulama: 346 test, `lint:ci` 0 warning. |
+| D-3 | Operasyonel Görünürlük | StoreBridge file log (`userData/logs/store-bridge.log`, 5 MB rotation), `writeBridgeLog` (info/error), crash reporter (`crashes.log` JSON-line). **Structured JSON logging (NDJSON):** `electron-main.log` her satırı geçerli JSON nesnesi — `{ts, level, msg, err?, stack?, data?}`; `buildLogEntry()` console.* args'larını parse eder; `store-bridge.log` artık `{ts, level, src:"bridge", msg}`. **Request-ID sertleştirme:** `requestIdMiddleware` UUID format regex doğrulaması (header injection koruması); 500 error response'a `requestId` eklendi (log correlation). 5 yeni unit test (`requestId.middleware.test.js`). Son doğrulama: 346/346 test, `lint:ci` 0 warning. |
+| D-4 | Monolitik Ayrıştırma | `electron/main.cjs` 301 satırlık orchestrator'a indirildi ve `electron/modules/*` altına bölündü; `server/routes/orders.js` + `payments.js` domain logic'i `orderService.js`/`paymentService.js` içine taşındı; `client/src/services/api.js` 31 satırlık facade oldu ve domain mixin modüllerine ayrıldı; `OrderScreen.jsx` için `useCatalog`, `useCart`, `ModifierModal`, `ClipboardEmpty` çıkarıldı; `PrinterDetailPage.jsx` için `usePrinterForm`, `PrinterDeviceSection`, `PrinterPreviewPanel` çıkarıldı. Son doğrulama: 318/318 test, `lint:ci` 0 warning, client build başarılı. |
+| D-5 | Ürün Eksiklerini Kapatma | D-5.1 period close / X-Z raporu ve kapalı dönem lock; D-5.2 ödeme/siparişe bağlı iade akışı; D-5.3 bahşiş modeli ve raporlama; D-5.4 rezervasyon → masa oturtma/adisyon bağlantısı tamamlandı. D-5.5 ödeme terminal SDK ve D-5.6 e-belge entegrasyonu provider/hardware/fiscal kararları gelene kadar bilinçli olarak deferred. Son doğrulama: 334/334 test, `lint:ci` 0 warning, client build başarılı. |
+| DB-1 / DB-2 | Veri Modeli Sağlamlaştırma | DB-1 migration disiplini başladı: numbered migration runner, `schema_migrations`, legacy baseline, forward-only validation. DB-2 audit trail başladı: `entity_mutations` tablosu, ödeme/iade mutasyon kayıtları, sipariş create/status/cancel mutation kayıtları. Son doğrulama: 341/341 test, `lint:ci` 0 warning, client build ve server health smoke başarılı. |
+| DB-2 (tam) | Audit Trail Tamamlandı | `entity_mutations` tüm mutation endpoint'lerine bağlandı: ürün create/update/delete, stok kalemi CRUD + stok hareketi, müşteri create/update, işletme/yazıcı/printer-routing/kullanıcı konfigürasyonları. `GET /api/admin/entity-mutations` endpoint (sayfalandırmalı, filtrelenebilir). `AuditLogPage` (`/settings/audit-log`) — tablo/işlem filtresi, before/after JSON diff görünümü. Son doğrulama: 346/346 test, `lint:ci` 0 warning. |
+| DB-3 | Integer Minor Unit Migration | `server/utils/money.js` (`toCents`, `fromCents`). `0002_add_cents_columns` migration: `orders`, `order_items`, `payments`, `refunds`, `products`, `product_portions` tablolarına `_cents` shadow kolonları + backfill. Dual-write: `orderService`, `paymentService`, `refundService`, `products.js` her mutation'da hem REAL hem `_cents` yazar. Reports read-path: COALESCE template'leri (`paymentAmountCents`, `orderGrandTotalCents` vb.) — REAL sütunlar korunuyor. `money.utils.test.js` (floating-point edge case dahil). Son doğrulama: 349/349 test, `lint:ci` 0 warning. |
+| DB-4 | Snapshot Tamamlama | `0003_snapshot_columns` migration: `orders` tablosuna `pricing_policy_version` (sipariş anındaki ürün MAX updated_at), `service_charge_rate/amount/cents` snapshot alanları; `order_items` tablosuna `vat_rate_snapshot` eklendi. `orderService.js` dual-write: her sipariş oluşturulurken menu versiyonu, servis ücreti oranı ve kalem vat_rate snapshot'ı yazılıyor. `grand_total` hesabı değiştirilmedi. `snapshot.test.js` (pricing_policy_version, vat_rate_snapshot, idempotency). Son doğrulama: 352/352 test, `lint:ci` 0 warning. |
+| C-1 | Railway Cloud Deployment | `railway.json` (NIXPACKS builder, `start:server`, `/api/health` healthcheck 30s); `server/config/index.js` merkezi `HOST`/`PORT`/`USER_DATA_PATH` (env-driven, absolute path desteği); `CORS_ORIGINS` env'den split; `server/.env.example` commit edilebilir şablon; Electron cloud modu: `pos-config.json`'da `cloudServerUrl` set edilirse local Express subprocess başlatılmaz, cloud URL kullanılır; `preload.cjs` `config:get-electron-config` IPC ile `apiBaseUrl` renderer'a expose edilir; `client/src/services/api/core.js` `electronConfig?.apiBaseUrl → VITE_API_URL → localhost:3001` önceliği. Son doğrulama: 352/352 test, `lint:ci` 0 warning. |
+| C-2 | Auth Hardening — Refresh Token + Mobile Session | `0004_refresh_tokens` migration; `tokenUtils.js` (generateRefreshToken, hashToken SHA-256); mobil login → 15dk access + 30 gün refresh token; `POST /api/auth/refresh` (rotate); `POST /api/auth/logout`; `POST /api/auth/logout-all`; desktop akışı değişmedi. `auth.refresh.test.js` (5 senaryo). Son doğrulama: 357/357 test, `lint:ci` 0 warning. |
+| M-1.1 | Mobile-First Waiter Endpoints | `requireMobile` middleware; `server/routes/mobile.js` (6 endpoint: tables, table order, add item, categories, waiter-call, me); `mobile.endpoints.test.js` (11 senaryo). 368/368 test. |
+| M-1.2 | Device Pairing (QR + device_id) | `0005_devices` migration (`devices` + `device_pairing_tokens` tabloları); `POST /api/mobile/devices/register` (pairing token doğrulama + cihaz kaydı); `GET /api/admin/devices`, `POST /api/admin/devices/pairing-token` (8 kar. token, 10dk TTL), `PATCH /api/admin/devices/:id`, `DELETE /api/admin/devices/:id`; `DevicesPage.jsx` (`/settings/devices`) — QR görüntüleme (api.qrserver.com), token kopyalama, cihaz tablosu, toggle/sil; `SettingsHome` + `App.jsx` route eklendi. Son doğrulama: 368/368 test, `lint:ci` 0 warning. |
+| FAZ 0 (0.1/0.3/0.4/0.2/0.5) | Güvenlik Sertleştirmesi (Online Öncesi) | **0.1** JWT_SECRET fail-fast (prod: zorunlu + min 32 char guard), `config.jwtSecret.test.js`. **0.3** `TRUST_PROXY_HOPS` env (0/1/2), geçersiz → 0 fallback, `config.trustProxy.test.js`. **0.4** Global rate-limit env-driven (`GLOBAL_RATE_LIMIT_WINDOW_MS/MAX`, `/api/health` skip) + `compression()` gzip middleware + `pretest` scripti (`npm rebuild better-sqlite3` — ABI drift kalıcı çözümü). **0.2** `utils/corsOrigin.js` ortak whitelist checker — prod'da yalnızca `CORS_ORIGINS`, dev'de localhost/127.0.0.1/192.168/10.x regex; bilinmeyen origin → `CORS: origin not allowed`; `cors()` ve Socket.io aynı callback; `corsOrigin.test.js` (15 test). **0.5** `utils/password.js` validator (min 8 + büyük harf + rakam); `0011_must_change_password` migration; admin user create → `must_change_password=1`; admin başkasının şifresini resetlerse flag=1; login'de flag=1 → 403 + `{must_change_password,email,businessId}`; `POST /api/auth/change-password` (old+new doğrulama, politika, farklılık guard, refresh token'lar iptal); `password.utils.test.js` (10 test) + `changePassword.integration.test.js` (7 test). **Kategori hard-delete**: `categories.js` soft-delete yerine transaction-based hard-delete (`product_modifiers`/`product_combos` temizle, `printer_routing.category_id=NULL`, CASCADE ile `product_portions`/`product_attribute_groups`); `0010_cleanup_soft_deleted_categories` mevcut pasifleri temizler. Son doğrulama: 415/415 test, `lint:ci` 0 warning. |
+| FAZ 0 (0.6/0.7) | Yapılandırılmış Log + Hata İzleme | **0.6** `server/utils/logger.js` merkezi Pino logger — D-3 NDJSON şemasıyla uyumlu (`ts/level/msg` alan isimleri korundu), `redact` path'leri: `authorization`, `x-bridge-token`, `cookie`, `*.password`, `*.token`, `*.jwtSecret`, `*.bridgeToken`, `*.refreshToken`; dev: `pino-pretty` transport; prod: raw JSON; test: `silent` level. `pino-http` access log middleware (`customProps` ile method/path/status/ms/requestId korundu, `/api/health` autoLogging ignore). `server/index.js` banner/404/prod-warn log'ları logger.* üzerinden. **0.7** Sentry backend (`@sentry/node` + `@sentry/profiling-node` → `nodeProfilingIntegration`) + frontend (`@sentry/react` + `replayIntegration` — `maskAllText:true`, `maskAllInputs:true`, `blockAllMedia:true` → POS verileri GDPR/KVKK altında). `server/utils/sentry.js` + `client/src/services/sentry.js` **simetrik redact** (aynı SENSITIVE_KEYS seti, 6-depth recursive walk, `beforeSend` hook scope'u `request/extra/contexts/breadcrumbs` temizler); frontend'de ek olarak `query_string` regex ile `?token=...` kazınır. `ignoreErrors` gürültü filtresi (CORS/rate-limit/validation backend'de; ResizeObserver/Network Error frontend'de). `Sentry.setupExpressErrorHandler` 500 response'a `sentryEventId` ekler — log correlation için. `AuthContext` login/logout/bootstrap'te `Sentry.setUser` çağırır (id/email/username/role, PII opt-in değil). `ErrorBoundary` React render hataları için `Sentry.withScope` + `componentStack` context. `@sentry/vite-plugin` source map upload — `SENTRY_AUTH_TOKEN` varsa otomatik tetiklenir, yüklendikten sonra `.map` dosyalarını `dist/` içinden siler (prod bundle'a .map sızma koruması); bundle'lara otomatik `_sentryDebugIds` injekt edilir. `server/.env.example` + `client/.env.example` + `docs/runbooks/sentry-setup-runbook.md` (12 bölüm: hesap → proje → auth token → env → verify → prod deploy → revert). `sentry.redact.test.js` (10 test: null/undefined, case-insensitive auth header, cookie, password, nested tokens, array scanning, depth guard, non-sensitive preservation, jwtSecret/bridgeToken, DSN-state-config consistency). End-to-end aktivasyon doğrulandı: backend init log + test error + dashboard + redact payload (`[Filtered]`), frontend init + test error + session replay mask + source map upload (release `restoran-pos@1.0.9` artifact'leri Sentry'de). Son doğrulama: 425/425 test, `lint:ci` 0 warning. |
+| FAZ 0 (0.8/0.9) | Secrets Audit + CI/CD Sertleştirmesi | **0.8** `.gitignore` savunma derinliği: `server/.env.local`, `server/.env.*.local`, `client/.env`, `client/.env.local`, `client/.env.*.local`, her yerden `*.db/*.db-shm/*.db-wal/*.sqlite/*.sqlite3`, `backups/`, `uploads/`, `server/uploads/`, `*.bak`. Leak taraması: `git ls-files` (secret pattern taraması) + `git log --all --full-history -- '*.env' 'pos-config.json' '*.db'` → geçmiş temiz, `git filter-repo` gerekmedi; 8/8 `git check-ignore` doğrulaması geçti. **0.9** `.github/workflows/ci.yml` sertleştirildi: üst seviye `concurrency` (aynı ref'e yeni push eskiyi iptal eder), tüm job'larda `timeout-minutes` (lint/test/test-frontend/build: 15, e2e: 25), yeni **build** job'u (client Vite build doğrulaması — `SENTRY_AUTH_TOKEN` olmadan koşar, source map upload atlanır ama bundle integrity CI kapısında olur), yanıltıcı test sayısı yorumları (`318 tests`, `22 tests`) nötr açıklamalarla değiştirildi. |
 
 ## Completed Features (Do Not Break)
 - Table management (area-based grid, status, transfer, occupancy color scale)
@@ -40,21 +59,37 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Payment (cash/card/mixed, discount, change calculation, auto-close)
 - Kitchen screen (active orders, item-level preparation tracking, age warnings)
 - Receipt/invoice printing (ESC/POS, PC857 Turkish, word-wrap, header/footer configurable)
-- Reservation module (calendar view, date/guests/notes)
+- Reservation module (calendar view, date/guests/notes, table seating link with arrived/no-show guardrails)
 - Inventory tracking (items, movements, low-stock alerts)
 - Customer management (multi-phone/address, order history, Excel/CSV import-export)
-- Reports (daily sales, payment breakdown, top sellers, category/user breakdown, 4 interactive charts)
+- Reports (daily sales, payment breakdown, top sellers, category/user breakdown, 4 interactive charts, X/Z period close)
+- Refund / return flow (refund records tied to original orders/payments, closed-period guard, report totals)
+- Tip / bahşiş tracking (payment-level tip capture, separate X/Z report totals)
 - Order history with advanced filters (date range, customer, amount)
-- CallerID (C812A V8 HID device, clipboard bridge via PowerShell; SDK helper as primary candidate)
+- CallerID (C812A V8 HID device, clipboard bridge via PowerShell; SDK helper as primary — **self-contained win-x64 binary**)
 - Socket.io real-time (kitchen, table, takeaway screens)
-- Daily automatic DB backup (02:00, 30-day retention)
+- **Daily automatic DB backup** (02:00, 30-day retention, WAL-safe snapshot)
+  - Backup scope: pos.db + uploads/products/ folder + pos-config.json snapshot
+  - Sidecar meta.json: appVersion, schemaVersion, rowCounts, integrityCheck, sha256, dbSizeBytes
+  - Manual backup via Settings → Bakım ve Yedekleme → Manuel Yedek Al
+  - Restore via two-step modal (summary + final confirm) with open-order warning
+  - Post-restore integrity verification + automatic safety revert on failure
+  - SHA-256 hash validation on restore (detect corrupted backups)
+  - Windows Task Scheduler: nightly 03:00 robocopy to external folder (USB, network drive)
+  - External backup import (UI file picker) + export (save dialog) per backup
+  - Disk space pre-check before backup (warns if insufficient)
 - Role-based auth: Admin, Cashier, Waiter, Kitchen
-- 104 automated tests (Vitest + Supertest integration), all passing
+- **425 automated tests** (Vitest + Supertest integration), all passing
 - 15/15 production checklist items complete
 - Electron packaging: NSIS Setup + Portable `.exe` (`npm run dist:win`)
 - One-click Windows startup scripts (`scripts/start-all.bat`)
 - Customer notification sound on new order
-- electron-updater auto-update (GitHub Releases, v1.0.3+)
+- electron-updater auto-update (GitHub Releases, v1.0.3+); `dist:release` generates `latest.yml`
+- **First-run setup wizard** (4 adım: hoş geldiniz → işletme adı → admin parola → tamamlandı); `setup:is-completed`/`setup:complete` IPC; `pos-config.json` `setupCompleted` flag
+- `UpdateNotification`: toast notification (sağ alt), indirme progress bar, release notes modal (HTML/plain text), "Kur ve Yeniden Başlat" / "Sonra" CTA, hata + retry
+- **`ReleaseNotesPage`** (`/settings/release-notes`): statik changelog (RELEASES dizisi, sürüm bazlı bölümler — Yeni/İyileştirme/Düzeltme/Güvenlik badge), uygulama versiyonu `getAppVersion` IPC, "Güncelleme Ara" + kopyalama butonu; SettingsHome'a kart eklendi
+- **Operasyonel görünürlük (D-3) — TAM:** `userData/logs/store-bridge.log` (5 MB rotation), `crashes.log` JSON-line crash reporter, `X-Request-Id` correlation header (UUID format validation — header injection koruması), **NDJSON structured logging** (`electron-main.log` her satırı `{ts,level,msg,...}` geçerli JSON), `requestId` 500 error response'a dahil — log correlation
+- **D-4 monolitik ayrıştırma:** Electron main process modüllere ayrıldı; orders/payments route'ları domain service çağıran ince HTTP katmanlarına dönüştü; API client domain modüllerine bölündü; OrderScreen ve PrinterDetailPage ilk güvenli hook/component extraction dilimlerini aldı.
 - Product image upload (server/uploads/products/, /uploads static)
 - Combo menu support (product_combos table, UI in MenuProductEditorPage)
 - Customer 360 profile (total spend, order count, last visit, top 3 products)
@@ -62,37 +97,122 @@ Windows desktop restaurant POS application. Production-ready as of April 2026.
 - Order report Excel export + print/PDF (daily + order history)
 - Waiter call QR code (table QR → customer scan → real-time notification via Socket.io)
 - Receipt templates rebuilt (4 templates: PAKET KASA, PAKET MUTFAK, MASA MUTFAK, MASA KASA — 32-char separators)
-- Supertest integration tests (auth, orders, payments, reports — 4 files)
+- Supertest integration tests (auth, orders, payments, reports, adminPrinters, bridgePrintJobs, takeawayDelivery, tables, orderLifecycle, **adminBridgeObservability** — 10 files)
+- `orderPaymentState.test.js`: 33 unit test — roundMoney, getPaidTotal, isOrderFullyPaid, canCloseOrder, getPaymentStateLabel, getPaymentSummary
+- `orderActionPolicy.test.js`: 30 unit test — canOpenOrderPayment, canEditOrderItem, canVoidOrderItem, canSaveOrderDraft
+- QA regression audit: `docs/audit/08-qa-regression-audit.md` + `docs/testing/regression-checklist.md`
+- `ConfirmDialog` + `useConfirmDialog`: all `window.confirm` calls replaced with in-app modal
+- `orderActionPolicy.js` + `orderPaymentState.js`: centralized order/payment decision utilities
+- `api/core.js`: HTTP core separated from `api.js` facade
+- Print queue: lease-based claim, claim ownership guard, manual retry for failed jobs, structured error codes
+- `printErrorMessages.js`: 16 ESC/POS error codes → Turkish `{ label, action }` dictionary (client/src/utils/)
+- `toast.warning` type in ToastContext — used for print failures, backup alerts
+- `StoreBridgePage` (`/settings/bridge`): health badge, queue summary, printer list, 200-line log tail, "Destek Paketi İndir"
+- `GET /admin/support-bundle`: full diagnostic bundle (system, DB, bridge, print queue, logs)
+- `backup-failed` IPC channel: Electron → preload → App.jsx → toast.warning on backup error
+- MaintenancePage: backup staleness banner (warns if last backup >2 days old)
+- PaymentScreen: toast.warning with `getPrintErrorAction()` when print job fails after payment
+- StoreBridge: API timeout enforcement, health-retry on startup, CallerID reconnect + bounded POST retry + duplicate ringing guard
+- Electron persistent logging: all process stdout/stderr + uncaught exceptions written to `userData/logs/electron-main.log`
+- JWT secret persisted to `pos-config.json` on first launch (sessions survive restarts without explicit `.env` config)
+- CallerID helper `.exe` included via `extraResources`; **self-contained win-x64 publish** — no .NET runtime required on target machine
+- `store-bridge/printers/encoding.js`: encoding/ESC-POS logic extracted from `renderers.js` into standalone module
+- Full audit documentation in `docs/audit/` (11 numbered reports: 00–10, + repo-cleanup-audit); sprint pass docs in `docs/audit/archive/`
+- Desktop install runbook: `docs/runbooks/desktop-install-runbook.md`
+- Backup & restore runbook: `docs/runbooks/backup-restore-runbook.md`
+- Code signing runbook: `docs/runbooks/code-signing-runbook.md`
+- Printer acceptance checklist: `docs/runbooks/printer-acceptance-checklist.md`
+- `ErrorBoundary` component: React crash → "Yenile" ekranı (beyaz ekran koruması), mounted at app root in `main.jsx`
+- Security hardening: `err.message` removed from all 500 responses; failed login → `login_failed` audit log; **`pos-config.json` removed from git tracking + gitignored**
+- Bridge max restart guard: `BRIDGE_MAX_RESTARTS=10` — stops infinite restart loop
+- ESLint: `client/eslint.config.js` (ESLint 10 flat config), **`lint:ci --max-warnings 0`** — zero warnings enforced in CI
+- Playwright e2e: `e2e/table-order-payment-close.spec.js` + `e2e/takeaway-order.spec.js`
+- `scripts/smoke-server-health.cjs`: starts server with temp DB, polls `/api/health`, verifies migration — wired into `dist:prepare`
+- Repo cleanup: 451 MB artifacts removed, 9 orphaned scripts deleted, `docs/audit/archive/` organized
+- **DB-1 migration discipline:** `schema_migrations`, `server/migrations/versions/`, legacy baseline marker, forward-only numbered migration validation.
+- **DB-2 audit trail — TAM:** `entity_mutations` tablosu; ürün/stok/müşteri/işletme/yazıcı/kullanıcı tüm mutation endpoint'lerinde before/after JSON snapshot kaydı. `GET /api/admin/entity-mutations` + `AuditLogPage` (`/settings/audit-log`).
+- **DB-3 integer minor unit — TAM:** `server/utils/money.js` (`toCents`/`fromCents`); `0002_add_cents_columns` migration + backfill; dual-write tüm mutation path'larında; reports COALESCE fallback read-path. REAL sütunlar korunuyor (geriye dönük uyumluluk).
+- **DB-4 snapshot tamamlama — TAM:** `0003_snapshot_columns` migration; `orders.pricing_policy_version`, `orders.service_charge_*`, `order_items.vat_rate_snapshot`; `orderService.js` her sipariş oluşturulurken snapshot yazar. **O-1 tamamlandı.**
 
 ## Pending Tasks
 
-All short-term and medium-term roadmap items completed as of Sprint 9.
-Long-term items deferred pending 15-day production testing period.
+All backup/restore critical gaps (P1), operational visibility (D-3 — tam), monolithic decomposition (D-4), mandatory D-5 product gaps (D-5.1 through D-5.4), DB-1 migration discipline, D-2 Release Notes UI, DB-2 audit trail, and DB-3 integer minor unit migration tamamlandı. **Gate 1 tek engelleyicisi: Windows kod imzası (EV/OV sertifika).**
+
+### D-5 Deferred Decisions
+D-5.5 and D-5.6 remain intentionally deferred. Do not implement payment terminal SDK work until a concrete provider/hardware choice exists. Do not implement e-belge work until fiscal provider, legal scope, and document flow are selected.
+
+### Remaining Architectural Debt (after D-5, low risk)
+- `TablesScreen.jsx` — extract `useTablesData`, `TakeawaySidebar`, `TableCard` components.
+- Continue gradual `OrderScreen.jsx` extraction only in small, tested slices; do not do a large UI rewrite.
+
+### Sıradaki: M-1.3 — Push Notification (FCM + APNs)
+**Ön koşul:** M-1.2 ✅ tamamlandı. Firebase projesi kurulumu gerekli (dış bağımlılık).
+- `firebase-admin` npm paketi (server)
+- `devices` tablosuna `push_token` alanı
+- `POST /api/mobile/devices/push-token` endpoint
+- `server/services/pushNotificationService.js`
+- Tetikleyiciler: yeni sipariş, mutfak hazır, masa çağrısı
+
+### O-2 — Tenant Identity + Billing (4 ay sonrası)
+**Ön koşul:** O-1 ✅, 4 ay pilot tamamlanmış.
+- Tenant model (plan, limit, billing)
+- RBAC genişleme
+- Tenant-aware rate limiting + backup/restore
+- iyzico subscription (TR market)
+
+### DB sonrası düşük öncelik
+- `_cents` kolonlarını primary read source yapma (REAL deprecated) — v2 verisi dolunca.
+- Audit log viewer'a CSV export eklenebilir.
+
+### Print queue UI (P2)
+- Print queue summary panel in Admin UI (pending/failed/stale counts)
+- `last_error_code` surfaced in failed job rows with actionable resolution messages
+- Manual retry confirmation modal for failed print jobs
+- StoreBridge log written to file (parallel to `electron-main.log`)
+
+### Desktop / release (P1→P2)
+- Code signing certificate + signed NSIS pipeline (currently SmartScreen warning on install) — see `docs/runbooks/code-signing-runbook.md`
+- Backup encryption (AES-256) with key management — low priority, defer to v2 if needed
 
 ### After production testing (v2 roadmap)
 - Multi-branch dashboard
 - Online order integrations (Yemeksepeti, Getir)
 - Mobile waiter app (tablet/offline)
 - Loyalty program
-- CI/CD pipeline (GitHub Actions) — **high priority, prevents packaging bugs**
 - Frontend test coverage (React component tests)
 - QR code local generation (replace external api.qrserver.com dependency)
-- Structured log file output for production debugging
 
 ## Critical Technical Notes
-- **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds. Vitest uses system Node: if `npm run test` fails with an ABI/version mismatch after `postinstall` or an Electron rebuild, run `npm rebuild better-sqlite3` in `server/`.
+- **`better-sqlite3`** — must be rebuilt for Electron ABI; `npm run dist:prepare` handles this automatically via `scripts/rebuild-server-native.cjs`. Requires Visual Studio "Desktop development with C++" for source builds. **Kalıcı çözüm (FAZ 0 — 0.4):** `server/package.json` artık `pretest` scripti ile `npm rebuild better-sqlite3 --quiet` çalıştırır — `npm test` her zaman sistem Node ABI'si için derlenmiş binary'yi garanti eder, Electron rebuild sonrası elle `npm rebuild` çalıştırmak gerekmez.
 - **`store-bridge/node_modules`** — `dist:prepare` runs `npm install --prefix store-bridge --omit=dev` since Sprint 9. Previously missing, caused iconv-lite crash in v1.0.2. Do NOT remove this step.
-- **PC857 Turkish encoding** — `ESC t 12` command; per-printer `skipInit` setting available to skip `ESC @` initialization (fixes Turkish chars on some network printers).
-- **CallerID** — Primary: C# SDK helper (`tools/callerid-sdk-helper`). Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`). Both POST to `POST /api/bridge/caller-id/incoming` with `X-Bridge-Token`.
+- **PC857 Turkish encoding** — `ESC t 12` command; per-printer `skipInit` setting available to skip `ESC @` initialization (fixes Turkish chars on some network printers). Encoding logic lives in `store-bridge/printers/encoding.js` (extracted from `renderers.js` in Sprint 10).
+- **CallerID** — Primary: C# SDK helper (`tools/callerid-sdk-helper`), **self-contained win-x64 binary** (no .NET runtime needed). Fallback: clipboard listener (`scripts/callerid-clipboard-listener.ps1`). Both POST to `POST /api/bridge/caller-id/incoming` with `X-Bridge-Token`. CallerID helper `.exe` is bundled via `extraResources`; `desktop:preflight` verifies it exists before packaging.
 - **BRIDGE_TOKEN** — must always be masked in logs (`***`); never log in plain text.
 - **DB transactions** — order, payment, and print operations must be atomic (all-or-nothing).
+- **Para birimi (DB-3)** — `server/utils/money.js` `toCents(value)` = `Math.round(Number(value) * 100)`. Tüm yeni mutation'lar hem REAL hem `_cents` sütununa yazar. REAL sütunlar silinmedi — geriye dönük uyumluluk. Reports COALESCE fallback kullanır: `COALESCE(col_cents, ROUND(col * 100)) / 100.0`.
 - **Mock mode** — must default to OFF; must never be enabled in production.
-- **userData path** — in packaged Electron, SQLite lives at `app.getPath('userData')` (`%APPDATA%\restoran-pos\pos.db`). On first launch, migrates from `server/data/pos.db` if userData is empty.
+- **userData path** — in packaged Electron, SQLite lives at `app.getPath('userData')` (`%APPDATA%\restoran-pos\pos.db`). On first launch, migrates from `server/data/pos.db` if userData is empty. `uploads/` and `backups/` also live under userData.
+- **Electron logging** — all process stdout/stderr (backend, StoreBridge, CallerID) and uncaught exceptions are written to `userData/logs/electron-main.log`. Check this file first for field support.
+- **JWT_SECRET** — on first Electron launch the secret is auto-generated and persisted to `userData/pos-config.json`, so sessions survive restarts without requiring `server/.env`. Set explicitly in `.env` for browser-only (`prod`) mode. **`pos-config.json` is gitignored — never commit it.** **Prod guard (FAZ 0 — 0.1):** `NODE_ENV=production` altında `JWT_SECRET` yoksa veya fallback değerse fail-fast; < 32 karakter → reddet.
+- **Şifre politikası (FAZ 0 — 0.5)** — `server/utils/password.js::validatePassword()` yalnızca YENİ şifre belirlenirken çağrılır (admin user create, admin şifre reset, user change-password). Login mevcut hash'i doğrular — eski kısa şifreler geriye dönük çalışır. Yeni kullanıcı veya admin reset → `users.must_change_password=1` → login 403 + `{must_change_password:true}` → frontend `/auth/change-password` akışına yönlendirir. `POST /api/auth/change-password` tüm refresh token'ları iptal eder (güvenlik).
+- **CORS whitelist (FAZ 0 — 0.2)** — `server/utils/corsOrigin.js` `buildCorsOriginCallback` Express ve Socket.io için ortak. Prod'da yalnızca `CORS_ORIGINS` env whitelist'i geçer; dev'de localhost/127.0.0.1/192.168.x/10.x (herhangi port) otomatik izinli. Origin header'ı olmayan istekler (mobile app, curl, same-origin) her zaman geçer.
+- **`server/.env`** — never committed to git.
+- **`pos-config.json`** (root) — local Electron config, contains JWT secret. Gitignored since Sprint 11. Never commit.
 - **CORS_ORIGINS** — LAN IP support configured via env var.
 - **Socket.io** — kitchen, table, and takeaway screens use real-time events (not polling).
 - **electron-builder** — pinned to `24.13.3`; do NOT upgrade to 25.x (known 7za/packaging issues).
-- **JWT_SECRET** — must be set in `server/.env` for production; Electron generates random per-launch if missing (sessions won't persist across restarts).
-- **`server/.env`** — never committed to git.
+- **`dist:nsis` / `dist:portable` KULLANMA** — NSIS ve portable build adımları `restoran-pos-1.1.0-x64.nsis.7z` adlı dev boyutlu (336MB+) bir ara dosya oluşturur ve bu dosya sonsuza kadar büyümeye devam eder, durdurulamaz hale gelir. Release için **sadece `dist:prepare` (win-unpacked) + manuel zip** yeterlidir: `npm run dist:prepare` → `win-unpacked` klasörünü zip'le → GitHub Release'e yükle. `dist:win` ve `dist:release` komutlarını ÇALIŞTIRMA.
+- **Electron frontend loading (CRITICAL)** — The renderer uses `mainWindow.loadFile(clientDist/index.html)` NOT `loadURL('http://...')`. loadURL causes `ERR_ABORTED 500` for CSS/JS assets when Electron Chromium loads them as page resources (curl/fetch work fine — it's a renderer-specific issue with Express static). loadFile bypasses Express for static files entirely. Consequences: (1) `vite.config.js` must keep `base: './'` (relative asset paths for file:// compatibility); (2) React Router must use `HashRouter`, not `BrowserRouter` (file:// has no history API server); (3) `SocketContext` uses `BASE_URL` from `api/core.js` instead of `window.location.origin` (origin is 'null' under file://); (4) `main.cjs` IPC `config:get-electron-config` returns `http://127.0.0.1:${port}` explicitly so `BASE_URL` resolves correctly. **Do NOT revert any of these four — they are all load-bearing.**
+- **`@sentry/profiling-node`** — removed from server dependencies. Electron ABI 132 (Electron 34) has no prebuild for `@sentry-internal/node-cpu-profiler`. Do NOT re-add until Sentry publishes ABI 132 support. `profilesSampleRate` config remains but profiling integration is disabled (`integrations: []` in `sentry.js`).
+- **Server subprocess logs** — `child.stdout.write('[pos-api] ...')` goes to `process.stdout.write` in Electron main, which bypasses the file logger. Server errors do NOT appear in `electron-main.log`. To debug server startup issues in packaged builds, check the server's own pino log or temporarily change serverProcess.cjs stdout handler to `console.log` (which IS captured).
+- **Playwright e2e tests** — must use `/#/path` style URLs (e.g. `goto('/#/login')`, `goto('/#/tables')`) because the app uses `HashRouter`. Path-based `goto('/tables')` navigates to the root hash route, not the tables page. `waitForURL` patterns still work as-is (e.g. `/\/tables/` matches `/#/tables`).
+- **`PATCH /admin/business` tax_id** — `tax_id` is optional (not required). Validation runs only when a value is provided (min 5 chars, alphanumeric). The setup wizard does not collect tax_id — admins set it later in Business Settings.
+- **Print queue lease** — `print_jobs` rows use `claimed_until` for lease-based ownership. A claimed job whose lease has expired is fair game for re-claim. Status updates are rejected (409) if the claiming bridge ID doesn't match. Failed jobs require explicit admin manual retry — no automatic retry by design (prevents duplicate kitchen receipts).
+- **ConfirmDialog** — `window.confirm` is banned. Use `client/src/components/common/ConfirmDialog.jsx` + `useConfirmDialog.js` hook for all destructive-action confirmations.
+- **ESLint** — `lint:ci` enforces `--max-warnings 0`. Any new warning breaks the CI gate. Fix warnings before committing.
+- **dist:release** — Full release chain: `npm run dist:release` = `dist:win` + `dist:gen-update-meta` (generates `latest.yml` for electron-updater).
+- **Desktop Readiness checks** — `receipt_printer` and `kitchen_printer` are `warning` (not `blocker`). Businesses without printers can complete setup. See `buildDesktopReadiness()` in `server/routes/admin.js`.
+- **`app.setup` settings key** — written by `db:seed` and by `POST /api/admin/desktop-readiness/complete`. Controls whether app redirects to readiness page on every navigation. If not set, users are locked out of all non-settings screens.
 
 ## Folder Structure
 ```
@@ -100,27 +220,56 @@ restoran-pos-v3/
 ├── client/                    # React 18 + Vite frontend
 │   └── src/
 │       ├── components/        # auth, layout, tables, orders, payments,
-│       │                      # kitchen, takeaway, callerid, customers,
-│       │                      # reports, settings
-│       ├── context/           # Auth + Toast context
+│       │                      # kitchen, callerid, customers, reports, settings
+│       │   └── common/        # ConfirmDialog, useConfirmDialog, ErrorBoundary,
+│       │                      # ManualPrintSelectorModal
+│       ├── context/           # Auth, Toast (w/ warning), IncomingCall, Socket
 │       ├── services/          # API service layer
-│       ├── constants/         # Constants, formatters
-│       └── styles/            # Global CSS
+│       │   └── api/           # HTTP core + domain mixins; api.js is thin facade
+│       ├── utils/             # orderActionPolicy.js, orderPaymentState.js,
+│       │                      # printErrorMessages.js, tableUtils.js, displayTheme.js
+│       ├── constants/         # Constants, formatters, menuUi
+│       └── styles/            # global.css
 ├── server/                    # Express backend
-│   ├── config/                # DB connection
-│   ├── middleware/            # Auth, authorization
+│   ├── config/                # DB connection, index.js
+│   ├── middleware/            # auth.js, bridgeAuth.js, validate.js, requestId.js
 │   ├── routes/                # auth, tables, products, orders, payments,
 │   │                          # customers, callerid, reports, printer,
-│   │                          # admin, bridge
-│   ├── migrations/            # Table creation
-│   ├── seeds/                 # Demo data
-│   ├── tests/                 # Vitest tests (101 tests)
+│   │                          # admin, bridge, reservations, stock, waiterCall, attributes
+│   ├── services/              # printJobs.js, callerIdService.js,
+│   │                          # printRouting.js, printerAutoPrintPolicy.js
+│   ├── constants/             # orderStatus.js
+│   ├── utils/                 # helpers.js, phoneNormalize.js
+│   ├── migrations/            # run.js — idempotent schema migration
+│   ├── seeds/                 # Demo data (run.js)
+│   ├── tests/                 # 346 Vitest tests (29 files)
+│   │   ├── integration/       # 10 integration test files
+│   │   └── frontend/          # storeBridgeClientMappings.test.js
 │   └── index.js               # Server entry point
 ├── electron/
-│   └── main.cjs               # Electron main process
+│   ├── main.cjs               # Thin Electron orchestrator (logs → userData/logs/)
+│   ├── modules/               # config, logging, process, backup, bridge, callerId, window modules
+│   └── preload.cjs            # IPC bridge (contextBridge)
 ├── store-bridge/              # Local printer bridge; hardware CID (HID/clipboard)
-├── tools/callerid-sdk-helper/ # C# CallerID SDK helper (.NET)
-├── scripts/                   # .bat startup scripts, build helpers
+│   ├── printers/
+│   │   ├── encoding.js        # PC857/Win1254 encode, ESC-POS helpers
+│   │   └── renderers.js       # Receipt rendering (re-exports encoding.js)
+│   ├── callerid/              # Cid812Provider.js
+│   └── jobs/                  # poller.js
+├── tools/callerid-sdk-helper/ # C# CallerID SDK helper (.NET 8, self-contained win-x64)
+├── e2e/                       # Playwright smoke tests (table-order-payment, takeaway)
+├── scripts/                   # Build helpers + Windows .bat starters
+│   ├── build-callerid-helper.cjs   # dotnet publish self-contained win-x64
+│   ├── check-desktop-release.cjs  # desktop:preflight validation
+│   ├── gen-update-meta.cjs        # latest.yml generator for electron-updater
+│   ├── smoke-server-health.cjs    # Server health smoke test (dist:prepare chain)
+│   ├── smoke-electron-sqlite.cjs  # Electron+SQLite smoke test
+│   └── rebuild-server-native.cjs  # better-sqlite3 ABI rebuild
+├── docs/
+│   ├── runbooks/              # desktop-install, backup-restore, code-signing,
+│   │                          # printer-acceptance-checklist
+│   └── testing/               # regression-checklist.md
+├── resources/                 # elevate.exe (Windows UAC)
 └── package.json
 ```
 
@@ -128,23 +277,32 @@ restoran-pos-v3/
 ```bash
 # Development
 npm run dev             # Vite (5173) + API (3001) concurrently
-npm run test            # Run all 101 tests (from repo root; delegates to server)
+npm run test            # Run all 415 tests (from repo root; delegates to server)
 npm run test:watch      # Watch mode
+npm run lint            # ESLint with warnings (dev)
+npm run lint:ci         # ESLint --max-warnings 0 (CI gate — must stay 0)
+
+# E2E
+npm run test:e2e        # Playwright smoke tests (requires running app)
+npm run test:e2e:ui     # Playwright UI mode
 
 # Production (browser)
 npm run prod            # Build client → start Express in production mode
 
 # Electron
-npm run electron:prod   # Build client → launch Electron
-npm run dist:prepare    # Build + rebuild native + smoke test → release/win-unpacked
-npm run dist:nsis       # NSIS Setup.exe (needs dist:prepare first)
-npm run dist:portable   # Portable .exe (needs dist:prepare first)
-npm run dist:win        # Full chain: dist:prepare → dist:nsis → dist:portable
+npm run electron:prod         # Build client → launch Electron
+npm run build:callerid-helper # Build CallerID C# helper exe (requires .NET 8)
+npm run desktop:preflight     # Verify all release inputs exist before packaging
+npm run smoke:server-health   # Server health + migration smoke test
+npm run dist:prepare          # Build + rebuild native + smoke tests + preflight → win-unpacked
+npm run dist:nsis             # NSIS Setup.exe (needs dist:prepare first)
+npm run dist:portable         # Portable .exe (needs dist:prepare first)
+npm run dist:win              # Full chain: dist:prepare → dist:nsis → dist:portable
+npm run dist:release          # dist:win + generates latest.yml (electron-updater)
 
 # Utilities
 npm run db:seed         # Create DB and load demo data
 npm run all:start       # Windows: start-all.bat (POS + Bridge + CallerID)
-npm run debug:login     # Test JWT/audit chain in terminal
 ```
 
 ## Developer Rules
@@ -153,8 +311,10 @@ npm run debug:login     # Test JWT/audit chain in terminal
 - Small, safe steps — no large refactors
 - Present a summary before making changes: "What will change and why"
 - Do not touch working code unnecessarily
-- Every new feature must not break the existing 101 tests
+- Every new feature must not break the existing **415 tests**
+- `lint:ci` must stay at 0 warnings — fix before every commit
 - Summarize what changed only when asked — do not add trailing summaries to every response
+- **Always read this file at the start of every session** before making any changes
 
 ## Demo Credentials
 | Role    | Email              | Password |
@@ -163,5 +323,3 @@ npm run debug:login     # Test JWT/audit chain in terminal
 | Cashier | kasiyer@demo.com   | 123456   |
 | Waiter  | garson@demo.com    | 123456   |
 | Kitchen | mutfak@demo.com    | 123456   |
-“Codex will review your output once you are done.”
-

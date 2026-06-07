@@ -4,6 +4,9 @@ import api from '../../services/api.js';
 import { formatCurrency } from '../../constants/index.js';
 import { X, CreditCard, Banknote, ArrowLeftRight, Check, Printer, Save } from 'lucide-react';
 import SplitPaymentModal from './SplitPaymentModal.jsx';
+import { getOrderTotal, getPaidTotal, getTotalDue, isOrderFullyPaid, roundMoney } from '../../utils/orderPaymentState.js';
+import { getPrintErrorAction } from '../../utils/printErrorMessages.js';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
 
 const paymentTypes = [
   { key: 'cash', label: 'Nakit', icon: Banknote },
@@ -16,10 +19,6 @@ const paymentActions = [
   { key: 'pay-print', label: 'Öde ve Yazdır', closeOrder: false, printReceipt: true, icon: Printer, tone: 'secondary' },
   { key: 'pay-print-close', label: 'Öde, Yazdır ve Kapat', closeOrder: true, printReceipt: true, icon: Printer, tone: 'secondary' },
 ];
-
-function round2(value) {
-  return Math.round((Number(value) || 0) * 100) / 100;
-}
 
 function inputValueForAmount(amount) {
   return amount % 1 === 0 ? String(amount) : amount.toFixed(2);
@@ -46,25 +45,29 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   const [paymentType, setPaymentType] = useState('cash');
   const [paymentAction, setPaymentAction] = useState('save');
   const [amountInput, setAmountInput] = useState('');
+  const [tipInput, setTipInput] = useState('');
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [lastChange, setLastChange] = useState(0);
   const [splitOpen, setSplitOpen] = useState(false);
+  const [manualPrintDialog, setManualPrintDialog] = useState({ open: false, kind: 'print-only' });
   const toast = useToast();
 
   useEffect(() => {
     setOrderState(order);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: sync only on specific order fields to avoid reset loop on unrelated re-renders
   }, [order?.id, order?.grand_total, order?.payments]);
 
   if (!orderState) return null;
 
-  const paidTotal = (orderState.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const orderTotal = round2(Number(orderState.grand_total) || 0);
-  const totalDue = round2(Math.max(0, orderTotal - paidTotal));
-  const isFullyPaid = totalDue <= 0.02;
+  const paidTotal = getPaidTotal(orderState);
+  const orderTotal = getOrderTotal(orderState);
+  const totalDue = getTotalDue(orderState);
+  const isFullyPaid = isOrderFullyPaid(orderState);
   const selectedAction = paymentActions.find((action) => action.key === paymentAction) || paymentActions[0];
   const requestedAmount = amountInput ? Number(amountInput) : totalDue;
-  const payAmount = round2(Math.min(Math.max(0, requestedAmount), totalDue));
+  const payAmount = roundMoney(Math.min(Math.max(0, requestedAmount), totalDue));
+  const tipAmount = roundMoney(Math.max(0, Number(tipInput || 0)));
   const activeItems = (orderState.items || []).filter((item) => item.status !== 'cancelled');
   const contextParts = [
     orderState.waiter_name || orderState.user_name ? `Garson: ${orderState.waiter_name || orderState.user_name}` : null,
@@ -96,26 +99,34 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
     }
   };
 
-  const closePaidOrder = async ({ printReceipt = false } = {}) => {
+  const closePaidOrder = async ({ printReceipt = false, printerId = null } = {}) => {
     const current = await refreshOrder();
-    const currentPaid = (current.payments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-    const currentDue = round2(Math.max(0, (Number(current.grand_total) || 0) - currentPaid));
+    const currentDue = getTotalDue(current);
     if (currentDue > 0.02) {
       toast.error('Sipariş tamamen ödenmeden masa kapatılamaz');
       return;
     }
     if (printReceipt) {
-      await api.printReceipt(current.id);
+      const printResult = await api.printOrderReceipt(current.id, printerId ? { printer_id: printerId } : {});
+      if (printResult?.printJob?.status === 'failed' || printResult?.printJob?.error_code) {
+        const action = getPrintErrorAction(printResult.printJob?.error_code);
+        toast.warning(`Fiş kuyruğa alındı ancak yazıcıya ulaşılamadı. ${action}`);
+      }
     }
     const updated = await api.updateOrderStatus(current.id, 'closed');
     finishSuccess({ order: updated }, printReceipt ? 'Masa kapatıldı ve yazdırıldı' : 'Masa kapatıldı');
   };
 
-  const printPaidOrder = async () => {
+  const printPaidOrder = async (printerId = null) => {
     setProcessing(true);
     try {
-      await api.printReceipt(orderState.id);
-      toast.success('Yazdırma isteği gönderildi');
+      const printResult = await api.printOrderReceipt(orderState.id, printerId ? { printer_id: printerId } : {});
+      if (printResult?.printJob?.status === 'failed' || printResult?.printJob?.error_code) {
+        const action = getPrintErrorAction(printResult.printJob?.error_code);
+        toast.warning(`Fiş kuyruğa alındı ancak yazıcıya ulaşılamadı. ${action}`);
+      } else {
+        toast.success('Yazdırma isteği gönderildi');
+      }
     } catch (err) {
       toast.error(err.message || 'Yazdırma isteği gönderilemedi');
     } finally {
@@ -124,12 +135,23 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
   };
 
   const handlePayment = async () => {
+    if (selectedAction.printReceipt && !manualPrintDialog.open) {
+      setManualPrintDialog({ open: true, kind: 'payment' });
+      return;
+    }
+    await executePayment(null);
+  };
+
+  const executePayment = async (printerId = null) => {
     if (processing) return;
     setProcessing(true);
     try {
       if (isFullyPaid) {
         if (selectedAction.closeOrder || selectedAction.printReceipt) {
-          await closePaidOrder({ printReceipt: selectedAction.printReceipt && !selectedAction.closeOrder });
+          await closePaidOrder({
+            printReceipt: selectedAction.printReceipt && !selectedAction.closeOrder,
+            printerId,
+          });
         } else {
           toast.info('Bu siparişin ödenecek bakiyesi yok');
         }
@@ -149,9 +171,11 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
         order_id: orderState.id,
         payment_type: paymentType,
         amount: payAmount,
-        cash_received: payAmount,
+        tip_amount: tipAmount,
+        cash_received: payAmount + tipAmount,
         close_order: selectedAction.closeOrder,
         print_receipt: selectedAction.printReceipt,
+        print_printer_id: selectedAction.printReceipt ? printerId : null,
       });
 
       finishSuccess(result, selectedAction.label === 'Kaydet' ? 'Ödeme kaydedildi' : 'Ödeme alındı');
@@ -309,7 +333,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
 
             <div style={{ padding: 14, borderTop: '1px solid var(--border)', background: 'var(--bg-primary)' }}>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın. Normal tahsilat için sağdaki ödeme alanını kullanın.
+                Ayrı ödeme gerektiğinde kalemleri kişilere paylaştırın. Normal ödeme için sağdaki ödeme alanını kullanın.
               </div>
             </div>
           </section>
@@ -372,12 +396,17 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                   <div>
                     <div style={{ fontSize: 17, fontWeight: 850 }}>Ödeme Tamamlandı</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
-                      Yeni tahsilat alınmasına gerek yok.
+                      Yeni ödeme alınmasına gerek yok.
                     </div>
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  <button type="button" className="btn btn-ghost" onClick={printPaidOrder} disabled={processing}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setManualPrintDialog({ open: true, kind: 'print-only' })}
+                    disabled={processing}
+                  >
                     <Printer size={16} /> Yazdır
                   </button>
                   <button type="button" className="btn btn-success" onClick={() => closePaidOrder()} disabled={processing}>
@@ -404,6 +433,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                         <button
                           key={action.key}
                           type="button"
+                          data-testid={`payment-action-${action.key}`}
                           className={paymentActionClass(action, selected)}
                           onClick={() => setPaymentAction(action.key)}
                           style={{ minHeight: 48, justifyContent: 'center', fontWeight: selected ? 850 : 750 }}
@@ -461,6 +491,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                       onChange={(e) => setAmountInput(e.target.value)}
                       placeholder={formatCurrency(totalDue)}
                       style={{ fontSize: 22, fontWeight: 850, textAlign: 'center' }}
+                      data-testid="payment-amount-input"
                     />
                     <button
                       type="button"
@@ -481,6 +512,30 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
                     İşlenecek tutar: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(payAmount)}</strong>
                   </div>
                 </div>
+
+                <div style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 8,
+                  background: 'var(--bg-secondary)',
+                  padding: 16,
+                }}>
+                  <label style={{ display: 'block', fontSize: 12, fontWeight: 850, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase' }}>
+                    Bahşiş
+                  </label>
+                  <input
+                    className="input input-lg"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={tipInput}
+                    onChange={(e) => setTipInput(e.target.value)}
+                    placeholder="0,00"
+                    style={{ fontSize: 18, fontWeight: 850, textAlign: 'center' }}
+                  />
+                  <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+                    Toplam tahsilat: <strong style={{ color: 'var(--text-primary)' }}>{formatCurrency(payAmount + tipAmount)}</strong>
+                  </div>
+                </div>
               </>
             )}
           </section>
@@ -491,6 +546,7 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
           {!isFullyPaid && (
             <button
               type="button"
+              data-testid="payment-submit-button"
               className={selectedAction.tone === 'success' ? 'btn btn-success btn-lg' : 'btn btn-primary btn-lg'}
               onClick={handlePayment}
               disabled={processing}
@@ -522,6 +578,20 @@ export default function PaymentScreen({ order, onClose, onComplete }) {
           onPaymentComplete={handleSplitPaymentComplete}
         />
       )}
+      <ManualPrintSelectorModal
+        open={!!manualPrintDialog.open}
+        onClose={() => setManualPrintDialog({ open: false, kind: 'print-only' })}
+        printRole="receipt"
+        title="Fiş yazdır"
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          if (manualPrintDialog.kind === 'print-only') {
+            await printPaidOrder(printerId);
+          } else {
+            await executePayment(printerId);
+          }
+        }}
+      />
     </div>
   );
 }

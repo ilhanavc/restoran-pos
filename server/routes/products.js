@@ -1,16 +1,16 @@
 import { Router } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
 import multer from 'multer';
+import config from '../config/index.js';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog, normalizeTurkishSearch } from '../utils/helpers.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
+import { toCents } from '../utils/money.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = process.env.USER_DATA_PATH
-  ? path.join(process.env.USER_DATA_PATH, 'uploads', 'products')
-  : path.join(__dirname, '..', 'uploads', 'products');
+const userDataPath = config.userDataPath || process.env.USER_DATA_PATH || path.join(process.cwd(), 'data');
+const UPLOADS_DIR = path.join(userDataPath, 'uploads', 'products');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -71,15 +71,36 @@ function defaultPortionPrice(list) {
   return d ? d.price : list[0].price;
 }
 
+function assertValidBasePrice(price) {
+  const value = Number(price);
+  if (!Number.isFinite(value) || value <= 0) {
+    const err = new Error('Geçerli ürün fiyatı gerekli');
+    err.status = 400;
+    throw err;
+  }
+  return value;
+}
+
+function assertCategoryExists(categoryId, businessId) {
+  const category = db.prepare(
+    'SELECT id FROM categories WHERE id = ? AND business_id = ? AND is_active = 1',
+  ).get(categoryId, businessId);
+  if (!category) {
+    const err = new Error('Geçerli kategori gerekli');
+    err.status = 400;
+    throw err;
+  }
+}
+
 function replaceProductPortions(businessId, productId, list) {
   db.prepare('DELETE FROM product_portions WHERE product_id = ? AND business_id = ?').run(productId, businessId);
   const ins = db.prepare(
-    `INSERT INTO product_portions (id, business_id, product_id, label, price, sort_order, is_default)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO product_portions (id, business_id, product_id, label, price, price_cents, sort_order, is_default)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   for (let i = 0; i < list.length; i++) {
     const p = list[i];
-    ins.run(genId(), businessId, productId, p.label, p.price, i, p.is_default ? 1 : 0);
+    ins.run(genId(), businessId, productId, p.label, p.price, toCents(p.price), i, p.is_default ? 1 : 0);
   }
 }
 
@@ -123,9 +144,11 @@ router.post('/', staffMenu, (req, res) => {
     if (!name || !category_id || price === undefined) {
       return res.status(400).json({ error: 'Ürün adı, kategori ve fiyat gerekli' });
     }
+    const basePrice = assertValidBasePrice(price);
+    assertCategoryExists(category_id, req.businessId);
     let normalized;
     try {
-      normalized = normalizePortionsInput(portions, price);
+      normalized = normalizePortionsInput(portions, basePrice);
     } catch (e) {
       return res.status(400).json({ error: e.message || 'Porsiyon hatası' });
     }
@@ -133,13 +156,14 @@ router.post('/', staffMenu, (req, res) => {
     const id = genId();
 
     db.transaction(() => {
-      db.prepare(`INSERT INTO products (id, business_id, category_id, name, price, description, barcode, vat_rate, printer_target)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      db.prepare(`INSERT INTO products (id, business_id, category_id, name, price, price_cents, description, barcode, vat_rate, printer_target)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
         id,
         req.businessId,
         category_id,
         name,
         salePrice,
+        toCents(salePrice),
         description || '',
         barcode || '',
         0,
@@ -154,8 +178,18 @@ router.post('/', staffMenu, (req, res) => {
         `SELECT * FROM product_portions WHERE product_id = ? AND business_id = ? ORDER BY sort_order, label`,
       )
       .all(id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'products',
+      entityId: id,
+      action: 'create',
+      after: { ...product, portions: portionRows },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json({ ...product, portions: portionRows });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error('Product post:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
@@ -224,6 +258,12 @@ router.patch('/:id', staffMenu, (req, res) => {
 
     let normalized = null;
     let priceCoalesce = price !== undefined && price !== null ? Number(price) : null;
+    if (price !== undefined && price !== null) {
+      priceCoalesce = assertValidBasePrice(price);
+    }
+    if (category_id !== undefined && category_id !== null) {
+      assertCategoryExists(category_id, req.businessId);
+    }
     if (portions !== undefined) {
       try {
         normalized = normalizePortionsInput(portions, product.price);
@@ -243,11 +283,12 @@ router.patch('/:id', staffMenu, (req, res) => {
           )
           .get(req.params.id, req.businessId);
         if (defRow) {
-          db.prepare(`UPDATE product_portions SET price = ? WHERE id = ?`).run(Number(price), defRow.id);
+          db.prepare(`UPDATE product_portions SET price = ?, price_cents = ? WHERE id = ?`)
+            .run(Number(price), toCents(price), defRow.id);
         }
       }
       db.prepare(`UPDATE products SET 
-      name = COALESCE(?, name), price = COALESCE(?, price), category_id = COALESCE(?, category_id),
+      name = COALESCE(?, name), price = COALESCE(?, price), price_cents = COALESCE(?, price_cents), category_id = COALESCE(?, category_id),
       description = COALESCE(?, description), is_active = COALESCE(?, is_active),
       barcode = COALESCE(?, barcode),
       printer_target = COALESCE(?, printer_target),
@@ -257,6 +298,7 @@ router.patch('/:id', staffMenu, (req, res) => {
         .run(
           name ?? null,
           priceCoalesce,
+          priceCoalesce != null ? toCents(priceCoalesce) : null,
           category_id ?? null,
           description ?? null,
           is_active !== undefined ? (is_active ? 1 : 0) : null,
@@ -276,8 +318,19 @@ router.patch('/:id', staffMenu, (req, res) => {
         `SELECT * FROM product_portions WHERE product_id = ? AND business_id = ? ORDER BY sort_order, label`,
       )
       .all(req.params.id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'products',
+      entityId: req.params.id,
+      action: 'update',
+      before: product,
+      after: { ...updated, portions: portionRows },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ ...updated, portions: portionRows });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error('Product patch:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
@@ -376,17 +429,51 @@ router.delete('/:id/combos/:comboId', staffMenu, (req, res) => {
   }
 });
 
-// DELETE /api/products/:id — soft delete (is_deleted=1, is_active=0)
+// DELETE /api/products/:id — hybrid: hard-delete if no order history, soft-delete otherwise
 router.delete('/:id', staffMenu, (req, res) => {
   try {
     const product = db.prepare('SELECT * FROM products WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!product) return res.status(404).json({ error: 'Ürün bulunamadı' });
 
-    db.prepare(`UPDATE products SET is_deleted = 1, is_active = 0, updated_at = datetime('now')
-      WHERE id = ? AND business_id = ?`).run(req.params.id, req.businessId);
+    const hasOrders = db.prepare('SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1').get(req.params.id);
 
-    auditLog(req.businessId, req.user.id, 'product_delete', 'product', req.params.id, {});
-    res.json({ success: true });
+    let deleted = false;
+    if (hasOrders) {
+      // Soft-delete: preserve FK integrity with order history
+      db.transaction(() => {
+        db.prepare('DELETE FROM product_modifiers WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM product_combos WHERE parent_product_id = ? OR child_product_id = ?').run(req.params.id, req.params.id);
+        db.prepare("UPDATE products SET is_deleted = 1, is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?")
+          .run(req.params.id, req.businessId);
+      })();
+    } else {
+      // Hard-delete: no order history, safe to remove permanently
+      db.transaction(() => {
+        db.prepare('DELETE FROM product_modifiers WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM product_combos WHERE parent_product_id = ? OR child_product_id = ?').run(req.params.id, req.params.id);
+        db.prepare('DELETE FROM product_portions WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM product_attribute_groups WHERE product_id = ?').run(req.params.id);
+        db.prepare('DELETE FROM products WHERE id = ? AND business_id = ?').run(req.params.id, req.businessId);
+      })();
+      deleted = true;
+
+      if (product.image_url) {
+        const imgFile = path.join(UPLOADS_DIR, path.basename(product.image_url));
+        fs.unlink(imgFile, () => {});
+      }
+    }
+
+    auditLog(req.businessId, req.user.id, 'product_delete', 'product', req.params.id, { hard_delete: deleted });
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'products',
+      entityId: req.params.id,
+      action: 'delete',
+      before: product,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
+    res.json({ success: true, hard_delete: deleted });
   } catch (err) {
     console.error('Product delete:', err);
     res.status(500).json({ error: 'Sunucu hatası' });

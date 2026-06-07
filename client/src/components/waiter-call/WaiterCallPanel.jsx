@@ -44,7 +44,7 @@ function QrSetupModal({ onClose }) {
       if (data.tables?.length) setSelectedTable(data.tables[0]);
     }).catch(() => toast.error('QR kurulum verisi alınamadı'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [toast]);
 
   const callUrl = setup && selectedTable
     ? buildCallUrl(baseUrl, selectedTable.id, user?.businessId || '', setup.token)

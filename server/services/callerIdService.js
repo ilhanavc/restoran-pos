@@ -2,6 +2,8 @@ import db from '../config/database.js';
 import { genId, auditLog } from '../utils/helpers.js';
 import { normalizePhoneDigits } from '../utils/phoneNormalize.js';
 
+const CALLER_ID_DEDUPE_SECONDS = 5;
+
 /**
  * @param {string} businessId
  * @param {string} normalizedPhone Kanonik 90… rakamları
@@ -55,6 +57,32 @@ export function processIncomingCall(opts) {
   }
 
   const displayPhone = String(rawPhone ?? '').trim() || normalized;
+  const dedupe = db
+    .prepare(
+      `SELECT *
+       FROM call_logs
+       WHERE business_id = ?
+         AND normalized_phone = ?
+         AND source_type = ?
+         AND status = 'ringing'
+         AND datetime(created_at) >= datetime('now', '-' || ? || ' seconds')
+       ORDER BY datetime(created_at) DESC
+       LIMIT 1`,
+    )
+    .get(businessId, normalized, sourceType || 'http', CALLER_ID_DEDUPE_SECONDS);
+  if (dedupe) {
+    return {
+      callId: dedupe.id,
+      callLogId: dedupe.id,
+      phone: normalized,
+      displayPhone: dedupe.phone || displayPhone,
+      matched: dedupe.customer_id ? 1 : 0,
+      customer: dedupe.customer_id ? loadCustomerForCallerId(dedupe.customer_id, businessId) : null,
+      rawPayload: rawPayload ?? null,
+      duplicate: true,
+    };
+  }
+
   const phoneRecord = findCustomerPhoneRow(businessId, normalized);
   const matched = phoneRecord ? 1 : 0;
   const customerId = phoneRecord?.customer_id || null;

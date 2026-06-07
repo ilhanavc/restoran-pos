@@ -2,7 +2,13 @@ import crypto from 'crypto';
 import db from '../config/database.js';
 import config from '../config/index.js';
 import { genId, auditLog } from '../utils/helpers.js';
-import { resolvePrinterForKitchenLine, resolveReceiptPrinter, stationFromPrinter } from './printRouting.js';
+import {
+  resolvePrinterForKitchenLine,
+  resolveReceiptPrinter,
+  resolveTakeawayLabelPrinter,
+  stationFromPrinter,
+} from './printRouting.js';
+import { isAutoPrintEnabledForPrinter } from './printerAutoPrintPolicy.js';
 
 /** Mutfağa görünür satırlar: iptal/azaltma fişi yalnız bunlar için basılır (varsayılan). */
 const KITCHEN_VISIBLE_STATUSES = new Set(['sent', 'preparing', 'ready', 'served']);
@@ -100,7 +106,8 @@ function customerInfoForOrder(order) {
 /**
  * Mutfağa gönderilen kalemler için yazıcı başına (veya çözülemeyenler için) job.
  */
-export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds, userId) {
+export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds, userId, options = {}) {
+  const eventType = options?.eventType || null;
   if (!orderItemIds?.length) return { created: 0, skipped: 0 };
 
   const order = db
@@ -123,16 +130,21 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
   for (const oiId of orderItemIds) {
     const oi = db.prepare(`SELECT * FROM order_items WHERE id = ? AND order_id = ?`).get(oiId, orderId);
     if (!oi) continue;
-    const meta = db
+    const liveMeta = db
       .prepare(
-        `SELECT p.category_id, c.name AS category_name
-         FROM products p JOIN categories c ON p.category_id = c.id
+        `SELECT p.category_id, c.name AS category_name, COALESCE(p.printer_target, c.printer_target, 'kitchen') AS printer_target
+         FROM products p LEFT JOIN categories c ON p.category_id = c.id
          WHERE p.id = ? AND p.business_id = ?`,
       )
       .get(oi.product_id, businessId);
-    if (!meta) continue;
+    const categoryId = oi.category_id_snapshot || liveMeta?.category_id || null;
+    if (!categoryId) continue;
+    const categoryName = oi.category_name_snapshot || liveMeta?.category_name || 'Kategori';
 
-    const resolved = resolvePrinterForKitchenLine(businessId, meta.category_id, oi.product_id);
+    const resolved = resolvePrinterForKitchenLine(businessId, categoryId, oi.product_id);
+    if (eventType && resolved?.printer && !isAutoPrintEnabledForPrinter(resolved.printer, eventType)) {
+      continue;
+    }
     lines.push({
       orderItemId: oi.id,
       productId: oi.product_id,
@@ -140,8 +152,8 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
       quantity: oi.quantity,
       note: oi.note,
       portionLabel: oi.portion_label || null,
-      categoryId: meta.category_id,
-      categoryName: meta.category_name,
+      categoryId,
+      categoryName,
       resolved,
     });
   }
@@ -260,7 +272,8 @@ export function enqueueKitchenJobsForSentItems(businessId, orderId, orderItemIds
  * @param {object} beforeItem - Güncellemeden önceki order_items satırı
  * @param {{ type: 'cancel' } | { type: 'reduce', previousQty: number, newQty: number }} adjustment
  */
-export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, adjustment, userId) {
+export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, adjustment, userId, options = {}) {
+  const eventType = options?.eventType || null;
   if (!beforeItem || !shouldPrintKitchenAdjustment(businessId, beforeItem.status)) {
     return { created: 0, skipped: 0 };
   }
@@ -277,16 +290,21 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
     .get(orderId, businessId);
   if (!order || ['closed', 'cancelled'].includes(order.status)) return { created: 0, skipped: 0 };
 
-  const meta = db
+  const liveMeta = db
     .prepare(
       `SELECT p.category_id, c.name AS category_name
-       FROM products p JOIN categories c ON p.category_id = c.id
+       FROM products p LEFT JOIN categories c ON p.category_id = c.id
        WHERE p.id = ? AND p.business_id = ?`,
     )
     .get(beforeItem.product_id, businessId);
-  if (!meta) return { created: 0, skipped: 0 };
+  const categoryId = beforeItem.category_id_snapshot || liveMeta?.category_id || null;
+  if (!categoryId) return { created: 0, skipped: 0 };
+  const categoryName = beforeItem.category_name_snapshot || liveMeta?.category_name || 'Kategori';
 
-  const resolved = resolvePrinterForKitchenLine(businessId, meta.category_id, beforeItem.product_id);
+  const resolved = resolvePrinterForKitchenLine(businessId, categoryId, beforeItem.product_id);
+  if (eventType && resolved?.printer && !isAutoPrintEnabledForPrinter(resolved.printer, eventType)) {
+    return { created: 0, skipped: 0, policySkipped: true };
+  }
   const { customer_name, customer_phone } = customerInfoForOrder(order);
   const bizAdj = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
   const payment_summary = paymentSummaryForOrder(orderId);
@@ -301,7 +319,7 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
       quantity: beforeItem.quantity,
       note: beforeItem.note,
       portion_label: beforeItem.portion_label || null,
-      category_name: meta.category_name,
+      category_name: categoryName,
       station,
     };
   } else if (adjustment.type === 'reduce') {
@@ -314,7 +332,7 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
       quantity: delta,
       note: beforeItem.note,
       portion_label: beforeItem.portion_label || null,
-      category_name: meta.category_name,
+      category_name: categoryName,
       station,
       previous_quantity: previousQty,
       new_quantity: newQty,
@@ -382,8 +400,12 @@ export function enqueueKitchenAdjustmentJobs(businessId, orderId, beforeItem, ad
   return { created: r.inserted ? 1 : 0, skipped: r.duplicate ? 1 : 0 };
 }
 
-export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
-  const idempotencyKey = `receipt|${businessId}|${orderId}`;
+export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId, options = {}) {
+  const suffix = options?.idempotencySuffix ? `|${String(options.idempotencySuffix).slice(0, 80)}` : '';
+  const forcedPrinterId = options?.forcedPrinterId ? String(options.forcedPrinterId) : null;
+  const eventType = options?.eventType || null;
+  const applyAutoPrintPolicy = options?.applyAutoPrintPolicy === true;
+  const idempotencyKey = `receipt|${businessId}|${orderId}${suffix}`;
   const existing = db.prepare(`SELECT id FROM print_jobs WHERE idempotency_key = ?`).get(idempotencyKey);
   if (existing) return { created: 0, skipped: 1, duplicate: true };
 
@@ -418,7 +440,22 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
 
   const biz = db.prepare(`SELECT name, phone, address, receipt_header, receipt_footer FROM businesses WHERE id = ?`).get(businessId);
 
-  const resolved = resolveReceiptPrinter(businessId);
+  let resolved = resolveReceiptPrinter(businessId);
+  if (forcedPrinterId) {
+    const forced = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ? AND is_active = 1`)
+      .get(forcedPrinterId, businessId);
+    if (!forced) {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_not_found_or_inactive' };
+    }
+    if (forced.type !== 'receipt') {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_role_mismatch' };
+    }
+    resolved = { printer: forced, source: 'manual_override' };
+  }
+  if (applyAutoPrintPolicy && resolved.printer && !isAutoPrintEnabledForPrinter(resolved.printer, eventType)) {
+    return { created: 0, skipped: 0, policySkipped: true };
+  }
   const payload = {
     kind: 'receipt',
     order_id: orderId,
@@ -496,6 +533,7 @@ export function enqueueReceiptJobForClosedOrder(businessId, orderId, userId) {
  */
 export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {}) {
   const suffix = options?.idempotencySuffix ? `|${String(options.idempotencySuffix).slice(0, 80)}` : '';
+  const forcedPrinterId = options?.forcedPrinterId ? String(options.forcedPrinterId) : null;
   const idempotencyKey = `takeaway_label|${businessId}|${orderId}${suffix}`;
   const existing = db.prepare(`SELECT id FROM print_jobs WHERE idempotency_key = ?`).get(idempotencyKey);
   if (existing) return { created: 0, skipped: 1, duplicate: true };
@@ -526,7 +564,19 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
     .all(orderId);
 
   const biz = db.prepare(`SELECT name FROM businesses WHERE id = ?`).get(businessId);
-  const resolved = resolveReceiptPrinter(businessId);
+  let resolved = resolveTakeawayLabelPrinter(businessId);
+  if (forcedPrinterId) {
+    const forced = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ? AND is_active = 1`)
+      .get(forcedPrinterId, businessId);
+    if (!forced) {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_not_found_or_inactive' };
+    }
+    if (forced.type !== 'kitchen') {
+      return { created: 0, skipped: 0, failed: true, reason: 'printer_role_mismatch' };
+    }
+    resolved = { printer: forced, source: 'manual_override' };
+  }
 
   const payload = {
     kind: 'takeaway_label',
@@ -558,7 +608,7 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
       jobType: 'takeaway_label',
       payload,
       status: 'failed',
-      errorMessage: 'Paket etiketi yazıcısı bulunamadı (varsayılan veya type=receipt)',
+      errorMessage: 'Paket etiketi için aktif mutfak yazıcısı bulunamadı',
       idempotencyKey,
     });
     if (userId) auditLog(businessId, userId, 'print_job_failed', 'order', orderId, { kind: 'takeaway_label' });
@@ -590,6 +640,9 @@ export function enqueueTakeawayLabelJob(businessId, orderId, userId, options = {
  * claimed_at dolu işler köprü tarafından alınmış sayılır; mock bunları işlemez.
  */
 export function processPendingJobsSync(businessId, userId) {
+  if (config.nodeEnv === 'production' && process.env.ALLOW_PRINT_JOB_MOCK !== '1') {
+    return { processed: 0, skipped: true, reason: 'mock_disabled_in_production' };
+  }
   if (config.disablePrintJobMock) {
     return { processed: 0, skipped: true };
   }

@@ -1,0 +1,1223 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restoran POS v3 — Master Productization Report</title>
+<style>
+  :root{
+    --bg:#0b0f14;
+    --panel:#11161d;
+    --panel-2:#161c25;
+    --border:#232b37;
+    --text:#e6edf3;
+    --muted:#9aa4b2;
+    --accent:#4f8cff;
+    --accent-2:#7aa2ff;
+    --green:#3fb950;
+    --yellow:#d29922;
+    --red:#f85149;
+    --gray:#8b949e;
+    --radius:10px;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.2);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent-2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#0f141b;padding:2px 6px;border-radius:4px;border:1px solid var(--border);font-size:.9em}
+  pre{background:#0f141b;padding:14px;border-radius:var(--radius);border:1px solid var(--border);overflow-x:auto;font-size:13px;line-height:1.5}
+
+  .container{max-width:1280px;margin:0 auto;padding:32px 24px 120px}
+  .hero{background:linear-gradient(135deg,#1a2333 0%,#0f1722 100%);border:1px solid var(--border);border-radius:14px;padding:32px;margin-bottom:24px;position:relative;overflow:hidden}
+  .hero::before{content:"";position:absolute;top:-40%;right:-10%;width:400px;height:400px;background:radial-gradient(circle,rgba(79,140,255,.15),transparent 60%);pointer-events:none}
+  .hero h1{margin:0 0 6px;font-size:32px;letter-spacing:-.02em}
+  .hero .sub{color:var(--muted);font-size:15px;margin-bottom:18px}
+  .hero .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+  .meta-chip{background:rgba(79,140,255,.12);border:1px solid rgba(79,140,255,.3);color:var(--accent-2);font-size:12px;padding:4px 10px;border-radius:999px}
+
+  h2{font-size:22px;margin:40px 0 14px;letter-spacing:-.01em;padding-bottom:6px;border-bottom:1px solid var(--border)}
+  h3{font-size:17px;margin:22px 0 10px;color:var(--accent-2)}
+  h4{font-size:15px;margin:16px 0 8px}
+  p{margin:0 0 12px}
+
+  .grid{display:grid;gap:14px}
+  .grid.cols-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid.cols-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .grid.cols-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  @media (max-width:900px){.grid.cols-3,.grid.cols-4{grid-template-columns:1fr 1fr}.grid.cols-2{grid-template-columns:1fr}}
+  @media (max-width:600px){.grid{grid-template-columns:1fr !important}}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+  .card h3{margin-top:0}
+  .card.green{border-left:3px solid var(--green)}
+  .card.yellow{border-left:3px solid var(--yellow)}
+  .card.red{border-left:3px solid var(--red)}
+  .card.accent{border-left:3px solid var(--accent)}
+
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:18px;text-align:left;position:relative}
+  .kpi .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+  .kpi .value{font-size:28px;font-weight:600;margin:6px 0 2px}
+  .kpi .hint{color:var(--muted);font-size:12px}
+  .kpi.green .value{color:var(--green)}
+  .kpi.yellow .value{color:var(--yellow)}
+  .kpi.red .value{color:var(--red)}
+
+  .badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;vertical-align:middle}
+  .badge.green{background:rgba(63,185,80,.15);color:var(--green);border:1px solid rgba(63,185,80,.3)}
+  .badge.yellow{background:rgba(210,153,34,.15);color:var(--yellow);border:1px solid rgba(210,153,34,.3)}
+  .badge.red{background:rgba(248,81,73,.12);color:var(--red);border:1px solid rgba(248,81,73,.3)}
+  .badge.gray{background:rgba(139,148,158,.12);color:var(--gray);border:1px solid rgba(139,148,158,.3)}
+  .badge.blue{background:rgba(79,140,255,.12);color:var(--accent-2);border:1px solid rgba(79,140,255,.3)}
+
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14px;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  th{background:var(--panel-2);text-align:left;padding:10px 12px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)}
+  td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+
+  .callout{border-radius:var(--radius);padding:14px 16px;margin:14px 0;border:1px solid var(--border);background:var(--panel-2)}
+  .callout.warn{border-left:3px solid var(--yellow);background:rgba(210,153,34,.06)}
+  .callout.danger{border-left:3px solid var(--red);background:rgba(248,81,73,.06)}
+  .callout.info{border-left:3px solid var(--accent);background:rgba(79,140,255,.06)}
+  .callout.ok{border-left:3px solid var(--green);background:rgba(63,185,80,.06)}
+  .callout strong{display:block;margin-bottom:6px}
+
+  .score-bar{background:var(--panel-2);border-radius:999px;height:8px;overflow:hidden;margin-top:8px}
+  .score-bar > div{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+  .score-bar.green > div{background:linear-gradient(90deg,#2f9b41,#3fb950)}
+  .score-bar.yellow > div{background:linear-gradient(90deg,#b07a1a,#d29922)}
+  .score-bar.red > div{background:linear-gradient(90deg,#c73d36,#f85149)}
+
+  .phase{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:10px;position:relative}
+  .phase .phase-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .phase .phase-name{font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;font-weight:600}
+  .phase .phase-title{font-size:16px;font-weight:600}
+  .phase .phase-body{color:var(--muted);font-size:14px}
+  .phase ul{margin:6px 0 0;padding-left:18px}
+  .phase li{margin-bottom:4px}
+
+  .compare{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  .compare > div{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:14px}
+  .compare .now{border-left:3px solid var(--gray)}
+  .compare .target{border-left:3px solid var(--accent)}
+  @media (max-width:700px){.compare{grid-template-columns:1fr}}
+
+  .toc{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin-bottom:28px;columns:2;column-gap:28px}
+  .toc a{display:block;padding:3px 0;color:var(--text);font-size:14px;break-inside:avoid}
+  .toc a:hover{color:var(--accent-2)}
+  @media (max-width:700px){.toc{columns:1}}
+
+  .tree{background:#0f141b;border:1px solid var(--border);border-radius:var(--radius);padding:16px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px;white-space:pre;color:var(--muted);overflow-x:auto}
+
+  ul.check{list-style:none;padding:0;margin:8px 0}
+  ul.check li{padding:4px 0 4px 26px;position:relative;font-size:14px}
+  ul.check li::before{position:absolute;left:0;top:4px;font-size:14px;font-weight:700}
+  ul.check li.ok::before{content:"✅";}
+  ul.check li.no::before{content:"⬜";color:var(--muted)}
+  ul.check li.warn::before{content:"🟡";}
+  ul.check li.bad::before{content:"❌";color:var(--red)}
+
+  .gate{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:14px}
+  .gate .gate-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+  .gate .gate-title{font-weight:600;font-size:15px}
+
+  footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:13px}
+
+  .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{background:var(--panel-2);border:1px solid var(--border);border-radius:999px;padding:3px 10px;font-size:12px;color:var(--muted)}
+
+  .risk-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:middle}
+  .risk-dot.h{background:var(--red)}
+  .risk-dot.m{background:var(--yellow)}
+  .risk-dot.l{background:var(--green)}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <section class="hero">
+    <h1>Master Productization Report</h1>
+    <div class="sub">Restoran POS v3 — kanıta dayalı ürünleşme, online ve mobil genişleme değerlendirmesi</div>
+    <div class="meta">
+      <span class="meta-chip">Tarih: 2026-04-17</span>
+      <span class="meta-chip">Sprint: 12 / v1.0.9</span>
+      <span class="meta-chip">Kapsam: tüm katmanlar</span>
+      <span class="meta-chip">Rol: CTO · Architect · Product Strategist · Mobile · DB · Release</span>
+      <span class="meta-chip">Bu rapor yalnızca analiz içerir · kod değiştirilmedi</span>
+    </div>
+  </section>
+
+  <nav class="toc">
+    <a href="#s1">1) Yönetici Özeti</a>
+    <a href="#s2">2) Mevcut Durum</a>
+    <a href="#s3">3) Tamamlanmış İşler</a>
+    <a href="#s4">4) Eksik İşler</a>
+    <a href="#s5">5) Güçlü Yönler</a>
+    <a href="#s6">6) Zayıf Yönler</a>
+    <a href="#s7">7) Readiness Scorecard</a>
+    <a href="#s8">8) Productization Gap</a>
+    <a href="#s9">9) Online/Cloud Geçiş</a>
+    <a href="#s10">10) DB Profesyonelleştirme</a>
+    <a href="#s11">11) Mobile Expansion</a>
+    <a href="#s12">12) Katman Bazlı Teknik Analiz</a>
+    <a href="#s13">13) Risk Matrisi</a>
+    <a href="#s14">14) Teknik Borç Haritası</a>
+    <a href="#s15">15) İş Sırası Yol Haritası</a>
+    <a href="#s16">16) Decision Tree</a>
+    <a href="#s17">17) Henüz Yapma</a>
+    <a href="#s18">18) Go/No-Go Gates</a>
+    <a href="#s19">19) Tek Kişi Gerçeği</a>
+    <a href="#s20">20) Final Recommendation</a>
+  </nav>
+
+  <!-- ============ S1 ============ -->
+  <h2 id="s1">1) Yönetici Özeti</h2>
+
+  <div class="grid cols-4">
+    <div class="kpi yellow">
+      <div class="label">Local ürünleşme</div>
+      <div class="value">ŞARTLI HAZIR</div>
+      <div class="hint">3 açık şart: imza, wizard, crash reporter</div>
+    </div>
+    <div class="kpi red">
+      <div class="label">Online / Cloud</div>
+      <div class="value">HAZIR DEĞİL</div>
+      <div class="hint">9 açık şart (tenant + DB + sync)</div>
+    </div>
+    <div class="kpi red">
+      <div class="label">Mobil (iOS/Android)</div>
+      <div class="value">HAZIR DEĞİL</div>
+      <div class="hint">Önce online backbone gerekli</div>
+    </div>
+    <div class="kpi yellow">
+      <div class="label">Productization Score</div>
+      <div class="value">5.6 / 10</div>
+      <div class="hint">Ticari ürün standardına göre</div>
+    </div>
+  </div>
+
+  <div class="grid cols-4" style="margin-top:14px">
+    <div class="kpi green">
+      <div class="label">Otomatik Test</div>
+      <div class="value">318</div>
+      <div class="hint">Backend güçlü · Frontend 0</div>
+    </div>
+    <div class="kpi green">
+      <div class="label">Tamamlanmış Sprint</div>
+      <div class="value">12</div>
+      <div class="hint">Release disiplini oturdu</div>
+    </div>
+    <div class="kpi yellow">
+      <div class="label">Kritik Dosya Boyutu</div>
+      <div class="value">1605 · 1632 · 2275</div>
+      <div class="hint">OrderScreen · electron/main · admin.js</div>
+    </div>
+    <div class="kpi red">
+      <div class="label">CI/CD</div>
+      <div class="value">YOK</div>
+      <div class="hint">Kod imzası da yok</div>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <strong>Net karar</strong>
+    <span class="badge yellow">ŞARTLI HAZIR</span> — yalnızca "kontrollü pilot müşteri" ve "tek restoran lokal kurulum" senaryosunda.
+    <span class="badge red" style="margin-left:8px">HAZIR DEĞİL</span> — multi-restoran, multi-kasa, online, mobil veya SaaS senaryolarında.
+    <br><br>
+    Özet: <em>lokal ürünleşme için son 10 metre</em>, <em>online için baştan omurga</em>, <em>mobil için henüz vakit değil</em>.
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card green">
+      <h3>Güçlü tarafları</h3>
+      <ul>
+        <li>Sipariş→ödeme→mutfak→yazıcı zinciri end-to-end çalışıyor; 99 senaryoluk orderLifecycle entegrasyon testi var.</li>
+        <li>Yazdırma doğru mimari: <code>outbox + StoreBridge pull + lease + idempotency + 16-kod error dictionary</code>.</li>
+        <li>Backup/restore (Sprint 12): <code>meta.json + SHA-256 + integrity + safety revert + uploads + pos-config + schtasks</code>.</li>
+        <li>Güvenlik temeli oturmuş: JWT persist, BRIDGE_TOKEN mask, err.message kapalı, login_failed audit log.</li>
+        <li>Paketleme disiplinli: self-contained CallerID, extraResources, desktop:preflight, smoke tests, ABI rebuild.</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>En büyük riskler</h3>
+      <ul>
+        <li>Tek kişi projesi dağınıklığı: kritik dosyalar her sprint büyüyor (1428→1605 OrderScreen, 860→1632 electron/main).</li>
+        <li>Veri modeli seviye atlamadı: tek migration dosyası, REAL para, snapshot yarım, audit trail yok.</li>
+        <li>Frontend test boşluğu: 318 test backend'de, frontend'de 0.</li>
+        <li>Online için temel yok: multi-tenant identity, RBAC, plan/billing, outbox sync yok.</li>
+        <li>Operasyon izlenebilirliği yetersiz: merkezi log / crash reporter / telemetry yok.</li>
+        <li>Mobil için API yanlış boyutta: POS ekranına göre şekillenmiş, mobil-first değil.</li>
+        <li>Kod imzası yok → SmartScreen her yeni kurulumda sürtünme.</li>
+        <li>CI/CD yok → Sprint 9 tarzı packaging bug'ı tekrar edebilir.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ S2 ============ -->
+  <h2 id="s2">2) Current State / Mevcut Durum</h2>
+
+  <h3>2.1 Ürün Kapsamı</h3>
+  <table>
+    <thead><tr><th>Alan</th><th>Durum</th><th>Kanıt</th></tr></thead>
+    <tbody>
+      <tr><td>Masa, sipariş, ödeme, mutfak, takeaway</td><td><span class="badge green">Oturmuş</span></td><td><code>server/routes/orders.js</code>, <code>payments.js</code>, <code>tables.js</code></td></tr>
+      <tr><td>Müşteri + CallerID</td><td><span class="badge green">Oturmuş</span></td><td><code>customers.js</code>, <code>callerIdService.js</code></td></tr>
+      <tr><td>Raporlar + grafikler</td><td><span class="badge green">Çalışıyor</span></td><td><code>ReportsScreen.jsx</code> 859 satır</td></tr>
+      <tr><td>Rezervasyon</td><td><span class="badge yellow">Temel var</span></td><td>CRUD; masa entegrasyonu eksik</td></tr>
+      <tr><td>Stok</td><td><span class="badge yellow">Temel var</span></td><td>Hareket + low-stock; maliyet yok</td></tr>
+      <tr><td>Yazıcı + Bridge + CallerID</td><td><span class="badge green">Oturmuş</span></td><td>Outbox + lease + error codes</td></tr>
+      <tr><td>Rol/erişim</td><td><span class="badge green">Temel</span></td><td>Admin/Kasiyer/Garson/Mutfak</td></tr>
+      <tr><td>Multi-tenant</td><td><span class="badge red">Kolon seviyesi</span></td><td><code>business_id</code> var, ama tek işletme varsayımı</td></tr>
+      <tr><td>Multi-branch</td><td><span class="badge red">Şema hazır, akış yok</span></td><td><code>branches</code> tablo var</td></tr>
+      <tr><td>Loyalty / promosyon</td><td><span class="badge red">Yok</span></td><td>-</td></tr>
+      <tr><td>Online entegrasyon (Yemeksepeti/Getir)</td><td><span class="badge red">Yok</span></td><td>v2 roadmap</td></tr>
+    </tbody>
+  </table>
+
+  <h3>2.2 Katman Durumları</h3>
+  <div class="grid cols-3">
+    <div class="card accent">
+      <h3>Frontend</h3>
+      <p>React 18 + Vite, TS yok. Lazy-loading yapılmış (Sprint 10, 948→265 kB). Query/cache layer yok.</p>
+      <div class="chip-row">
+        <span class="chip">OrderScreen 1605</span>
+        <span class="chip">TablesScreen 1551</span>
+        <span class="chip">Frontend test: 0</span>
+      </div>
+    </div>
+    <div class="card accent">
+      <h3>Backend / API</h3>
+      <p>Express + Zod + better-sqlite3. 138 route handler. Transaction var; yan etkiler tx dışında.</p>
+      <div class="chip-row">
+        <span class="chip">admin.js 2275</span>
+        <span class="chip">orders.js 1231</span>
+        <span class="chip">318 test ✅</span>
+      </div>
+    </div>
+    <div class="card accent">
+      <h3>Veritabanı</h3>
+      <p>SQLite WAL + FK ON. Tek <code>run.js</code> 959 satır, 35 <code>CREATE TABLE</code>. Snapshot yarım, REAL para, audit trail yok.</p>
+      <div class="chip-row">
+        <span class="chip">numbered migration ❌</span>
+        <span class="chip">integer minor unit ❌</span>
+      </div>
+    </div>
+    <div class="card accent">
+      <h3>Electron Shell</h3>
+      <p><code>electron/main.cjs</code> 1632 satır. Config, 3 child process, backup scheduler, pencere — bir arada. ExtraResources disiplinli.</p>
+      <div class="chip-row">
+        <span class="chip">userData OK</span>
+        <span class="chip">preflight 8/8 ✅</span>
+      </div>
+    </div>
+    <div class="card accent">
+      <h3>Entegrasyonlar</h3>
+      <p>Yazıcı outbox + lease + error codes. CallerID self-contained. Socket.io gerçek zamanlı. Harici entegrasyon yok.</p>
+      <div class="chip-row">
+        <span class="chip">16 error code</span>
+        <span class="chip">webhook ❌</span>
+      </div>
+    </div>
+    <div class="card accent">
+      <h3>Test / Release / Ops</h3>
+      <p>318 backend + 2 Playwright e2e. Kod imzası yok. CI/CD yok. Electron log var, StoreBridge log yok. Crash reporter yok.</p>
+      <div class="chip-row">
+        <span class="chip">RTL test ❌</span>
+        <span class="chip">CI ❌</span>
+        <span class="chip">Sentry ❌</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ S3 ============ -->
+  <h2 id="s3">3) Completed Work / Tamamlanmış İşler</h2>
+
+  <div class="grid cols-3">
+    <div class="card green">
+      <h3>Tam oturmuş</h3>
+      <p><strong>Çekirdek POS:</strong></p>
+      <ul>
+        <li>Masa grid + occupancy + transfer</li>
+        <li>Sipariş + modifier + portion + not</li>
+        <li>Ödeme (cash/card/split/mixed)</li>
+        <li>Takeaway ayrı akış, otomatik kapanış</li>
+        <li>Mutfak age warning 10/20 dk</li>
+        <li>4 receipt template, 48 char PC857</li>
+      </ul>
+      <p><strong>Yazıcı & Bridge:</strong></p>
+      <ul>
+        <li>Outbox + lease + ownership guard</li>
+        <li>Idempotency key · 16 error kodu</li>
+        <li>Manual retry · PC857+Win1254</li>
+      </ul>
+      <p><strong>Güvenlik:</strong> JWT persist, BRIDGE_TOKEN mask, err.message kapalı, login_failed log.</p>
+      <p><strong>Backup (Sprint 12):</strong> meta + SHA-256 + safety revert + schtasks.</p>
+    </div>
+
+    <div class="card yellow">
+      <h3>Çalışıyor ama kırılgan</h3>
+      <ul>
+        <li><strong>OrderScreen / PaymentScreen</strong> — frontend testi yok; her değişiklik regression riski.</li>
+        <li><strong>electron/main.cjs 1632</strong> — 3 süreç + backup scheduler + pencere bir arada.</li>
+        <li><strong>server/routes/admin.js 2275</strong> — "her işe yarayan" monolit.</li>
+        <li><strong>migrations/run.js 959</strong> — idempotent ama numbered migration yok.</li>
+        <li><strong>Rate limiting</strong> — devrede, sahada gerçek yük testi yok.</li>
+        <li><strong>Auto-update</strong> — latest.yml var, SmartScreen sürtünmesi var.</li>
+        <li><strong>Rezervasyon / Stok</strong> — CRUD var, operasyonel derinlik yok.</li>
+        <li><strong>Raporlar</strong> — X/Z / period close yok.</li>
+      </ul>
+    </div>
+
+    <div class="card accent">
+      <h3>Yarım ama temel atılmış</h3>
+      <ul>
+        <li><strong>Multi-tenant izolasyon</strong> — business_id şema seviyesinde.</li>
+        <li><strong>Multi-branch</strong> — <code>branches</code> şema hazır, UI yok.</li>
+        <li><strong>Combo menu</strong> — <code>product_combos</code> tablo var, gelişmiş kural yok.</li>
+        <li><strong>Advanced analytics</strong> — top 10 + peak hours var; cohort/LTV yok.</li>
+        <li><strong>Customer 360</strong> — temel var, segmentasyon yok.</li>
+        <li><strong>api/core.js</strong> ayrımı başladı, tamamlanmadı.</li>
+        <li><strong>orderActionPolicy / orderPaymentState</strong> çıkarıldı, ama route'lar hâlâ kalın.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ S4 ============ -->
+  <h2 id="s4">4) Missing Work / Eksik İşler</h2>
+
+  <h3>4.1 Kritik (ürünleşme öncesi)</h3>
+  <table>
+    <thead><tr><th>Sorun</th><th>Etki</th><th>Öncelik</th><th>Ne zaman bitmeli</th></tr></thead>
+    <tbody>
+      <tr><td>Kod imzası (Windows)</td><td>SmartScreen; IT-olmayan müşteride kurulum takılır</td><td><span class="badge red">P1</span></td><td>Pilot öncesi</td></tr>
+      <tr><td>First-run setup wizard</td><td>Satış anında kurulum sürtünmesi</td><td><span class="badge red">P1</span></td><td>Pilot öncesi</td></tr>
+      <tr><td>CI/CD pipeline</td><td>Sprint 9 tarzı packaging bug tekrarı</td><td><span class="badge red">P1</span></td><td>Düzenli release öncesi</td></tr>
+      <tr><td>Frontend test (RTL)</td><td>PaymentScreen/OrderScreen regression rulet</td><td><span class="badge red">P1</span></td><td>Refactor öncesi</td></tr>
+      <tr><td>StoreBridge file logu</td><td>Bridge için saha tanı yok</td><td><span class="badge yellow">P2</span></td><td>Pilot öncesi</td></tr>
+      <tr><td>Changelog + release notes UX</td><td>Müşteri neye güncelleme aldı bilmiyor</td><td><span class="badge yellow">P2</span></td><td>Auto-update açılmadan</td></tr>
+    </tbody>
+  </table>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>4.2 Ürün eksikleri</h3>
+      <ul>
+        <li>X/Z raporu, gün sonu period close</li>
+        <li>e-belge (e-Arşiv/e-Fatura/e-SMM)</li>
+        <li>Ödeme POS terminal SDK entegrasyonu</li>
+        <li>Personel mesai / vardiya</li>
+        <li>Tip/bahşiş yönetimi</li>
+        <li>Kurye paneli (atama, rota)</li>
+        <li>Menü fiyat versiyonlama / happy hour</li>
+        <li>Çoklu KDV (yemek/içecek ayrışımı)</li>
+        <li>İade / return akışı</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>4.3 Teknik eksikler</h3>
+      <ul>
+        <li>Numbered migration runner + schema_migrations</li>
+        <li>Integer minor unit (kuruş) para modeli</li>
+        <li>Domain service katmanı (orders/payments/kitchen/print)</li>
+        <li>Event bus / domain event modeli</li>
+        <li>Outbox tüm dış tetiklemelerde (sms, webhook, mail)</li>
+        <li>Structured logging (JSON line)</li>
+        <li>Error taksonomisi (printer dışı domain)</li>
+        <li>api.js domain split (başladı, bitmedi)</li>
+        <li>OpenAPI / API sözleşmesi</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>4.4 Güvenlik eksikleri</h3>
+      <ul>
+        <li>Login lockout (audit log reaktif değil)</li>
+        <li>2FA / MFA (admin için)</li>
+        <li>Refresh token / session timeout</li>
+        <li>Secret rotation (JWT secret tek üretim)</li>
+        <li>Audit trail (login dışı mutasyonlar)</li>
+        <li>KVKK: veri silme, export, rıza akışı</li>
+        <li>CSP tam değil</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>4.5 Operasyon eksikleri</h3>
+      <ul>
+        <li>Crash reporter (Sentry vb.)</li>
+        <li>Merkezi log agregasyonu</li>
+        <li>Uptime monitor</li>
+        <li>Sürüm başına error rate</li>
+        <li>Müşteri başına telemetry (opt-in)</li>
+        <li>Incident runbook (genel POS crash, yazıcı kördümen)</li>
+        <li>Support bundle UI butonu (endpoint var)</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>4.6 Online öncesi eksikler</h3>
+      <ul>
+        <li>Tenant identity + plan modeli</li>
+        <li>Subscription/billing (Stripe/iyzico)</li>
+        <li>Tenant-aware rate limit + backup</li>
+        <li>Outbox sync + offline-first queue</li>
+        <li>Conflict resolution (multi-device)</li>
+        <li>Realtime scale (Socket.io + Redis)</li>
+        <li>Edge/local bridge → cloud backbone</li>
+        <li>Audit trail (SaaS standardı)</li>
+        <li>KVKK / data residency</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>4.7 Mobil öncesi eksikler</h3>
+      <ul>
+        <li>OpenAPI sözleşme stabil değil</li>
+        <li>Device pairing (QR ile) yok</li>
+        <li>Push notification backbone yok (FCM/APNs)</li>
+        <li>Mobil auth (OAuth device flow) yok</li>
+        <li>Küçük ekran ekran varyasyonları yok</li>
+        <li>Offline queue (mobil lokal + sync) yok</li>
+        <li>BLE yazıcı / tap-to-pay yok</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card yellow" style="margin-top:14px">
+    <h3>4.8 Profesyonel ürünleşme öncesi eksikler</h3>
+    <div class="grid cols-3" style="gap:8px">
+      <div>
+        <strong>Tasarım & UX</strong>
+        <ul><li>Design system / component lib</li><li>Accessibility (WCAG AA)</li><li>i18n / l10n</li></ul>
+      </div>
+      <div>
+        <strong>Onboarding & Destek</strong>
+        <ul><li>First-run wizard</li><li>In-app help / tooltip</li><li>Video eğitim, PDF</li><li>Ticket sistemi, SLA</li></ul>
+      </div>
+      <div>
+        <strong>Marka & Release</strong>
+        <ul><li>Release notes UX</li><li>Logo/favicon/about/splash tutarlılığı</li><li>Sürüm destek politikası</li></ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ S5 & S6 ============ -->
+  <h2 id="s5">5) Strengths / Güçlü Yönler</h2>
+  <div class="grid cols-2">
+    <div class="card green">
+      <h3>Ürün çekirdeği + Operasyon</h3>
+      <ul>
+        <li>Sipariş akışı + item lifecycle + modifier/portion test edilmiş durumda.</li>
+        <li>Takeaway ve dine-in net ayrılmış.</li>
+        <li>Receipt template disiplini (4 tip, 48 char, PC857) — yerli POS'ta nadir.</li>
+        <li>Yazıcı outbox + StoreBridge pull — arızada POS akışı durmaz.</li>
+        <li>Günlük backup + scheduler + SHA-256 + safety revert — local-first güvence.</li>
+        <li>userData veri politikası doğru (EPERM tuzakları geçilmiş).</li>
+      </ul>
+    </div>
+    <div class="card green">
+      <h3>Teknik kararlar + gelecek omurga</h3>
+      <ul>
+        <li>Electron içinde backend ELECTRON_RUN_AS_NODE → Node bağımlılığı yok.</li>
+        <li>Socket.io erken entegrasyon — mobil/online için yeniden kullanılabilir.</li>
+        <li>Policy/pure function katmanı (orderActionPolicy, orderPaymentState) — doğru yön.</li>
+        <li>Idempotency key disiplini — multi-device sync'e hazır.</li>
+        <li>Zod validation — OpenAPI/contract için sağlam taban.</li>
+        <li>business_id her tabloda — multi-tenant evrimi rename yüküsüz.</li>
+        <li>11 audit raporu + sprint sonu hardening listesi — tek kişi projesinde olağanüstü disiplin.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2 id="s6">6) Weaknesses / Zayıf Yönler</h2>
+  <div class="grid cols-2">
+    <div class="card red">
+      <h3>Tek kişilik dağınıklık izleri</h3>
+      <ul>
+        <li>Monolitik dosyalar küçülmek yerine büyüyor: <code>OrderScreen 1428→1605</code>, <code>electron/main 860→1632</code>.</li>
+        <li>Test disiplini sadece backend'de.</li>
+        <li>Audit 00a–03'te adı konmuş refactor'lar uygulanmadı (admin 2275, orders 1231).</li>
+        <li>Her sprint “feature” önceliği; refactor/ürünleşme erteleniyor.</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>Modülerlik / Ürünleşme engelleri</h3>
+      <ul>
+        <li>Domain service ayrımı yarım (orders, payments).</li>
+        <li>api.js domain split tamamlanmadı.</li>
+        <li>electron/main.cjs sub-module'lere ayrılmadı.</li>
+        <li>First-run wizard yok, kod imzası yok, CI/CD yok.</li>
+        <li>Empty state / skeleton / offline banner disiplini parçalı.</li>
+        <li>PrinterDetailPage 854 satır, adım adım form değil.</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>Veri / operasyon riskleri</h3>
+      <ul>
+        <li>REAL para + merkezi round2 — finansal sistem standardı değil.</li>
+        <li>Audit trail yok → fiş silme, fiyat değişimi izi yok.</li>
+        <li>Numbered migration yok.</li>
+        <li>Tek kişiye bağımlılık (bus factor = 1).</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>Frontend testi</h3>
+      <p>0 RTL / Vitest bileşen testi. En kırılgan alanlar (OrderScreen, PaymentScreen, PrinterDetailPage) tamamen test dışı. <code>lint:ci --max-warnings 0</code> dış duvar; asıl korumayı test vermeli.</p>
+    </div>
+  </div>
+
+  <!-- ============ S7 ============ -->
+  <h2 id="s7">7) Readiness Scorecard</h2>
+  <table>
+    <thead><tr><th>Alan</th><th style="width:70px" class="num">Puan</th><th>Gerekçe</th><th style="width:160px">Görsel</th></tr></thead>
+    <tbody>
+      <tr><td>Ürün netliği</td><td class="num">7/10</td><td>Çekirdek akışlar net; rezervasyon/stok/multi-branch yarım.</td><td><div class="score-bar green"><div style="width:70%"></div></div></td></tr>
+      <tr><td>Kullanıcı deneyimi</td><td class="num">6/10</td><td>Tutarlı ama amatör; empty state / onboarding eksik.</td><td><div class="score-bar yellow"><div style="width:60%"></div></div></td></tr>
+      <tr><td>Frontend mimarisi</td><td class="num">5/10</td><td>Lazy-loading iyi; monolitik ekran + 0 test.</td><td><div class="score-bar yellow"><div style="width:50%"></div></div></td></tr>
+      <tr><td>Backend/API olgunluğu</td><td class="num">7/10</td><td>318 test + Zod + transaction iyi; route'larda domain ayrımı yok.</td><td><div class="score-bar green"><div style="width:70%"></div></div></td></tr>
+      <tr><td>Veritabanı tasarımı</td><td class="num">5/10</td><td>WAL+FK iyi; tek migration, REAL para, audit trail yok.</td><td><div class="score-bar yellow"><div style="width:50%"></div></div></td></tr>
+      <tr><td>Entegrasyonlar</td><td class="num">7/10</td><td>Yazıcı + CallerID sağlam; harici entegrasyon yok.</td><td><div class="score-bar green"><div style="width:70%"></div></div></td></tr>
+      <tr><td>Masaüstü ürünleşme</td><td class="num">7/10</td><td>Paketleme disiplinli; imza + wizard eksik.</td><td><div class="score-bar green"><div style="width:70%"></div></div></td></tr>
+      <tr><td>Test kalitesi</td><td class="num">6/10</td><td>Backend güçlü, frontend 0.</td><td><div class="score-bar yellow"><div style="width:60%"></div></div></td></tr>
+      <tr><td>Operasyon güveni</td><td class="num">5/10</td><td>Yerel log var; uzak log / crash reporter yok.</td><td><div class="score-bar yellow"><div style="width:50%"></div></div></td></tr>
+      <tr><td>Güvenlik</td><td class="num">7/10</td><td>Temel iyi; 2FA/audit/secret rotation yok.</td><td><div class="score-bar green"><div style="width:70%"></div></div></td></tr>
+      <tr><td>Loglama / izlenebilirlik</td><td class="num">5/10</td><td>Electron log var; bridge log / telemetry yok.</td><td><div class="score-bar yellow"><div style="width:50%"></div></div></td></tr>
+      <tr><td>Online / cloud hazırlığı</td><td class="num">3/10</td><td>Outbox hazır; tenant / billing / conflict yok.</td><td><div class="score-bar red"><div style="width:30%"></div></div></td></tr>
+      <tr><td>iOS hazırlığı</td><td class="num">2/10</td><td>API ve ekran mobil-first değil.</td><td><div class="score-bar red"><div style="width:20%"></div></div></td></tr>
+      <tr><td>Android hazırlığı</td><td class="num">2/10</td><td>Aynı; mobil ilk çıkış Android olmalı ama hazır değil.</td><td><div class="score-bar red"><div style="width:20%"></div></div></td></tr>
+      <tr><td><strong>Profesyonel ürünleşme</strong></td><td class="num"><strong>5.6/10</strong></td><td>Ticari ürün için onboarding, destek, marka ekosistemi eksik.</td><td><div class="score-bar yellow"><div style="width:56%"></div></div></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ S8 ============ -->
+  <h2 id="s8">8) Productization Gap</h2>
+  <table>
+    <thead><tr><th>Boyut</th><th>Bugün</th><th>Ticari standart</th><th>Gap</th></tr></thead>
+    <tbody>
+      <tr><td>Onboarding</td><td>Manual kurulum + demo kredi</td><td>First-run wizard + sample data + tutorial</td><td><span class="badge red">Büyük</span></td></tr>
+      <tr><td>Kurulum</td><td>NSIS/Portable + PowerShell runbook</td><td>İmzalı + tek tıkla + müşteri config</td><td><span class="badge yellow">Orta</span></td></tr>
+      <tr><td>Destek</td><td>Yok</td><td>Ticket + SLA + remote diag</td><td><span class="badge red">Büyük</span></td></tr>
+      <tr><td>Hata mesajları</td><td>Printer için 16 kod, diğeri serbest</td><td>Tüm domain'de error code → TR dict</td><td><span class="badge yellow">Orta</span></td></tr>
+      <tr><td>Bakım</td><td>Tek kişi + runbook</td><td>Destek prosedürü + uzaktan tanı</td><td><span class="badge red">Büyük</span></td></tr>
+      <tr><td>Dokümantasyon</td><td>Mühendis dokümanı iyi, müşteri yok</td><td>Kullanıcı kılavuzu + video + KB</td><td><span class="badge red">Büyük</span></td></tr>
+      <tr><td>Release disiplini</td><td>dist:release; CI yok</td><td>CI/CD + signing + staging → prod</td><td><span class="badge red">Orta-büyük</span></td></tr>
+      <tr><td>Tasarım sistemi</td><td>CSS tokens</td><td>Storybook + component lib + a11y</td><td><span class="badge yellow">Orta</span></td></tr>
+      <tr><td>Yönetim ekranları</td><td>Kategorili ama dağınık</td><td>Admin dashboard + sistem sağlığı</td><td><span class="badge yellow">Orta</span></td></tr>
+      <tr><td>Operasyonel güven</td><td>Yerel log</td><td>Uzak log + telemetry + crash + uptime</td><td><span class="badge red">Büyük</span></td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ S9 ============ -->
+  <h2 id="s9">9) Online / Cloud Geçiş Analizi</h2>
+
+  <div class="callout warn">
+    <strong>Öneri: Local-first + Cloud backbone (hibrit, aşamalı).</strong>
+    Cloud-first yeniden yazma <em>erken ve hatalıdır</em>. Yazıcı yerel zorunluluk. CallerID USB HID. Saha bağlantısı güvenilmez. KVKK yerel rezidans doğurabilir.
+  </div>
+
+  <div class="compare">
+    <div class="now">
+      <h4>Bugünkü mimari</h4>
+      <ul>
+        <li>Tek kasa + tek işletme + yerel SQLite</li>
+        <li>StoreBridge yerel pull</li>
+        <li>JWT 24h, refresh yok</li>
+        <li>business_id kolon var, tenant kurgu yok</li>
+        <li>Outbox <strong>sadece yazıcı için</strong></li>
+      </ul>
+    </div>
+    <div class="target">
+      <h4>Hedef hibrit</h4>
+      <ul>
+        <li>Local-first POS + Edge bridge</li>
+        <li>Cloud backbone: tenant + billing + raporlama</li>
+        <li>Outbox sync (sipariş, ödeme, menü, müşteri)</li>
+        <li>Refresh token + device session</li>
+        <li>Postgres + RLS · Socket.io + Redis</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Geçiş öncesi zorunlu işler</h3>
+  <ul class="check">
+    <li class="no">Numbered migration runner + schema_migrations</li>
+    <li class="no">Integer minor unit (kuruş) para modeli</li>
+    <li class="no">Audit trail (entity_mutations)</li>
+    <li class="no">Outbox sync queue + conflict resolution</li>
+    <li class="no">Tenant identity + billing</li>
+    <li class="no">OpenAPI sözleşmesi</li>
+    <li class="no">Tüm mutation endpoint'lerinde idempotency-wall</li>
+    <li class="no">Secret rotation</li>
+    <li class="no">Merkezi log / crash reporter</li>
+    <li class="no">CI/CD + staging ortamı</li>
+  </ul>
+
+  <!-- ============ S10 ============ -->
+  <h2 id="s10">10) Database Professionalization</h2>
+
+  <div class="grid cols-3">
+    <div class="card yellow">
+      <h3>Kısa vade (Desktop v1.x)</h3>
+      <ul>
+        <li>Numbered migration runner</li>
+        <li>Audit log (entity_mutations)</li>
+        <li>CHECK constraint'lerin eski DB'lere uygulanması</li>
+        <li>Snapshot tamamlanması (tax, service, pricing_policy_version)</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Orta vade (Online öncesi)</h3>
+      <ul>
+        <li>Integer minor unit migration (shadow column + dual write + cutover)</li>
+        <li>Postgres-friendly tipler (UUID, timestamptz, JSONB)</li>
+        <li>Period close + lock</li>
+        <li>Payment reversal modeli</li>
+      </ul>
+    </div>
+    <div class="card green">
+      <h3>Uzun vade (Cloud/Multi-tenant)</h3>
+      <ul>
+        <li>Postgres + tenant RLS</li>
+        <li>Analitik DB (dbt / ClickHouse)</li>
+        <li>Event sourcing backbone</li>
+        <li>Multi-device conflict resolution</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout info">
+    <strong>SQLite ne zaman yetmez?</strong>
+    1 işletme × 1–3 kasa için rahat. <em>Tetikleyiciler:</em> 2. işletme (multi-tenant), 2. şube (multi-branch), mobil eşzamanlı yazıcı, cloud geçişi, resmi mali audit.
+  </div>
+
+  <!-- ============ S11 ============ -->
+  <h2 id="s11">11) Mobile Expansion Analysis</h2>
+
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>Mobil strateji</h3>
+      <p><strong>Önce Android.</strong> Restoran sahasında Android tablet yaygın, store politikası esnek, hızlı iterate edilir. iOS 3 ay saha sonrası.</p>
+      <p><strong>Teknoloji:</strong> React Native (Expo). JS tek kişilik takımda uyumlu, push/OTA kolay. Native ve Flutter şimdilik gereksiz. PWA yalnız yönetici panel için.</p>
+      <p><strong>İlk mobil ürün:</strong> Garson telefonu istemcisi — dar kapsam, saha değeri yüksek.</p>
+    </div>
+    <div class="card">
+      <h3>Mobilde olmalı / olmamalı</h3>
+      <div class="compare" style="margin:0">
+        <div style="border:none;background:transparent;padding:0">
+          <strong style="color:var(--green)">Olmalı</strong>
+          <ul><li>Masa atanmış siparişi</li><li>Takeaway kabul</li><li>Kurye atama + teslim</li><li>Mutfak push</li><li>Gün sonu özet (admin)</li></ul>
+        </div>
+        <div style="border:none;background:transparent;padding:0">
+          <strong style="color:var(--red)">Olmamalı</strong>
+          <ul><li>Tam ödeme (terminal yoksa)</li><li>Yazıcı yönetimi</li><li>Menü CRUD</li><li>Rapor export</li><li>Multi-role admin</li></ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead><tr><th>Ekran</th><th>Mobile uyum</th><th>Karar</th></tr></thead>
+    <tbody>
+      <tr><td>OrderScreen</td><td><span class="badge red">Uygun değil</span></td><td>Yeniden tasarım</td></tr>
+      <tr><td>TablesScreen</td><td><span class="badge yellow">Kısmen</span></td><td>"Benim masalarım" dar view</td></tr>
+      <tr><td>KitchenScreen</td><td><span class="badge red">Büyük ekran</span></td><td>Mobilde push notification</td></tr>
+      <tr><td>Reports</td><td><span class="badge yellow">Kısmen</span></td><td>Özet card'lar</td></tr>
+      <tr><td>Settings/Printer</td><td><span class="badge red">Kapsam dışı</span></td><td>Masaüstünde kalır</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout info">
+    <strong>Ortak backend gereksinimleri</strong>
+    OpenAPI sözleşmesi · Device pairing (QR + device_id) · Push (FCM/APNs) · Refresh token + device session · Rate limit cihaz bazlı · Socket.io namespace ayrımı
+  </div>
+
+  <!-- ============ S12 ============ -->
+  <h2 id="s12">12) Layer-by-Layer Technical Analysis</h2>
+
+  <div class="grid cols-2">
+    <div class="card accent">
+      <h3>Frontend</h3>
+      <p>React 18 + Vite. Lazy-loading iyi. Context API + local state; query/cache yok. Component sınırları ekran bazlı (domain değil). <strong>0 frontend testi.</strong></p>
+    </div>
+    <div class="card accent">
+      <h3>Backend / Routes / Services</h3>
+      <p>Express + Zod. Domain service kısmi. <code>admin.js 2275</code>, <code>orders.js 1231</code>, <code>payments.js 552</code>. Transaction + idempotency iyi; sideeffect tx dışında.</p>
+    </div>
+    <div class="card accent">
+      <h3>Database / Schema</h3>
+      <p>35 tablo + migration yamaları. WAL + FK + busy_timeout. business_id her tabloda. Snapshot yarım. REAL para. ON DELETE politikası homojen değil.</p>
+    </div>
+    <div class="card accent">
+      <h3>Integrations / Bridge / Print</h3>
+      <p>Outbox + pull + lease + idempotency. 16 error code. CallerID self-contained. StoreBridge file log yok. Webhook/SMS/mail backbone yok.</p>
+    </div>
+    <div class="card accent">
+      <h3>Electron Shell</h3>
+      <p>1632 satır tek dosya. Config, JWT, DB migration, 3 child, backup scheduler, pencere bir arada. Sub-module ayrımı eksik.</p>
+    </div>
+    <div class="card accent">
+      <h3>Config / Environment</h3>
+      <p><code>.env</code>, <code>pos-config.json</code>, bridge env, DB settings çoklu kaynak. Tek doğruluk resolver'ı yok. Precedence dokümanı yok.</p>
+    </div>
+    <div class="card accent">
+      <h3>Tests</h3>
+      <p>318 backend test · 24 dosya · 99 senaryolu orderLifecycle. 2 Playwright spec. 0 RTL / Vitest bileşen. Hardware-in-the-loop yok.</p>
+    </div>
+    <div class="card accent">
+      <h3>Logging / Diagnostics</h3>
+      <p><code>userData/logs/electron-main.log</code> var. Bridge file log yok. Structured logging yok. Correlation id yok. Crash reporter yok.</p>
+    </div>
+    <div class="card accent">
+      <h3>Deployment / Update</h3>
+      <p>electron-updater + latest.yml. Kod imzası yok. CI/CD yok. Rollback prosedürü manuel.</p>
+    </div>
+    <div class="card accent">
+      <h3>Docs / Runbooks</h3>
+      <p>4 runbook + 11 audit + CLAUDE.md güncel. <strong>Müşteri dokümanı yok.</strong> API dokümanı yok.</p>
+    </div>
+  </div>
+
+  <!-- ============ S13 ============ -->
+  <h2 id="s13">13) Risk Register</h2>
+  <table>
+    <thead><tr><th>#</th><th>Risk</th><th>Etki</th><th>Olasılık</th><th>Öncelik</th><th>Çözüm</th><th>Aşama</th></tr></thead>
+    <tbody>
+      <tr><td>R1</td><td>Veri kaybı (DB corruption)</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot l"></span>Düşük</td><td><span class="badge red">P1</span></td><td>Backup staleness banner + ext export (yapıldı)</td><td>Pilot</td></tr>
+      <tr><td>R2</td><td>Yanlış yazdırma (dup/eksik)</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot m"></span>Orta</td><td><span class="badge red">P1</span></td><td>Vendor status veya operatör onay</td><td>Online/mobil öncesi</td></tr>
+      <tr><td>R3</td><td>Çoklu cihaz çakışması</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot l"></span>Düşük bugün</td><td><span class="badge red">P0</span></td><td>Conflict resolution + optimistic lock</td><td>Mobil öncesi</td></tr>
+      <tr><td>R4</td><td>Online geçişte kırılma</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot m"></span>Orta</td><td><span class="badge red">P1</span></td><td>Edge bridge + aşamalı evrim</td><td>Online boyunca</td></tr>
+      <tr><td>R5</td><td>Mobilde UX yetersizliği</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P1</span></td><td>Mobil design + ayrı endpoint</td><td>Mobil başlamadan</td></tr>
+      <tr><td>R6</td><td>Kuruş migration riski</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot m"></span>Orta</td><td><span class="badge red">P1</span></td><td>Shadow column + dual write + cutover</td><td>Online öncesi</td></tr>
+      <tr><td>R7</td><td>Bakım zorluğu (monolit)</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P1</span></td><td>Kontrollü extraction + test</td><td>Her sprintte bir dilim</td></tr>
+      <tr><td>R8</td><td>Tek kişi bağımlılığı</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P0</span></td><td>Doküman + CI/CD + commit disiplini</td><td>Sürekli</td></tr>
+      <tr><td>R9</td><td>Fazla erken genişleme</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P0</span></td><td>Sıralama disiplini (bu rapor)</td><td>Her yeni yön öncesi</td></tr>
+      <tr><td>R10</td><td>SmartScreen kurulum sürtünmesi</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P1</span></td><td>Kod imzası</td><td>Pilot öncesi</td></tr>
+      <tr><td>R11</td><td>Rounding hatası (REAL para)</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot m"></span>Orta</td><td><span class="badge red">P1</span></td><td>Integer minor unit</td><td>Online öncesi</td></tr>
+      <tr><td>R12</td><td>Audit trail eksikliği</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P1</span></td><td>entity_mutations + middleware</td><td>Online öncesi</td></tr>
+      <tr><td>R13</td><td>Frontend regressionu</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot h"></span>Yüksek</td><td><span class="badge red">P1</span></td><td>Playwright + RTL</td><td>Refactor öncesi</td></tr>
+      <tr><td>R14</td><td>Gizli bilgi sızıntısı</td><td><span class="risk-dot l"></span>Düşük</td><td><span class="risk-dot l"></span>Düşük</td><td><span class="badge yellow">P2</span></td><td>Secret rotation + log hygiene testi</td><td>Yıllık</td></tr>
+      <tr><td>R15</td><td>Printer encoding saha hatası</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot m"></span>Orta</td><td><span class="badge yellow">P2</span></td><td>Golden snapshot + profil katalog</td><td>Her yeni müşteri</td></tr>
+      <tr><td>R16</td><td>Scheduler kaybı</td><td><span class="risk-dot m"></span>Orta</td><td><span class="risk-dot l"></span>Düşük</td><td><span class="badge yellow">P2</span></td><td>Scheduler health + UI banner</td><td>Pilot</td></tr>
+    </tbody>
+  </table>
+
+  <!-- ============ S14 ============ -->
+  <h2 id="s14">14) Technical Debt Map</h2>
+  <div class="grid cols-3">
+    <div class="card red">
+      <h3>Hemen ödenmeli</h3>
+      <ul>
+        <li>Frontend test altyapısı (Vitest + RTL) — PaymentScreen + OrderScreen</li>
+        <li>CI/CD pipeline (lint:ci + test + build)</li>
+        <li>StoreBridge file logu</li>
+        <li><code>lint:ci</code> 0-warning doğrulaması (periyodik)</li>
+      </ul>
+    </div>
+    <div class="card yellow">
+      <h3>Ürünleşme öncesi</h3>
+      <ul>
+        <li>Kod imzası (SmartScreen)</li>
+        <li>First-run setup wizard</li>
+        <li><code>electron/main.cjs</code> sub-module ayrımı</li>
+        <li>Numbered migration runner</li>
+        <li>API client domain split (api.js)</li>
+        <li>Orders/payments → domain service</li>
+      </ul>
+    </div>
+    <div class="card accent">
+      <h3>Online öncesi</h3>
+      <ul>
+        <li>Integer minor unit para modeli</li>
+        <li>Audit trail (entity_mutations)</li>
+        <li>Period close / lock</li>
+        <li>Tenant identity + billing</li>
+        <li>Outbox sync + conflict resolution</li>
+        <li>OpenAPI sözleşmesi</li>
+        <li>Secret rotation</li>
+        <li>Merkezi log / crash reporter</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Mobil öncesi</h3>
+      <ul>
+        <li>Device pairing + push notification</li>
+        <li>Mobil-first endpointler</li>
+        <li>Refresh token + device session</li>
+        <li>Mobil design system</li>
+      </ul>
+    </div>
+    <div class="card green">
+      <h3>Tolere edilebilir</h3>
+      <ul>
+        <li>Admin dashboard eksikliği</li>
+        <li>BI-grade reporting (dış araçla)</li>
+        <li>Loyalty / promosyon</li>
+        <li>Multi-currency</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ S15 ============ -->
+  <h2 id="s15">15) Work-Sequence Roadmap</h2>
+  <div class="callout info">
+    <strong>Bu yol haritası zamanla değil, bağımlılık sırasıyla yazıldı.</strong> Aşamaları atlayarak ilerlemek risk yaratır.
+  </div>
+
+  <h3>15.1 Desktop / Local Çekirdek Ürünleştirme</h3>
+  <div class="phase">
+    <div class="phase-head"><span class="phase-name">Aşama D-1</span><span class="phase-title">Test + CI Kapısı</span><span class="badge blue">Başlangıç</span></div>
+    <div class="phase-body">
+      <p><strong>Amaç:</strong> Her değişikliğin otomatik doğrulanması. <strong>Neden bu sırada:</strong> Bundan sonraki her iş bu kapıdan geçecek.</p>
+      <ul>
+        <li>GitHub Actions: lint:ci + backend test + Playwright smoke</li>
+        <li>PaymentScreen + OrderScreen için en az 10 RTL senaryosu</li>
+      </ul>
+      <p><em>Bitmeden sonraki aşama açılmaz.</em></p>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-head"><span class="phase-name">Aşama D-2</span><span class="phase-title">Signing + Wizard + Update Disiplini</span></div>
+    <div class="phase-body">
+      <p><strong>Ön koşul:</strong> D-1. <strong>Amaç:</strong> Müşteri kurulabilir olmak.</p>
+      <ul>
+        <li>Windows EV/OV kod imzası</li>
+        <li>First-run setup wizard (şirket, yazıcı, bridge token, admin)</li>
+        <li>Release notes UI + changelog</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-head"><span class="phase-name">Aşama D-3</span><span class="phase-title">Operasyonel Görünürlük</span></div>
+    <div class="phase-body">
+      <p><strong>Ön koşul:</strong> D-1. <strong>Amaç:</strong> Sahada ne oluyor bilmek.</p>
+      <ul>
+        <li>StoreBridge file log + rotation</li>
+        <li>Crash reporter (Sentry) main + renderer + backend</li>
+        <li>Support bundle UI butonu</li>
+        <li>Structured logging (JSON) + request-id correlation</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-head"><span class="phase-name">Aşama D-4</span><span class="phase-title">Monolitik Ayrıştırma (Kontrollü)</span></div>
+    <div class="phase-body">
+      <p><strong>Ön koşul:</strong> D-1, D-3.</p>
+      <ul>
+        <li>electron/main.cjs → 6 sub-module</li>
+        <li>server/routes/orders.js → orderService.js</li>
+        <li>server/routes/payments.js → paymentService.js</li>
+        <li>client/src/services/api.js → domain modülleri</li>
+        <li>OrderScreen → hook + sub-component extraction</li>
+        <li>PrinterDetailPage → form model hook + preview</li>
+      </ul>
+    </div>
+  </div>
+  <div class="phase">
+    <div class="phase-head"><span class="phase-name">Aşama D-5</span><span class="phase-title">Ürün Eksiklerini Kapatma</span></div>
+    <div class="phase-body">
+      <p><strong>Ön koşul:</strong> D-4.</p>
+      <ul>
+        <li>Period close / X-Z raporu</li>
+        <li>İade / return akışı</li>
+        <li>e-belge + ödeme terminal SDK (opsiyonel)</li>
+        <li>Tip/bahşiş modeli</li>
+        <li>Rezervasyon ↔ masa eşleme</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>15.2 Online / Cloud Geçiş</h3>
+  <div class="phase"><div class="phase-head"><span class="phase-name">O-1</span><span class="phase-title">Veri Modeli Sağlamlaştırma</span></div>
+    <div class="phase-body"><p><strong>Ön koşul:</strong> D-1, D-3, D-4 (kısmi).</p><ul><li>Numbered migration runner</li><li>Audit trail (entity_mutations)</li><li>Integer minor unit (dual write + cutover)</li><li>Snapshot tamamlama (tax, service, pricing_policy_version)</li><li>Period close / lock</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">O-2</span><span class="phase-title">Tenant Identity + Billing</span></div>
+    <div class="phase-body"><p><strong>Ön koşul:</strong> O-1.</p><ul><li>Plan, limit, billing modeli</li><li>Tenant-aware rate limit + backup</li><li>Stripe/iyzico subscription</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">O-3</span><span class="phase-title">Sync Backbone</span></div>
+    <div class="phase-body"><p><strong>Ön koşul:</strong> O-1, O-2.</p><ul><li>Outbox genişletme (sipariş, ödeme, menü, müşteri)</li><li>Conflict resolution protokolü</li><li>Idempotency-wall tüm mutation endpoint'lerinde</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">O-4</span><span class="phase-title">Cloud Deployment</span></div>
+    <div class="phase-body"><ul><li>Postgres + RLS</li><li>Socket.io + Redis adapter</li><li>Observability stack</li><li>Staging/prod ayrımı</li><li>KVKK / data residency</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">O-5</span><span class="phase-title">Merkezi Raporlama + Ekosistem</span></div>
+    <div class="phase-body"><ul><li>Merkezi dashboard + BI</li><li>Multi-branch reporting</li><li>Yemeksepeti/Getir/Logo-Mikro</li></ul></div>
+  </div>
+
+  <h3>15.3 Mobil iOS/Android</h3>
+  <div class="phase"><div class="phase-head"><span class="phase-name">M-1</span><span class="phase-title">Mobil-Ready Backend</span></div>
+    <div class="phase-body"><p><strong>Ön koşul:</strong> D-4 + O-1 (kısmi).</p><ul><li>OpenAPI + mobile-first endpoints</li><li>Device pairing (QR + device_id)</li><li>Push (FCM/APNs)</li><li>Refresh token + session</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">M-2</span><span class="phase-title">Garson Mobil (Android ilk)</span></div>
+    <div class="phase-body"><ul><li>React Native (Expo)</li><li>Masa listesi → sipariş ekle → kaydet</li><li>Push: mutfak tamam, masa çağırıyor</li><li>Offline queue (tek cihaz)</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">M-3</span><span class="phase-title">Garson Mobil iOS</span></div>
+    <div class="phase-body"><p><strong>Ön koşul:</strong> M-2 stabil (3+ ay saha).</p><ul><li>TestFlight + App Store review</li><li>iOS-specific notifications, background fetch</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">M-4</span><span class="phase-title">Yönetici Paneli (PWA veya RN)</span></div>
+    <div class="phase-body"><ul><li>Dashboard, raporlar</li><li>Approval akışları</li></ul></div>
+  </div>
+  <div class="phase"><div class="phase-head"><span class="phase-name">M-5</span><span class="phase-title">Müşteri Self-Service</span></div>
+    <div class="phase-body"><ul><li>QR menü · self-order · self-pay · loyalty</li></ul></div>
+  </div>
+
+  <h3>15.4 Veritabanı Profesyonelleştirme</h3>
+  <div class="grid cols-3">
+    <div class="phase"><div class="phase-head"><span class="phase-name">DB-1</span><span class="phase-title">Migration disiplini</span></div><div class="phase-body">Numbered migration + schema_migrations · forward-only karar</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">DB-2</span><span class="phase-title">Audit trail</span></div><div class="phase-body">entity_mutations + middleware + admin viewer</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">DB-3</span><span class="phase-title">Integer minor unit</span></div><div class="phase-body">Shadow kolon · dual write · raporlar cutover</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">DB-4</span><span class="phase-title">Snapshot tamamlama</span></div><div class="phase-body">Pricing policy version · tax/service · period lock</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">DB-5</span><span class="phase-title">Postgres-friendly evrilme</span></div><div class="phase-body">UUID · timestamptz · JSONB · generated columns</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">DB-6</span><span class="phase-title">Cloud DB</span></div><div class="phase-body">Postgres · RLS · read replica · analitik DB</div></div>
+  </div>
+
+  <h3>15.5 Profesyonel Ürünleşme</h3>
+  <div class="grid cols-3">
+    <div class="phase"><div class="phase-head"><span class="phase-name">P-1</span><span class="phase-title">Güven temeli</span></div><div class="phase-body">CI/CD · imza · crash reporter · bridge log</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">P-2</span><span class="phase-title">Müşteri olgunluğu</span></div><div class="phase-body">First-run wizard · help · release notes · error TR dict</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">P-3</span><span class="phase-title">Dokümantasyon + destek</span></div><div class="phase-body">Kılavuz · video · KB · ticket · SLA</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">P-4</span><span class="phase-title">Marka + tutarlılık</span></div><div class="phase-body">Design system · a11y · i18n altyapı</div></div>
+    <div class="phase"><div class="phase-head"><span class="phase-name">P-5</span><span class="phase-title">Ekosistem</span></div><div class="phase-body">Public API · webhook · 3rd party marketplace</div></div>
+  </div>
+
+  <!-- ============ S16 ============ -->
+  <h2 id="s16">16) Dependency-Based Decision Tree</h2>
+  <div class="tree">BAŞLANGIÇ
+  │
+  ▼
+┌────────────────────────────────┐
+│  D-1  Test + CI Kapısı         │  (ZORUNLU ilk adım)
+└────────────────────────────────┘
+  │
+  ├── Hedef: LOCAL ÜRÜN (pilot) ─────► D-2 ─► D-3 ─► P-1 ─► P-2 ─► SATIŞ
+  │
+  ├── Hedef: ONLINE/SAAS ───────────► D-3 ─► D-4 (kısmi) ─► DB-1 ─► DB-2 ─► DB-3 ─► O-1 ─► O-2 ─► O-3 ─► O-4
+  │                                                                                              │
+  │                                                                             (O-4 tamam değilse mobil asla)
+  │
+  ├── Hedef: MOBİL ─────────────────► O-1 + D-4 zorunlu ✅ ─► M-1 ─► M-2 (Android)
+  │                                                              │
+  │                                                 3 ay saha ─► M-3 (iOS)
+  │
+  └── Hedef: PROFESYONEL ÜRÜN ──────► P-1 ─► P-2 ─► P-3 ─► P-4  (sonrası paralel)
+
+Kural 1: D-1 olmadan hiçbir dal açılamaz.
+Kural 2: Online hedefi → DB-1 + DB-2 + DB-3 atlanamaz.
+Kural 3: Mobil'e O-1 olmadan girmek veri kazası davet eder.
+Kural 4: Code signing olmadan müşteriye gitme — nokta.</div>
+
+  <!-- ============ S17 ============ -->
+  <h2 id="s17">17) What Not To Do Yet / Henüz Yapma</h2>
+  <div class="grid cols-2">
+    <div class="card red">
+      <h3>Kesinlikle yapma</h3>
+      <ul>
+        <li>Cloud-first yeniden yazma</li>
+        <li>Mobil uygulamaya şimdi başlama</li>
+        <li>Multi-tenant SaaS lansmanı</li>
+        <li>Büyük monolitik refactor aynı anda</li>
+        <li>Yemeksepeti/Getir entegrasyonu</li>
+      </ul>
+    </div>
+    <div class="card yellow">
+      <h3>Erteleme / daraltma</h3>
+      <ul>
+        <li>Loyalty / kampanya modülü</li>
+        <li>Linux/Mac desteği</li>
+        <li>i18n / yeni dil</li>
+        <li>AI/voice-order / müşteri bot</li>
+        <li>Büyük UI redesign (design system olmadan)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ S18 ============ -->
+  <h2 id="s18">18) Go / No-Go Gates</h2>
+
+  <div class="gate">
+    <div class="gate-head"><span class="gate-title">Gate 1 — Local Ürünleşme (Pilot)</span><span class="badge yellow">Şartlı Hazır · 3 açık</span></div>
+    <ul class="check">
+      <li class="ok">318+ test geçiyor</li>
+      <li class="ok">Backup/restore production-grade</li>
+      <li class="no">Kod imzası</li>
+      <li class="no">First-run wizard</li>
+      <li class="no">StoreBridge file log</li>
+      <li class="no">Crash reporter</li>
+      <li class="warn">Müşteri kurulum runbook (var ama video eksik)</li>
+      <li class="no">Support bundle UI butonu</li>
+      <li class="no">Pilot eğitim + on-site prosedürü</li>
+    </ul>
+  </div>
+
+  <div class="gate">
+    <div class="gate-head"><span class="gate-title">Gate 2 — Online Faza Geçiş</span><span class="badge red">Hazır Değil · 9 açık</span></div>
+    <ul class="check">
+      <li class="no">Numbered migration runner</li>
+      <li class="no">Audit trail</li>
+      <li class="no">Integer minor unit</li>
+      <li class="no">Tenant identity + billing</li>
+      <li class="no">Outbox sync + conflict resolution</li>
+      <li class="no">OpenAPI sözleşmesi</li>
+      <li class="no">Secret rotation</li>
+      <li class="no">Merkezi log / crash reporter</li>
+      <li class="no">Staging ortamı + CI/CD</li>
+    </ul>
+  </div>
+
+  <div class="gate">
+    <div class="gate-head"><span class="gate-title">Gate 3 — Mobil Faza Geçiş</span><span class="badge red">Hazır Değil · Gate 2 ön koşul</span></div>
+    <ul class="check">
+      <li class="no">Online backbone (Gate 2) complete</li>
+      <li class="no">Mobile-first API endpoints</li>
+      <li class="no">Device pairing + push</li>
+      <li class="no">Refresh token + session</li>
+      <li class="no">Mobil design system</li>
+    </ul>
+  </div>
+
+  <div class="gate">
+    <div class="gate-head"><span class="gate-title">Gate 4 — Profesyonel Ürün Lansmanı</span><span class="badge red">Hazır Değil · Gate 1 sonrası</span></div>
+    <ul class="check">
+      <li class="no">Gate 1 complete</li>
+      <li class="no">Design system + a11y pass</li>
+      <li class="no">Customer docs + video</li>
+      <li class="no">Support ticket sistemi</li>
+      <li class="no">SLA tanımı</li>
+      <li class="no">Marka/about/splash tutarlılığı</li>
+    </ul>
+  </div>
+
+  <!-- ============ S19 ============ -->
+  <h2 id="s19">19) Single-Developer Reality Check</h2>
+
+  <div class="grid cols-2">
+    <div class="card accent">
+      <h3>Boğulmayan sıra</h3>
+      <ol>
+        <li>D-1 (Test + CI) — küçük ama sonrasını mümkün kılar</li>
+        <li>D-2 (Signing + Wizard) — somut satış etkisi</li>
+        <li>D-3 (Log + Crash reporter) — saha dertsizleşir</li>
+        <li>D-4 parça parça — ayda bir dosya ayrımı</li>
+        <li>DB-1 + DB-2 — online kapısını açar</li>
+      </ol>
+    </div>
+    <div class="card accent">
+      <h3>Bölünmesi gereken büyükler</h3>
+      <ul>
+        <li>OrderScreen refactor: 4–5 pass (önce hook, sonra sub-component, sonra state)</li>
+        <li>electron/main.cjs: her sub-module ayrı PR</li>
+        <li>API client split: domain başına bir PR</li>
+      </ul>
+    </div>
+    <div class="card yellow">
+      <h3>Scope nerede daraltılmalı</h3>
+      <ul>
+        <li><strong>Mobil:</strong> erteleme; roadmap "sonra"</li>
+        <li><strong>Multi-branch:</strong> pilot tek şubeli</li>
+        <li><strong>e-belge:</strong> v1.x sonu</li>
+        <li><strong>Loyalty:</strong> v2</li>
+        <li><strong>Yemeksepeti/Getir:</strong> v2</li>
+      </ul>
+    </div>
+    <div class="card green">
+      <h3>AI desteği ile verimli alanlar</h3>
+      <ul>
+        <li>Birim testi üretimi</li>
+        <li>Küçük PR bazlı refactor</li>
+        <li>Müşteri kılavuzu / runbook / release notes</li>
+        <li>Error taksonomisi + TR dictionary</li>
+        <li>OpenAPI sözleşme taslağı</li>
+      </ul>
+    </div>
+    <div class="card red">
+      <h3>İnsan eliyle dikkat isteyen</h3>
+      <ul>
+        <li>Para / rounding / ödeme kodu</li>
+        <li>Canlı veride migration</li>
+        <li>Yazıcı encoding</li>
+        <li>Güvenlik (secret, CORS, auth)</li>
+        <li>İş kuralı kararları (KDV, tip, iade)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============ S20 ============ -->
+  <h2 id="s20">20) Final Recommendation</h2>
+
+  <div class="callout ok">
+    <strong>Bugünkü seviye</strong>
+    "Pilot müşteriye hazır, çok müşteriye / cloud'a / mobil'e hazır değil" bir local POS çekirdeği. Backend test ve release infra'sı tek kişi projelerinin üstünde; mimari mühendislik (monolitik dosyalar, veri modeli, frontend test) altında.
+  </div>
+
+  <div class="grid cols-2">
+    <div class="card accent">
+      <h3>İlk ne yapılmalı?</h3>
+      <ol>
+        <li>D-1: Test + CI kapısı (lint:ci + backend + Playwright + RTL)</li>
+        <li>D-2: Kod imzası + first-run wizard + changelog</li>
+        <li>D-3: StoreBridge file log + crash reporter + support bundle UI</li>
+      </ol>
+    </div>
+    <div class="card accent">
+      <h3>Sonra ne yapılmalı?</h3>
+      <ol start="4">
+        <li>D-4: electron/main ayrımı → orders/payments service → api.js split</li>
+        <li>DB-1 + DB-2: numbered migration + audit trail</li>
+        <li>P-2: first-run wizard + in-app help + error taksonomisi</li>
+      </ol>
+    </div>
+    <div class="card yellow">
+      <h3>Online'a ne zaman?</h3>
+      <ul>
+        <li>D-1, D-3, D-4 (kısmi) tamam</li>
+        <li>DB-1 + DB-2 + DB-3 (kuruş) tamam</li>
+        <li>Tenant + billing modeli tasarlanmış</li>
+        <li>Outbox sync + conflict protokolü</li>
+        <li>Staging ortamı ayakta</li>
+      </ul>
+      <p><em>Önce geçersen: data corruption riski + SLA ihlali.</em></p>
+    </div>
+    <div class="card yellow">
+      <h3>iOS/Android ne zaman?</h3>
+      <ul>
+        <li>Online backbone (Gate 2) ayakta</li>
+        <li>OpenAPI kontrat stabil</li>
+        <li>Device pairing + push çalışıyor</li>
+        <li>Önce Android (garson dar kapsam)</li>
+        <li>3 ay saha sonrası iOS</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Profesyonel ürüne ilk 15 gerçek iş</h3>
+  <div class="card">
+    <ol>
+      <li>GitHub Actions CI: lint:ci + backend test + Playwright smoke</li>
+      <li>PaymentScreen + OrderScreen için RTL testi (en az 10 kritik senaryo)</li>
+      <li>Windows kod imzası (EV sertifika + sign chain dist:release'e)</li>
+      <li>First-run setup wizard (şirket + admin + yazıcı + bridge token)</li>
+      <li>StoreBridge file log (<code>userData/logs/store-bridge.log</code> + rotation)</li>
+      <li>Sentry crash reporter (main + renderer + backend)</li>
+      <li>Support bundle UI butonu (endpoint hazır)</li>
+      <li>Release notes UX ("Sürüm Notları" ekranı)</li>
+      <li><code>electron/main.cjs</code> → 6 sub-module ayrımı</li>
+      <li><code>server/routes/orders.js</code> → <code>services/orderService.js</code></li>
+      <li><code>client/src/services/api.js</code> → domain modülleri</li>
+      <li>Numbered migration runner + <code>schema_migrations</code></li>
+      <li>Audit trail (<code>entity_mutations</code>) + admin UI viewer</li>
+      <li>Error taksonomisi (TR dictionary + UI mapping)</li>
+      <li>Müşteri kılavuzu (5–10 dk video + PDF) — satış için şart</li>
+    </ol>
+  </div>
+
+  <div class="callout danger" style="margin-top:20px">
+    <strong>Sonuç</strong>
+    Proje tek restoran pilot müşteride lansmana <strong>3 şart uzaklıkta</strong>, online'a <strong>9 şart uzaklıkta</strong>, mobil'e ise <strong>önce online'dan geçmesi gereken</strong> bir seviyede. Yol haritası sıra bağımlıdır; sırayı bozmak her aşamayı daha pahalı yapar.
+  </div>
+
+  <footer>
+    <p><strong>Metodoloji:</strong> Kanıta dayalı; CLAUDE.md, git history (ba588f0, bc55cd7, f129a9b, 4131fbb), mevcut audit raporları (00–11), canlı <code>wc -l</code> + <code>grep</code> sayımları. 318 <code>it()</code> test sayımı doğrulandı.</p>
+    <p><strong>Sınırlılık:</strong> <code>npm run lint:ci</code> ve <code>npm run test</code> bu raporda yeniden çalıştırılmadı. Saha cihaz testi yapılmadı. Frontend davranışı statik analize dayanıyor.</p>
+    <p><strong>Ölçek kalibrasyonu:</strong> CLAUDE.md'deki 9.2/10 iç değerlendirmedir. Bu rapor ticari ürün standardına göre kalibre edilmiş <strong>5.6/10 Productization Score</strong> kullanır. Çelişmiyor — farklı referans çerçeveleri.</p>
+    <p style="margin-top:16px;color:var(--muted);font-size:12px">Rapor: <code>docs/audit/master-productization-report.md</code> · <code>master-productization-report.html</code> · 2026-04-17</p>
+  </footer>
+
+</div>
+</body>
+</html>

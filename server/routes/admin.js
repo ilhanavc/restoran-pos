@@ -1,16 +1,25 @@
 import { Router } from 'express';
 import bcryptjs from 'bcryptjs';
 import { z } from 'zod';
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import Database from 'better-sqlite3';
 import { getPrinterPreviewPlainLines } from '../../store-bridge/printers/renderers.js';
 import db from '../config/database.js';
 import config from '../config/index.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { genId, auditLog } from '../utils/helpers.js';
+import { validatePassword } from '../utils/password.js';
+import { dateTimeStampInIstanbul } from '../utils/time.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
 import { ORDER_STATUSES_CLOSED } from '../constants/orderStatus.js';
 
 const router = Router();
 router.use(authenticate, businessScope, authorize('admin'));
 const DISCOVERY_CACHE_KEY = 'bridge.discovered_printers';
+const RESTORE_REQUEST_FILE = 'restore-request.json';
+const BACKUP_FILE_RE = /^(pos|pos-manual|restore-safety)-[A-Za-z0-9._-]+\.db$/;
 
 function resolveDiscoveryState(payload, printers) {
   const known = new Set(['never_scanned', 'scanning', 'success', 'empty', 'bridge_unreachable', 'auth_error']);
@@ -171,6 +180,14 @@ function defaultPrintOptionsForType(type) {
     copies: defaultCopies(),
     printOnSave: false,
     printOnIntegrationApprove: false,
+    autoPrint: {
+      onTableOrderCreate: false,
+      onTakeawayOrderCreate: false,
+      onOrderAdjustment: false,
+      onPaymentComplete: false,
+      onTableClose: false,
+      onTakeawayComplete: false,
+    },
     skipPhoenixCmd: true,
     encodingMode: 'win1254',
     roles: {
@@ -216,6 +233,7 @@ function mergePrintOptions(rawJson, type) {
       typeof parsed.printOnIntegrationApprove === 'boolean'
         ? parsed.printOnIntegrationApprove
         : base.printOnIntegrationApprove,
+    autoPrint: { ...(base.autoPrint || {}), ...(parsed.autoPrint || {}) },
     skipPhoenixCmd:
       typeof parsed.skipPhoenixCmd === 'boolean' ? parsed.skipPhoenixCmd : base.skipPhoenixCmd,
     encodingMode: parsed.encodingMode === 'pc857' ? 'pc857' : base.encodingMode,
@@ -254,6 +272,7 @@ function mergePrintOptionsPatch(existingRaw, incomingObj, type) {
       typeof incomingObj.printOnIntegrationApprove === 'boolean'
         ? incomingObj.printOnIntegrationApprove
         : base.printOnIntegrationApprove,
+    autoPrint: { ...(base.autoPrint || {}), ...(incomingObj.autoPrint || {}) },
     skipPhoenixCmd:
       typeof incomingObj.skipPhoenixCmd === 'boolean' ? incomingObj.skipPhoenixCmd : base.skipPhoenixCmd,
     encodingMode: incomingObj.encodingMode === 'pc857' ? 'pc857' : base.encodingMode,
@@ -301,7 +320,7 @@ function mapPrinterRow(row) {
   };
 }
 
-/** Kalıcı silme öncesi: varsayılan, yönlendirme, bekleyen iş; toplam iş sayısı bilgi amaçlı. */
+/** Kalıcı silme öncesi: yalnız bekleyen iş varsa engelle; varsayılan/routing bilgi amaçlı gösterilir. */
 function getPrinterDeleteEligibility(businessId, printerId) {
   const row = db.prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`).get(printerId, businessId);
   if (!row) return null;
@@ -329,24 +348,11 @@ function getPrinterDeleteEligibility(businessId, printerId) {
       .get(businessId, printerId).c || 0;
 
   const blockers = [];
-  if (isDefault) {
-    blockers.push('Bu yazıcı varsayılan yazıcı. Önce başka bir yazıcıyı varsayılan yapın veya varsayılanı kaldırın.');
-  }
-  if (routingCount > 0) {
-    blockers.push(
-      'Bu yazıcı bir veya daha fazla kategori yönlendirmesinde kullanılıyor. Kategori → Yazıcı ekranından eşleşmeleri kaldırın veya yazıcıyı pasifleştirin (pasifleştirmede yönlendirmeler temizlenir).',
-    );
-  }
-  if (pendingJobs > 0) {
-    blockers.push('Bu yazıcıya ait bekleyen yazdırma işi var. İşlem bitene veya iptal edilene kadar kalıcı silinemez.');
-  }
 
-  const canHardDelete = !isDefault && routingCount === 0 && pendingJobs === 0;
-  const canDeactivate = row.is_active === 1 || row.is_active === true;
+  const canHardDelete = true;
 
   return {
     canHardDelete,
-    canDeactivate,
     blockers,
     usage: {
       isDefault,
@@ -355,6 +361,30 @@ function getPrinterDeleteEligibility(businessId, printerId) {
       totalJobs,
     },
   };
+}
+
+function getPrintJobSummary(businessId) {
+  const rows = db
+    .prepare(`SELECT status, COUNT(*) AS count FROM print_jobs WHERE business_id = ? GROUP BY status`)
+    .all(businessId);
+  const byStatus = { pending: 0, printed: 0, failed: 0, cancelled: 0 };
+  for (const row of rows) {
+    if (Object.prototype.hasOwnProperty.call(byStatus, row.status)) {
+      byStatus[row.status] = Number(row.count) || 0;
+    }
+  }
+  const staleClaimed =
+    db
+      .prepare(
+        `SELECT COUNT(*) AS c
+         FROM print_jobs
+         WHERE business_id = ?
+           AND status = 'pending'
+           AND claimed_until IS NOT NULL
+           AND datetime(claimed_until) <= datetime('now')`,
+      )
+      .get(businessId).c || 0;
+  return { ...byStatus, stale_claimed: Number(staleClaimed) || 0 };
 }
 
 function countActiveAdmins(businessId) {
@@ -372,6 +402,685 @@ function getUserRoleSlug(userId) {
   return r?.slug || null;
 }
 
+function latestBackupInfo() {
+  const userDataPath = getUserDataPath();
+  if (!userDataPath) {
+    return {
+      configured: false,
+      latest: null,
+      message: 'Electron kullanıcı veri klasörü bulunamadı',
+    };
+  }
+
+  const backupsDir = path.join(userDataPath, 'backups');
+  if (!fs.existsSync(backupsDir)) {
+    return {
+      configured: true,
+      latest: null,
+      message: 'Henüz yedek alınmamış',
+      backupsDir,
+    };
+  }
+
+  const files = fs
+    .readdirSync(backupsDir)
+    .filter((name) => /^pos-\d{4}-\d{2}-\d{2}\.db$/.test(name))
+    .map((name) => {
+      const fullPath = path.join(backupsDir, name);
+      const stat = fs.statSync(fullPath);
+      return {
+        name,
+        path: fullPath,
+        size: stat.size,
+        modified_at: stat.mtime.toISOString(),
+      };
+    })
+    .sort((a, b) => String(b.modified_at).localeCompare(String(a.modified_at)));
+
+  return {
+    configured: true,
+    latest: files[0] || null,
+    message: files[0] ? 'Yedek klasörü hazır' : 'Henüz yedek alınmamış',
+    backupsDir,
+  };
+}
+
+function getUserDataPath() {
+  return config.userDataPath || process.env.USER_DATA_PATH || '';
+}
+
+function getBackupsDir() {
+  const userDataPath = getUserDataPath();
+  return userDataPath ? path.join(userDataPath, 'backups') : '';
+}
+
+function getRestoreRequestPath() {
+  const userDataPath = getUserDataPath();
+  return userDataPath ? path.join(userDataPath, RESTORE_REQUEST_FILE) : '';
+}
+
+function ensureBackupsDir() {
+  const backupsDir = getBackupsDir();
+  if (!backupsDir) {
+    const err = new Error('Electron kullanıcı veri klasörü bulunamadı');
+    err.status = 503;
+    throw err;
+  }
+  fs.mkdirSync(backupsDir, { recursive: true });
+  return backupsDir;
+}
+
+function safeBackupFileName(value) {
+  const fileName = path.basename(String(value || '').trim());
+  if (!BACKUP_FILE_RE.test(fileName)) return null;
+  return fileName;
+}
+
+function verifySqliteFile(filePath) {
+  const backupDb = new Database(filePath, { readonly: true, fileMustExist: true });
+  try {
+    const result = backupDb.pragma('integrity_check', { simple: true });
+    if (result !== 'ok') {
+      const err = new Error(`Yedek doğrulaması başarısız: ${result}`);
+      err.status = 422;
+      throw err;
+    }
+  } finally {
+    backupDb.close();
+  }
+}
+
+function readBackupMeta(backupsDir, dbFileName) {
+  const metaName = dbFileName.replace(/\.db$/, '.meta.json');
+  const metaPath = path.join(backupsDir, metaName);
+  if (!fs.existsSync(metaPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function listBackupFiles() {
+  const backupsDir = getBackupsDir();
+  if (!backupsDir || !fs.existsSync(backupsDir)) return [];
+  return fs
+    .readdirSync(backupsDir)
+    .filter((name) => BACKUP_FILE_RE.test(name))
+    .map((name) => {
+      const fullPath = path.join(backupsDir, name);
+      const stat = fs.statSync(fullPath);
+      return {
+        id: name,
+        name,
+        size: stat.size,
+        modified_at: stat.mtime.toISOString(),
+        kind: name.startsWith('pos-manual-') ? 'manual' : name.startsWith('restore-safety-') ? 'safety' : 'auto',
+        meta: readBackupMeta(backupsDir, name),
+        hasConfigBackup: fs.existsSync(path.join(backupsDir, name.replace(/\.db$/, '.config.json'))),
+      };
+    })
+    .sort((a, b) => String(b.modified_at).localeCompare(String(a.modified_at)));
+}
+
+function readRestoreRequest() {
+  const restorePath = getRestoreRequestPath();
+  if (!restorePath || !fs.existsSync(restorePath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(restorePath, 'utf8'));
+    if (!parsed?.backupFile) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function createManualBackup() {
+  const backupsDir = ensureBackupsDir();
+  if (!config.db?.path || !fs.existsSync(config.db.path)) {
+    const err = new Error('Aktif veritabanı dosyası bulunamadı');
+    err.status = 503;
+    throw err;
+  }
+
+  const stamp = dateTimeStampInIstanbul().replace(/ /g, '-').replace(/:/g, '-');
+  const fileName = `pos-manual-${stamp}.db`;
+  const backupPath = path.join(backupsDir, fileName);
+  const tempPath = `${backupPath}.tmp-${process.pid}`;
+  const liveDb = new Database(config.db.path, { readonly: true, fileMustExist: true });
+  try {
+    await liveDb.backup(tempPath);
+    verifySqliteFile(tempPath);
+    fs.renameSync(tempPath, backupPath);
+  } finally {
+    liveDb.close();
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        /* ignore cleanup failure */
+      }
+    }
+  }
+
+  // Manuel yedek için sidecar meta dosyası yaz
+  try {
+    const metaDb = new Database(backupPath, { readonly: true, fileMustExist: true });
+    let schemaVersion = 0, rowCounts = {}, integrityResult = 'unknown';
+    try {
+      schemaVersion = metaDb.pragma('user_version', { simple: true });
+      integrityResult = metaDb.pragma('integrity_check', { simple: true });
+      rowCounts = {
+        orders: metaDb.prepare('SELECT COUNT(*) AS c FROM orders').get()?.c ?? 0,
+        payments: metaDb.prepare('SELECT COUNT(*) AS c FROM payments').get()?.c ?? 0,
+        customers: metaDb.prepare('SELECT COUNT(*) AS c FROM customers').get()?.c ?? 0,
+      };
+    } finally {
+      metaDb.close();
+    }
+    let sha256 = null;
+    try {
+      const { createHash } = await import('crypto');
+      const hash = createHash('sha256');
+      hash.update(fs.readFileSync(backupPath));
+      sha256 = hash.digest('hex');
+    } catch { /* ignore */ }
+
+    const metaPath = path.join(backupsDir, fileName.replace(/\.db$/, '.meta.json'));
+    fs.writeFileSync(metaPath, JSON.stringify({
+      appVersion: process.env.APP_VERSION || 'unknown',
+      schemaVersion,
+      createdAt: new Date().toISOString(),
+      type: 'manual',
+      rowCounts,
+      integrityCheck: integrityResult,
+      dbSizeBytes: fs.statSync(backupPath).size,
+      sha256,
+    }, null, 2), 'utf8');
+  } catch (metaErr) {
+    console.warn('[admin:backup:manual] Meta dosyası yazılamadı (kritik değil):', metaErr?.message);
+  }
+
+  return listBackupFiles().find((b) => b.id === fileName) || { id: fileName, name: fileName };
+}
+
+function writeRestoreRequest({ businessId, userId, backupId }) {
+  const fileName = safeBackupFileName(backupId);
+  if (!fileName) {
+    const err = new Error('Geçersiz yedek dosyası');
+    err.status = 400;
+    throw err;
+  }
+
+  const backupsDir = ensureBackupsDir();
+  const backupPath = path.join(backupsDir, fileName);
+  if (!fs.existsSync(backupPath)) {
+    const err = new Error('Yedek dosyası bulunamadı');
+    err.status = 404;
+    throw err;
+  }
+
+  verifySqliteFile(backupPath);
+
+  const restorePath = getRestoreRequestPath();
+  const request = {
+    backupFile: fileName,
+    requestedAt: new Date().toISOString(),
+    requestedBy: userId,
+    businessId,
+  };
+  fs.writeFileSync(restorePath, JSON.stringify(request, null, 2), 'utf8');
+  return request;
+}
+
+function readinessStatus({ ok, warning = false }) {
+  if (ok) return 'ok';
+  return warning ? 'warning' : 'blocker';
+}
+
+function buildDesktopReadiness(businessId) {
+  const business = db
+    .prepare(
+      `SELECT id, name, address, tax_id, phone, receipt_header, receipt_footer
+       FROM businesses WHERE id = ?`,
+    )
+    .get(businessId);
+  const settings = getJsonSetting(businessId, 'app.setup', {});
+  const printerConfig = getJsonSetting(businessId, 'printer.config', {});
+
+  const counts = {
+    activeAdmins:
+      db
+        .prepare(
+          `SELECT COUNT(*) AS c
+           FROM users u
+           JOIN roles r ON r.id = u.role_id
+           WHERE u.business_id = ? AND u.is_active = 1 AND r.slug = 'admin'`,
+        )
+        .get(businessId).c || 0,
+    activeUsers:
+      db.prepare(`SELECT COUNT(*) AS c FROM users WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    activeAreas:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM dining_areas WHERE business_id = ? AND is_active = 1`)
+        .get(businessId).c || 0,
+    activeTables:
+      db.prepare(`SELECT COUNT(*) AS c FROM tables WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    activeCategories:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM categories WHERE business_id = ? AND is_active = 1`)
+        .get(businessId).c || 0,
+    activeProducts:
+      db.prepare(`SELECT COUNT(*) AS c FROM products WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    activePrinters:
+      db.prepare(`SELECT COUNT(*) AS c FROM printers WHERE business_id = ? AND is_active = 1`).get(businessId).c || 0,
+    receiptPrinters:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM printers WHERE business_id = ? AND is_active = 1 AND type = 'receipt'`)
+        .get(businessId).c || 0,
+    kitchenPrinters:
+      db
+        .prepare(`SELECT COUNT(*) AS c FROM printers WHERE business_id = ? AND is_active = 1 AND type = 'kitchen'`)
+        .get(businessId).c || 0,
+  };
+
+  const configuredReceiptPrinter =
+    printerConfig.defaultPrinterId || printerConfig.usagePaymentId || null;
+  const configuredKitchenPrinter =
+    printerConfig.takeawayLabelPrinterId || printerConfig.usageKitchenId || null;
+  const configuredReceiptOk =
+    !!configuredReceiptPrinter &&
+    !!db
+      .prepare(`SELECT 1 FROM printers WHERE id = ? AND business_id = ? AND is_active = 1 AND type = 'receipt'`)
+      .get(configuredReceiptPrinter, businessId);
+  const configuredKitchenOk =
+    !!configuredKitchenPrinter &&
+    !!db
+      .prepare(`SELECT 1 FROM printers WHERE id = ? AND business_id = ? AND is_active = 1 AND type = 'kitchen'`)
+      .get(configuredKitchenPrinter, businessId);
+
+  const backup = latestBackupInfo();
+  const bridgeCache = getJsonSetting(businessId, DISCOVERY_CACHE_KEY, null);
+  const bridgeReady =
+    bridgeCache?.scanState === 'success' ||
+    (Array.isArray(bridgeCache?.printers) && bridgeCache.printers.length > 0);
+
+  const checks = [
+    {
+      key: 'business',
+      title: 'İşletme bilgileri',
+      status: readinessStatus({ ok: !!business?.name && !!business?.tax_id }),
+      message:
+        business?.name && business?.tax_id
+          ? 'İşletme adı ve vergi bilgisi hazır'
+          : 'İşletme adı ve vergi numarası tamamlanmalı',
+      action: '/settings/business',
+    },
+    {
+      key: 'users',
+      title: 'Yönetici kullanıcı',
+      status: readinessStatus({ ok: counts.activeAdmins >= 1 }),
+      message:
+        counts.activeAdmins >= 1
+          ? `${counts.activeAdmins} aktif yönetici var`
+          : 'En az bir aktif yönetici kullanıcısı gerekli',
+      action: '/settings/users',
+    },
+    {
+      key: 'tables',
+      title: 'Salon ve masa düzeni',
+      status: readinessStatus({ ok: counts.activeAreas >= 1 && counts.activeTables >= 1 }),
+      message:
+        counts.activeAreas >= 1 && counts.activeTables >= 1
+          ? `${counts.activeAreas} bölge, ${counts.activeTables} aktif masa hazır`
+          : 'En az bir bölge ve bir aktif masa gerekli',
+      action: '/settings/dining-areas',
+    },
+    {
+      key: 'menu',
+      title: 'Menü ve ürünler',
+      status: readinessStatus({ ok: counts.activeCategories >= 1 && counts.activeProducts >= 1 }),
+      message:
+        counts.activeCategories >= 1 && counts.activeProducts >= 1
+          ? `${counts.activeCategories} kategori, ${counts.activeProducts} aktif ürün hazır`
+          : 'Sipariş alabilmek için en az bir kategori ve ürün gerekli',
+      action: '/settings/menu',
+    },
+    {
+      key: 'receipt_printer',
+      title: 'Kasa fişi yazıcısı',
+      status: readinessStatus({ ok: counts.receiptPrinters >= 1 && configuredReceiptOk, warning: true }),
+      message:
+        counts.receiptPrinters >= 1 && configuredReceiptOk
+          ? 'Aktif kasa fişi yazıcısı seçilmiş'
+          : 'Aktif bir kasa fişi yazıcısı seçilmeli',
+      action: '/settings/printers',
+    },
+    {
+      key: 'kitchen_printer',
+      title: 'Mutfak yazıcısı',
+      status: readinessStatus({ ok: counts.kitchenPrinters >= 1 && configuredKitchenOk, warning: true }),
+      message:
+        counts.kitchenPrinters >= 1 && configuredKitchenOk
+          ? 'Aktif mutfak yazıcısı seçilmiş'
+          : 'Mutfak akışı için aktif bir mutfak yazıcısı seçilmeli',
+      action: '/settings/printers',
+    },
+    {
+      key: 'backup',
+      title: 'Yerel yedekleme',
+      status: readinessStatus({ ok: backup.configured && !!backup.latest, warning: true }),
+      message: backup.latest
+        ? `Son yedek: ${backup.latest.name}`
+        : backup.message || 'Yedek durumu doğrulanamadı',
+      action: null,
+    },
+    {
+      key: 'storebridge',
+      title: 'StoreBridge yazıcı servisi',
+      status: readinessStatus({ ok: bridgeReady, warning: true }),
+      message: bridgeReady
+        ? 'Yazıcı tarama verisi alındı'
+        : discoveryMessageForState(bridgeCache?.scanState) || 'StoreBridge taraması henüz doğrulanmadı',
+      action: '/settings/printers',
+    },
+  ];
+
+  const blockerCount = checks.filter((c) => c.status === 'blocker').length;
+  const warningCount = checks.filter((c) => c.status === 'warning').length;
+
+  return {
+    completed: !!settings.completedAt,
+    completed_at: settings.completedAt || null,
+    completed_by: settings.completedBy || null,
+    ready: blockerCount === 0,
+    blockerCount,
+    warningCount,
+    checks,
+    counts,
+    backup,
+  };
+}
+
+function getBridgeLogPathCandidates() {
+  const userDataPath = getUserDataPath();
+  if (!userDataPath) return [];
+  const logsDir = path.join(userDataPath, 'logs');
+  return [
+    { path: path.join(logsDir, 'store-bridge.log'), source: 'store-bridge' },
+    { path: path.join(logsDir, 'electron-main.log'), source: 'electron-main' },
+  ];
+}
+
+function readLogTail({ filePath, source, limit = 200 }) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { source, file: path.basename(filePath || ''), exists: false, lines: [] };
+  }
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const allLines = raw.split(/\r?\n/);
+  const filtered = source === 'electron-main'
+    ? allLines.filter((line) => line.includes('[store-bridge]'))
+    : allLines;
+  const token = String(config.bridge?.token || '').trim();
+  const lines = filtered
+    .map((line) => (token ? line.replaceAll(token, '***') : line))
+    .filter(Boolean)
+    .slice(-limit);
+  return {
+    source,
+    file: path.basename(filePath),
+    exists: true,
+    lines,
+  };
+}
+
+function buildStoreBridgeHealth(businessId) {
+  const discovery = getJsonSetting(businessId, DISCOVERY_CACHE_KEY, null);
+  const queueSummary = getPrintJobSummary(businessId);
+  const printerConfig = getJsonSetting(businessId, 'printer.config', {});
+  const configuredPrinters = db
+    .prepare(
+      `SELECT id, type, is_active, print_options
+       FROM printers
+       WHERE business_id = ?
+         AND is_active = 1
+         AND type IN ('receipt', 'kitchen')`,
+    )
+    .all(businessId)
+    .map((row) => mapPrinterRow(row));
+  const discoveredNames = new Set(
+    (Array.isArray(discovery?.printers) ? discovery.printers : [])
+      .map((printer) => String(printer?.name || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const selectedPhysicalNames = configuredPrinters
+    .map((printer) => ({
+      type: printer.type,
+      physicalName: String(printer?.print_options?.device?.physicalName || '').trim(),
+    }))
+    .filter((item) => item.physicalName);
+  const missingConfiguredPhysical = selectedPhysicalNames.filter(
+    (item) => discoveredNames.size > 0 && !discoveredNames.has(item.physicalName.toLowerCase()),
+  );
+  const latestFailedJob = db
+    .prepare(
+      `SELECT id, printer_id, error_message, last_error_code, created_at, last_attempt_at
+       FROM print_jobs
+       WHERE business_id = ? AND status = 'failed'
+       ORDER BY datetime(COALESCE(last_attempt_at, created_at)) DESC
+       LIMIT 1`,
+    )
+    .get(businessId);
+  const latestJob = db
+    .prepare(
+      `SELECT id, status, created_at, printed_at, last_attempt_at, last_error_code
+       FROM print_jobs
+       WHERE business_id = ?
+       ORDER BY datetime(COALESCE(last_attempt_at, printed_at, created_at)) DESC
+       LIMIT 1`,
+    )
+    .get(businessId);
+  const bridgeConfigured = !!config.bridge?.token && !!config.bridge?.businessId;
+  const scanState = resolveDiscoveryState(discovery, Array.isArray(discovery?.printers) ? discovery.printers : []);
+
+  let status = 'ok';
+  let message = 'StoreBridge görünümü sağlıklı.';
+  if (!bridgeConfigured) {
+    status = 'unconfigured';
+    message = 'Bridge yapılandırması eksik.';
+  } else if (scanState === 'bridge_unreachable' || scanState === 'auth_error') {
+    status = 'down';
+    message = discoveryMessageForState(scanState) || 'StoreBridge servisine ulaşılamadı.';
+  } else if (
+    scanState === 'never_scanned' ||
+    scanState === 'scanning' ||
+    queueSummary.failed > 0 ||
+    queueSummary.stale_claimed > 0 ||
+    missingConfiguredPhysical.length > 0 ||
+    scanState === 'empty'
+  ) {
+    status = 'degraded';
+    message = latestFailedJob?.last_error_code
+      ? `Son yazdırma hatası: ${latestFailedJob.last_error_code}`
+      : discoveryMessageForState(scanState) || 'StoreBridge dikkat gerektiriyor.';
+  }
+
+  const lastSeenAt = discovery?.updatedAt || null;
+  const logs = getBridgeLogPathCandidates().map(({ path: filePath, source }) => ({
+    source,
+    file: path.basename(filePath),
+    exists: fs.existsSync(filePath),
+  }));
+
+  return {
+    status,
+    running: status === 'ok' || status === 'degraded',
+    configured: bridgeConfigured,
+    message,
+    scanState,
+    lastSeenAt,
+    lastJobAt: latestJob?.created_at || null,
+    lastAttemptAt: latestJob?.last_attempt_at || null,
+    queueSummary,
+    lastErrorCode: latestFailedJob?.last_error_code || discovery?.lastErrorCode || null,
+    discovery: {
+      available: Array.isArray(discovery?.printers) && discovery.printers.length > 0,
+      updatedAt: discovery?.updatedAt || null,
+      printerCount: Array.isArray(discovery?.printers) ? discovery.printers.length : 0,
+      printers: Array.isArray(discovery?.printers) ? discovery.printers : [],
+      lastErrorCode: discovery?.lastErrorCode || null,
+    },
+    selectedPrinters: {
+      receiptPrinterId: printerConfig.defaultPrinterId || printerConfig.usagePaymentId || null,
+      kitchenPrinterId: printerConfig.takeawayLabelPrinterId || printerConfig.usageKitchenId || null,
+      missingConfiguredPhysical,
+    },
+    latestFailedJob: latestFailedJob || null,
+    logs,
+  };
+}
+
+router.get('/desktop-readiness', (req, res) => {
+  try {
+    res.json(buildDesktopReadiness(req.businessId));
+  } catch (err) {
+    console.error('[admin:desktop-readiness:get]', err);
+    res.status(500).json({ error: 'Kurulum durumu alınamadı' });
+  }
+});
+
+router.post('/desktop-readiness/complete', (req, res) => {
+  try {
+    const readiness = buildDesktopReadiness(req.businessId);
+    if (!readiness.ready) {
+      return res.status(409).json({
+        error: 'Kurulum tamamlanmadan önce bloklayıcı eksikler giderilmeli',
+        readiness,
+      });
+    }
+
+    const setup = {
+      completedAt: new Date().toISOString(),
+      completedBy: req.user.id,
+    };
+    upsertSetting(req.businessId, 'app.setup', setup);
+    auditLog(req.businessId, req.user.id, 'desktop_setup_complete', 'settings', 'app.setup', {
+      warningCount: readiness.warningCount,
+    });
+    res.json({ ...buildDesktopReadiness(req.businessId), message: 'Kurulum kontrolü tamamlandı' });
+  } catch (err) {
+    console.error('[admin:desktop-readiness:complete]', err);
+    res.status(500).json({ error: 'Kurulum tamamlanamadı' });
+  }
+});
+
+router.get('/storebridge/health', (req, res) => {
+  try {
+    res.json(buildStoreBridgeHealth(req.businessId));
+  } catch (err) {
+    console.error('[admin:storebridge:health]', err);
+    res.status(500).json({ error: 'StoreBridge sağlık durumu alınamadı' });
+  }
+});
+
+router.get('/storebridge/logs', (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '200', 10) || 200, 10), 1000);
+    const candidates = getBridgeLogPathCandidates();
+    const primary = candidates.find((candidate) => fs.existsSync(candidate.path)) || candidates[0];
+    const log = readLogTail({ filePath: primary?.path, source: primary?.source || 'store-bridge', limit });
+    res.json({
+      source: log.source,
+      file: log.file,
+      exists: log.exists,
+      lines: log.lines,
+    });
+  } catch (err) {
+    console.error('[admin:storebridge:logs]', err);
+    res.status(500).json({ error: 'StoreBridge logları alınamadı' });
+  }
+});
+
+router.get('/maintenance/open-orders', (req, res) => {
+  try {
+    const row = db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM orders
+         WHERE business_id = ? AND status NOT IN (${ORDER_STATUSES_CLOSED.map(() => '?').join(',')})`,
+      )
+      .get(req.businessId, ...ORDER_STATUSES_CLOSED);
+    res.json({ openOrderCount: row?.c ?? 0 });
+  } catch (err) {
+    console.error('[admin:maintenance:open-orders]', err);
+    res.status(500).json({ error: 'Açık sipariş sayısı alınamadı' });
+  }
+});
+
+router.get('/maintenance', (req, res) => {
+  try {
+    const backups = listBackupFiles();
+    const latest = backups[0] || null;
+    res.json({
+      dbPath: config.db?.path || null,
+      userDataPath: getUserDataPath() || null,
+      backupsDir: getBackupsDir() || null,
+      backups,
+      latest,
+      pendingRestore: readRestoreRequest(),
+    });
+  } catch (err) {
+    console.error('[admin:maintenance:get]', err);
+    res.status(500).json({ error: 'Bakım durumu alınamadı' });
+  }
+});
+
+router.post('/maintenance/backups', async (req, res) => {
+  try {
+    const backup = await createManualBackup();
+    auditLog(req.businessId, req.user.id, 'manual_backup_created', 'backup', backup.id);
+    res.status(201).json({
+      backup,
+      backups: listBackupFiles(),
+      message: 'Manuel yedek alındı',
+    });
+  } catch (err) {
+    console.error('[admin:maintenance:backup]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Yedek alınamadı' });
+  }
+});
+
+router.post('/maintenance/restore-request', (req, res) => {
+  try {
+    const request = writeRestoreRequest({
+      businessId: req.businessId,
+      userId: req.user.id,
+      backupId: req.body?.backup_id,
+    });
+    auditLog(req.businessId, req.user.id, 'restore_requested', 'backup', request.backupFile);
+    res.json({
+      pendingRestore: request,
+      message: 'Restore isteği kaydedildi. Uygulamayı yeniden başlatınca seçilen yedek uygulanacak.',
+    });
+  } catch (err) {
+    console.error('[admin:maintenance:restore-request]', err);
+    res.status(err.status || 500).json({ error: err.message || 'Restore isteği kaydedilemedi' });
+  }
+});
+
+router.delete('/maintenance/restore-request', (req, res) => {
+  try {
+    const restorePath = getRestoreRequestPath();
+    if (restorePath && fs.existsSync(restorePath)) {
+      fs.unlinkSync(restorePath);
+      auditLog(req.businessId, req.user.id, 'restore_request_cancelled', 'backup', 'restore-request');
+    }
+    res.json({ pendingRestore: null, message: 'Bekleyen restore isteği iptal edildi' });
+  } catch (err) {
+    console.error('[admin:maintenance:restore-cancel]', err);
+    res.status(500).json({ error: 'Restore isteği iptal edilemedi' });
+  }
+});
+
 // ── Business ──
 router.get('/business', (req, res) => {
   try {
@@ -382,7 +1091,7 @@ router.get('/business', (req, res) => {
     if (!b) return res.status(404).json({ error: 'İşletme bulunamadı' });
     res.json({ business: b });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:business:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -393,10 +1102,12 @@ router.patch('/business', (req, res) => {
     const n = (name ?? '').trim();
     if (!n) return res.status(400).json({ error: 'İşletme adı boş olamaz' });
     const tax = (tax_id ?? '').trim();
-    if (!tax) return res.status(400).json({ error: 'Vergi numarası zorunludur' });
-    if (tax.length < 5 || !/^[\dA-Za-z]+$/.test(tax)) {
+    if (tax && (tax.length < 5 || !/^[\dA-Za-z]+$/.test(tax))) {
       return res.status(400).json({ error: 'Vergi numarası en az 5 karakter ve yalnızca harf/rakam olmalıdır' });
     }
+    const beforeBusiness = db.prepare(
+      `SELECT id, name, address, tax_id, receipt_header, phone, receipt_footer FROM businesses WHERE id = ?`,
+    ).get(req.businessId);
     db.prepare(
       `UPDATE businesses SET name = ?, address = ?, tax_id = ?, receipt_header = ?, phone = ?, receipt_footer = ?, updated_at = datetime('now')
        WHERE id = ?`,
@@ -413,9 +1124,19 @@ router.patch('/business', (req, res) => {
     const b = db.prepare(
       `SELECT id, name, address, tax_id, receipt_header, phone, tax_office, receipt_footer FROM businesses WHERE id = ?`,
     ).get(req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'businesses',
+      entityId: req.businessId,
+      action: 'update',
+      before: beforeBusiness,
+      after: b,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ business: b, message: 'İşletme bilgileri kaydedildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:business:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -441,7 +1162,7 @@ router.patch('/display-settings', (req, res) => {
     auditLog(req.businessId, req.user.id, 'update_display', 'settings', 'app.display');
     res.json({ display: next, message: 'Ekran ayarları kaydedildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:display-settings:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -467,7 +1188,7 @@ router.get('/printer-settings', (req, res) => {
     const config = { ...defaults, ...stored };
     res.json({ printers, config });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printer-settings:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -503,7 +1224,7 @@ router.get('/printers/discovered', (req, res) => {
       message: discoveryMessageForState(scanState),
     });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:discovered]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -611,7 +1332,7 @@ router.patch('/printer-settings', (req, res) => {
     auditLog(req.businessId, req.user.id, 'update_printer_settings', 'settings', 'printer.config');
     res.json({ config, message: 'Yazıcı ayarları kaydedildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printer-settings:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -654,9 +1375,18 @@ router.post('/printers', (req, res) => {
     const row = db
       .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
       .get(id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printers',
+      entityId: id,
+      action: 'create',
+      after: mapPrinterRow(row),
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json({ printer: mapPrinterRow(row), message: 'Yazıcı oluşturuldu' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:create]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -671,8 +1401,8 @@ router.post('/printers/preview', (req, res) => {
     const lines = getPrinterPreviewPlainLines(type, line_width ?? undefined, print_options || {});
     res.json({ lines });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    console.error('[admin] Yazıcı önizleme hatası:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
@@ -682,7 +1412,7 @@ router.get('/printers/:id/delete-eligibility', (req, res) => {
     if (!el) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
     res.json(el);
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:eligibility]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -695,7 +1425,7 @@ router.get('/printers/:id', (req, res) => {
     if (!row) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
     res.json({ printer: mapPrinterRow(row) });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -780,9 +1510,19 @@ router.patch('/printers/:id', (req, res) => {
     const row = db
       .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
       .get(req.params.id, req.businessId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printers',
+      entityId: req.params.id,
+      action: 'update',
+      before: mapPrinterRow(existing),
+      after: mapPrinterRow(row),
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ printer: mapPrinterRow(row), message: responseMessage });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -791,6 +1531,9 @@ router.delete('/printers/:id', (req, res) => {
   try {
     const el = getPrinterDeleteEligibility(req.businessId, req.params.id);
     if (!el) return res.status(404).json({ error: 'Yazıcı bulunamadı' });
+    const printerBeforeDelete = db
+      .prepare(`SELECT * FROM printers WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
     if (!el.canHardDelete) {
       return res.status(400).json({
         error: 'Bu yazıcı şu an kalıcı olarak silinemez.',
@@ -801,6 +1544,10 @@ router.delete('/printers/:id', (req, res) => {
 
     db.transaction(() => {
       db.prepare(`DELETE FROM printer_routing WHERE business_id = ? AND printer_id = ?`).run(req.businessId, req.params.id);
+      db.prepare(`DELETE FROM print_jobs WHERE business_id = ? AND printer_id = ? AND status = 'pending'`).run(
+        req.businessId,
+        req.params.id,
+      );
       db.prepare(`UPDATE print_jobs SET printer_id = NULL WHERE business_id = ? AND printer_id = ?`).run(
         req.businessId,
         req.params.id,
@@ -814,10 +1561,19 @@ router.delete('/printers/:id', (req, res) => {
     })();
 
     auditLog(req.businessId, req.user.id, 'delete_printer', 'printer', req.params.id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printers',
+      entityId: req.params.id,
+      action: 'delete',
+      before: printerBeforeDelete ? mapPrinterRow(printerBeforeDelete) : null,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ message: 'Yazıcı kalıcı olarak silindi' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    console.error('[admin:printers:delete]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 
@@ -826,13 +1582,52 @@ router.get('/print-jobs', (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit || '30', 10) || 30, 1), 100);
     const jobs = db
       .prepare(
-        `SELECT id, order_id, printer_id, job_type, status, error_message, idempotency_key, created_at, printed_at, payload
+        `SELECT id, order_id, printer_id, job_type, status, error_message, idempotency_key, created_at, printed_at,
+                claimed_at, claimed_by, claimed_until, attempt_count, last_attempt_at, last_error_code, payload
          FROM print_jobs WHERE business_id = ? ORDER BY datetime(created_at) DESC LIMIT ?`,
       )
       .all(req.businessId, limit);
-    res.json({ jobs });
+    res.json({ jobs, summary: getPrintJobSummary(req.businessId) });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:print-jobs:list]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+router.post('/print-jobs/:id/retry', (req, res) => {
+  try {
+    const job = db
+      .prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`)
+      .get(req.params.id, req.businessId);
+    if (!job) return res.status(404).json({ error: 'Yazdırma işi bulunamadı' });
+    if (job.status !== 'failed') {
+      return res.status(409).json({
+        error: 'Yalnızca başarısız yazdırma işleri yeniden kuyruğa alınabilir',
+        status: job.status,
+      });
+    }
+
+    db.prepare(
+      `UPDATE print_jobs
+       SET status = 'pending',
+           error_message = NULL,
+           last_error_code = NULL,
+           claimed_at = NULL,
+           claimed_by = NULL,
+           claimed_until = NULL,
+           printed_at = NULL
+       WHERE id = ? AND business_id = ?`,
+    ).run(req.params.id, req.businessId);
+
+    auditLog(req.businessId, req.user.id, 'print_job_retry', 'print_job', req.params.id, {
+      previous_error_code: job.last_error_code || null,
+      attempt_count: Number(job.attempt_count) || 0,
+    });
+
+    const updated = db.prepare(`SELECT * FROM print_jobs WHERE id = ? AND business_id = ?`).get(req.params.id, req.businessId);
+    res.json({ job: updated, message: 'Yazdırma işi yeniden kuyruğa alındı' });
+  } catch (err) {
+    console.error('[admin:print-jobs:retry]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -859,7 +1654,7 @@ router.get('/printer-routing', (req, res) => {
 
     res.json({ categories, printers, assignments });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printer-routing:get]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -908,17 +1703,28 @@ router.patch('/printer-routing', (req, res) => {
       }
     });
 
+    const beforeRouting = db.prepare(`SELECT category_id, printer_id FROM printer_routing WHERE business_id = ?`).all(req.businessId);
     run();
     auditLog(req.businessId, req.user.id, 'update_printer_routing', 'settings', 'printer_routing');
 
     const routingRows = db.prepare(`SELECT id, category_id, printer_id FROM printer_routing WHERE business_id = ?`).all(req.businessId);
     const assignmentsOut = routingRows.map((r) => ({ category_id: r.category_id, printer_id: r.printer_id }));
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'printer_routing',
+      entityId: 'printer_routing',
+      action: 'update',
+      before: { assignments: beforeRouting },
+      after: { assignments: assignmentsOut },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ assignments: assignmentsOut, message: 'Yazıcı yönlendirmesi kaydedildi' });
   } catch (err) {
     if (err.status === 400) {
       return res.status(400).json({ error: err.message });
     }
-    console.error(err);
+    console.error('[admin:printer-routing:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -970,7 +1776,7 @@ router.post('/printers/test', (req, res) => {
       message: `Test çıktısı kuyruğa alındı: ${p.name}`,
     });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:printers:test]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1000,7 +1806,7 @@ router.get('/users', (req, res) => {
       .all(req.businessId);
     res.json({ users });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:users:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1013,7 +1819,9 @@ router.post('/users', (req, res) => {
     const em = (email ?? '').toLowerCase().trim();
     if (!emailRe.test(em)) return res.status(400).json({ error: 'Geçerli bir e-posta girin' });
     const pw = password ?? '';
-    if (!pw || pw.length < 4) return res.status(400).json({ error: 'Şifre en az 4 karakter olmalıdır' });
+    // Şifre politikası (FAZ 0 — 0.5): min 8 karakter, büyük harf, rakam.
+    const pwErr = validatePassword(pw);
+    if (pwErr) return res.status(400).json({ error: pwErr });
     const role = db
       .prepare(`SELECT id FROM roles WHERE business_id = ? AND slug = ?`)
       .get(req.businessId, role_slug || 'waiter');
@@ -1028,9 +1836,10 @@ router.post('/users', (req, res) => {
       const b = db.prepare(`SELECT id FROM branches WHERE business_id = ? LIMIT 1`).get(req.businessId);
       branchId = b?.id || null;
     }
+    // Yeni kullanıcı ilk login'de şifreyi değiştirmek zorunda (geçici şifre modeli).
     db.prepare(
-      `INSERT INTO users (id, business_id, branch_id, role_id, email, password_hash, full_name, is_active, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      `INSERT INTO users (id, business_id, branch_id, role_id, email, password_hash, full_name, is_active, must_change_password, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
     ).run(id, req.businessId, branchId, role.id, em, hash, fn, active);
     auditLog(req.businessId, req.user.id, 'create_user', 'user', id);
     const u = db
@@ -1039,9 +1848,18 @@ router.post('/users', (req, res) => {
          FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
       )
       .get(id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'users',
+      entityId: id,
+      action: 'create',
+      after: u,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.status(201).json({ user: u, message: 'Kullanıcı oluşturuldu' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:users:create]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1083,12 +1901,26 @@ router.patch('/users/:id', (req, res) => {
     if (userId === req.user.id && !nextActive) {
       return res.status(400).json({ error: 'Kendi hesabınızı pasifleştiremezsiniz' });
     }
-    const hash = password && String(password).length > 0 ? bcryptjs.hashSync(password, 10) : null;
+    // Şifre güncelleme: verilmişse politika kontrolü yap (min 8, büyük harf, rakam).
+    // Admin başka bir kullanıcının şifresini resetlediğinde o kullanıcı ilk login'de
+    // tekrar değiştirmek zorunda (must_change_password=1). Kullanıcı kendi şifresini
+    // değiştiriyorsa flag ezilmez — /auth/change-password akışı bunu sıfırlar.
+    let pwStr = null;
+    if (password !== undefined && password !== null) {
+      const trimmed = String(password).trim();
+      if (trimmed.length > 0) {
+        const pwErr = validatePassword(trimmed);
+        if (pwErr) return res.status(400).json({ error: pwErr });
+        pwStr = trimmed;
+      }
+    }
+    const hash = pwStr ? bcryptjs.hashSync(pwStr, 10) : null;
     if (hash) {
+      const forceChange = userId !== req.user.id ? 1 : 0;
       db.prepare(
-        `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, password_hash = ?, updated_at = datetime('now')
+        `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, password_hash = ?, must_change_password = ?, updated_at = datetime('now')
          WHERE id = ? AND business_id = ?`,
-      ).run(fn, em, roleId, nextActive, hash, userId, req.businessId);
+      ).run(fn, em, roleId, nextActive, hash, forceChange, userId, req.businessId);
     } else {
       db.prepare(
         `UPDATE users SET full_name = ?, email = ?, role_id = ?, is_active = ?, updated_at = datetime('now')
@@ -1102,9 +1934,20 @@ router.patch('/users/:id', (req, res) => {
          FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
       )
       .get(userId);
+    const { password_hash: _ph, ...rowSnapshot } = row;
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'users',
+      entityId: userId,
+      action: 'update',
+      before: rowSnapshot,
+      after: u,
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ user: u, message: 'Kullanıcı güncellendi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:users:delete]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1119,14 +1962,25 @@ router.delete('/users/:id', (req, res) => {
     if (getUserRoleSlug(userId) === 'admin' && countActiveAdmins(req.businessId) <= 1) {
       return res.status(400).json({ error: 'Son yönetici kaldırılamaz' });
     }
+    const { password_hash: _dph, ...deactivatedSnapshot } = row;
     db.prepare(`UPDATE users SET is_active = 0, updated_at = datetime('now') WHERE id = ? AND business_id = ?`).run(
       userId,
       req.businessId,
     );
     auditLog(req.businessId, req.user.id, 'deactivate_user', 'user', userId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'users',
+      entityId: userId,
+      action: 'deactivate',
+      before: deactivatedSnapshot,
+      after: { ...deactivatedSnapshot, is_active: 0 },
+      actorUserId: req.user.id,
+      requestId: req.requestId,
+    });
     res.json({ message: 'Kullanıcı pasifleştirildi' });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1145,7 +1999,7 @@ router.get('/dining-areas', (req, res) => {
       .all(req.businessId);
     res.json({ areas });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:list]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1202,7 +2056,7 @@ router.post('/dining-areas', (req, res) => {
     const area = db.prepare(`SELECT * FROM dining_areas WHERE id = ?`).get(id);
     res.status(201).json({ area });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:update]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1238,7 +2092,7 @@ router.patch('/dining-areas/:id', (req, res) => {
     const updated = db.prepare(`SELECT * FROM dining_areas WHERE id = ?`).get(area.id);
     res.json({ area: updated });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:delete]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1268,7 +2122,7 @@ router.delete('/dining-areas/:id', (req, res) => {
     auditLog(req.businessId, req.user.id, 'dining_area_delete', 'dining_area', area.id, {});
     res.json({ success: true });
   } catch (err) {
-    console.error(err);
+    console.error('[admin:dining-areas:sync-tables]', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
@@ -1403,8 +2257,235 @@ router.post('/dining-areas/:areaId/sync-tables', (req, res) => {
       .get(area.id, req.businessId).c;
     res.json({ success: true, target_table_count: target, active_table_count: activeCount });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || 'Sunucu hatası' });
+    console.error('[admin:dining-areas:sync-tables]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Support Bundle ──────────────────────────────────────────────────────────
+// GET /admin/support-bundle
+// Returns a JSON payload with system info, print queue summary, last failed
+// jobs, recent audit log, backup summary and log tails — suitable for
+// attaching to a support ticket or exporting from the maintenance UI.
+router.get('/support-bundle', (req, res) => {
+  try {
+    const userDataPath = getUserDataPath();
+    const dbPath = config.db?.path || null;
+    const backupsDir = getBackupsDir();
+
+    // DB file size
+    let dbSizeBytes = null;
+    try {
+      if (dbPath && fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
+    } catch { /* ignore */ }
+
+    // Print queue counts + last 5 failed jobs
+    const queueSummary = getPrintJobSummary(req.businessId);
+    const recentFailedJobs = db
+      .prepare(
+        `SELECT id, printer_id, status, last_error_code, error_message,
+                created_at, last_attempt_at, attempt_count
+         FROM print_jobs
+         WHERE business_id = ? AND status = 'failed'
+         ORDER BY datetime(COALESCE(last_attempt_at, created_at)) DESC
+         LIMIT 10`,
+      )
+      .all(req.businessId);
+
+    // Recent audit log (last 30 entries)
+    const recentAudit = db
+      .prepare(
+        `SELECT action, entity_type, entity_id, created_at
+         FROM audit_logs
+         WHERE business_id = ?
+         ORDER BY id DESC
+         LIMIT 30`,
+      )
+      .all(req.businessId);
+
+    // Backup summary
+    const backups = listBackupFiles();
+    const latestBackup = backups[0] || null;
+
+    // Bridge health
+    const bridgeHealth = buildStoreBridgeHealth(req.businessId);
+
+    // Log tails — electron-main (full, last 100 lines) + store-bridge (last 150 lines)
+    const logsDir = userDataPath ? path.join(userDataPath, 'logs') : null;
+    const token = String(config.bridge?.token || '').trim();
+
+    function readRawTail(filePath, limit) {
+      if (!filePath || !fs.existsSync(filePath)) return { exists: false, lines: [] };
+      const raw = fs.readFileSync(filePath, 'utf8');
+      const lines = raw
+        .split(/\r?\n/)
+        .map((l) => (token ? l.replaceAll(token, '***') : l))
+        .filter(Boolean)
+        .slice(-limit);
+      return { exists: true, lines };
+    }
+
+    const electronLog = logsDir
+      ? readRawTail(path.join(logsDir, 'electron-main.log'), 100)
+      : { exists: false, lines: [] };
+    const bridgeLog = logsDir
+      ? readRawTail(path.join(logsDir, 'store-bridge.log'), 150)
+      : { exists: false, lines: [] };
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      system: {
+        nodeVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        userDataPath: userDataPath || null,
+        dbPath,
+        dbSizeBytes,
+        backupsDir: backupsDir || null,
+        backupCount: backups.length,
+        latestBackup: latestBackup
+          ? { name: latestBackup.name, modified_at: latestBackup.modified_at, size: latestBackup.size }
+          : null,
+      },
+      bridge: {
+        status: bridgeHealth.status,
+        message: bridgeHealth.message,
+        scanState: bridgeHealth.scanState,
+        lastSeenAt: bridgeHealth.lastSeenAt,
+        lastErrorCode: bridgeHealth.lastErrorCode,
+        discoveredPrinters: bridgeHealth.discovery?.printerCount ?? 0,
+      },
+      printQueue: {
+        summary: queueSummary,
+        recentFailedJobs,
+      },
+      recentAudit,
+      logs: {
+        electronMain: electronLog,
+        storeBridge: bridgeLog,
+      },
+    });
+  } catch (err) {
+    console.error('[admin:support-bundle]', err);
+    res.status(500).json({ error: 'Destek paketi oluşturulamadı' });
+  }
+});
+
+// ── Audit log viewer ──
+router.get('/entity-mutations', (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit || '50', 10) || 50, 1), 200);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
+    const entityTable = req.query.entity_table || null;
+    const action = req.query.action || null;
+    const actorUserId = req.query.actor_user_id || null;
+    const entityId = req.query.entity_id || null;
+    const fromTs = req.query.from || null;
+    const toTs = req.query.to || null;
+
+    let where = 'WHERE m.business_id = ?';
+    const params = [req.businessId];
+    if (entityTable) { where += ' AND m.entity_table = ?'; params.push(entityTable); }
+    if (action) { where += ' AND m.action = ?'; params.push(action); }
+    if (actorUserId) { where += ' AND m.actor_user_id = ?'; params.push(actorUserId); }
+    if (entityId) { where += ' AND m.entity_id = ?'; params.push(entityId); }
+    if (fromTs) { where += ' AND m.created_at >= ?'; params.push(fromTs); }
+    if (toTs) { where += ' AND m.created_at <= ?'; params.push(toTs); }
+
+    const rows = db.prepare(`
+      SELECT m.id, m.entity_table, m.entity_id, m.action,
+             m.before_json, m.after_json, m.reason, m.request_id, m.source,
+             m.created_at, u.full_name AS actor_name
+      FROM entity_mutations m
+      LEFT JOIN users u ON m.actor_user_id = u.id
+      ${where}
+      ORDER BY m.created_at DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset);
+
+    const total = db.prepare(`SELECT COUNT(*) as c FROM entity_mutations m ${where}`).get(...params).c;
+
+    const mutations = rows.map((r) => ({
+      ...r,
+      before_json: r.before_json ? JSON.parse(r.before_json) : null,
+      after_json: r.after_json ? JSON.parse(r.after_json) : null,
+    }));
+
+    res.json({ mutations, total, limit, offset });
+  } catch (err) {
+    console.error('[admin:entity-mutations:list]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// ── Device management ──────────────────────────────────────────────────────
+
+// GET /api/admin/devices — tüm kayıtlı cihazlar
+router.get('/devices', (req, res) => {
+  try {
+    const devices = db.prepare(`
+      SELECT d.id, d.device_name, d.platform, d.is_active, d.last_seen_at, d.created_at,
+             u.full_name AS user_name, u.email AS user_email
+      FROM devices d
+      JOIN users u ON d.user_id = u.id
+      WHERE d.business_id = ?
+      ORDER BY d.created_at DESC
+    `).all(req.businessId);
+    res.json(devices);
+  } catch (err) {
+    console.error('[admin:devices:list]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/admin/devices/pairing-token — eşleştirme kodu üret (10 dk geçerli)
+router.post('/devices/pairing-token', (req, res) => {
+  try {
+    // Süresi dolmuş tokenları temizle
+    db.prepare(`DELETE FROM device_pairing_tokens WHERE business_id = ? AND expires_at < datetime('now')`).run(req.businessId);
+
+    const token = crypto.randomBytes(4).toString('hex').toUpperCase(); // 8 karakter
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+
+    db.prepare(`
+      INSERT INTO device_pairing_tokens (id, business_id, token, expires_at)
+      VALUES (?, ?, ?, ?)
+    `).run(genId(), req.businessId, token, expiresAt);
+
+    res.json({ token, expires_at: expiresAt });
+  } catch (err) {
+    console.error('[admin:devices:pairing-token]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// PATCH /api/admin/devices/:id — cihazı aktif/pasif yap
+router.patch('/devices/:id', (req, res) => {
+  try {
+    const device = db.prepare('SELECT * FROM devices WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!device) return res.status(404).json({ error: 'Cihaz bulunamadı' });
+
+    const isActive = req.body.is_active === true ? 1 : 0;
+    db.prepare(`UPDATE devices SET is_active = ?, last_seen_at = last_seen_at WHERE id = ?`).run(isActive, req.params.id);
+
+    res.json(db.prepare('SELECT * FROM devices WHERE id = ?').get(req.params.id));
+  } catch (err) {
+    console.error('[admin:devices:patch]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// DELETE /api/admin/devices/:id — cihazı kaldır
+router.delete('/devices/:id', (req, res) => {
+  try {
+    const device = db.prepare('SELECT * FROM devices WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!device) return res.status(404).json({ error: 'Cihaz bulunamadı' });
+
+    db.prepare('DELETE FROM devices WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[admin:devices:delete]', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
   }
 });
 

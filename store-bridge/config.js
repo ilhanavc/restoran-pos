@@ -4,6 +4,7 @@
  *
  * store-bridge:
  *   POLL_INTERVAL_MS, BRIDGE_DRY_RUN=1 (yazıcıya göndermeden printed işaretle)
+ *   BRIDGE_API_TIMEOUT_MS=8000, BRIDGE_HEALTH_RETRY_MS=3000
  *
  * CID812:
  *   CID812_ENABLED=0|1
@@ -20,6 +21,9 @@
  *   CID812_ENABLE_PARSE=0|1 (varsayılan 0)
  *   CID812_PHONE_REGEX=... (varsa parse denenecek; tipik olarak tek capture grubu = numara)
  *   CID812_DEBOUNCE_MS=3500
+ *   CID812_POST_RETRY_ATTEMPTS=3
+ *   CID812_POST_RETRY_MS=1500
+ *   CID812_POST_QUEUE_MAX=25
  *   CID812_LOG_HEX=0|1
  *   CID812_TRACE_MODE=0|1
  *   CID812_TRACE_OFFSETS=18-21,29-31,51-53,63
@@ -50,6 +54,8 @@ export function loadConfig() {
   const token = req('BRIDGE_TOKEN');
   const businessId = req('BRIDGE_BUSINESS_ID');
   const pollIntervalMs = Math.max(500, parseInt(req('POLL_INTERVAL_MS', '2000'), 10) || 2000);
+  const apiTimeoutMs = Math.max(1000, parseInt(req('BRIDGE_API_TIMEOUT_MS', '8000'), 10) || 8000);
+  const healthRetryMs = Math.max(1000, parseInt(req('BRIDGE_HEALTH_RETRY_MS', '3000'), 10) || 3000);
   const discoveryPollIntervalMs = Math.max(
     2000,
     parseInt(req('DISCOVERY_POLL_INTERVAL_MS', '5000'), 10) || 5000,
@@ -83,6 +89,9 @@ export function loadConfig() {
 
   const cid812EnableParse = req('CID812_ENABLE_PARSE') === '1' || req('CID812_ENABLE_PARSE') === 'true';
   const cid812DebounceMs = Math.max(500, parseInt(req('CID812_DEBOUNCE_MS', '3500'), 10) || 3500);
+  const cid812PostRetryAttempts = Math.max(1, parseInt(req('CID812_POST_RETRY_ATTEMPTS', '3'), 10) || 3);
+  const cid812PostRetryMs = Math.max(500, parseInt(req('CID812_POST_RETRY_MS', '1500'), 10) || 1500);
+  const cid812PostQueueMax = Math.max(1, parseInt(req('CID812_POST_QUEUE_MAX', '25'), 10) || 25);
   const cid812PhoneRegex = req('CID812_PHONE_REGEX', '');
   const cid812LogHex = req('CID812_LOG_HEX') === '1' || req('CID812_LOG_HEX') === 'true';
   const cid812TraceMode = req('CID812_TRACE_MODE') === '1' || req('CID812_TRACE_MODE') === 'true';
@@ -128,6 +137,8 @@ export function loadConfig() {
     token,
     businessId,
     pollIntervalMs,
+    apiTimeoutMs,
+    healthRetryMs,
     discoveryPollIntervalMs,
     dryRun,
     claimId,
@@ -145,6 +156,9 @@ export function loadConfig() {
     cid812ReconnectIntervalMs,
     cid812EnableParse,
     cid812DebounceMs,
+    cid812PostRetryAttempts,
+    cid812PostRetryMs,
+    cid812PostQueueMax,
     cid812PhoneRegex,
     cid812LogHex,
     cid812TraceMode,

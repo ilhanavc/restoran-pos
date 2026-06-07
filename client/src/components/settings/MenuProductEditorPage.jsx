@@ -38,6 +38,10 @@ export default function MenuProductEditorPage() {
   const [comboChildId, setComboChildId] = useState('');
   const [comboQty, setComboQty] = useState(1);
   const [comboLoading, setComboLoading] = useState(false);
+  const [assignedGroups, setAssignedGroups] = useState([]);
+  const [allAttributeGroups, setAllAttributeGroups] = useState([]);
+  const [selectedGroupId, setSelectedGroupId] = useState('');
+  const [attributeAssigning, setAttributeAssigning] = useState(false);
   const imageInputRef = useRef(null);
 
   const defaultCategoryFromNav = location.state?.defaultCategoryId;
@@ -104,13 +108,48 @@ export default function MenuProductEditorPage() {
     return () => {
       cancelled = true;
     };
-  }, [isNew, productId, defaultCategoryFromNav, navigate]);
+  }, [isNew, productId, defaultCategoryFromNav, navigate, error]);
 
   // Load all products for combo picker (edit mode only)
   useEffect(() => {
     if (isNew) return;
     api.getProducts({ include_deleted: 0 }).then(setAllProducts).catch(() => {});
   }, [isNew]);
+
+  // Load attribute groups
+  useEffect(() => {
+    api.getAttributeGroups().then(setAllAttributeGroups).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (isNew || !productId) return;
+    api.getProductAttributeGroups(productId).then(setAssignedGroups).catch(() => {});
+  }, [isNew, productId]);
+
+  const handleAssignGroup = async () => {
+    if (!selectedGroupId) return;
+    setAttributeAssigning(true);
+    try {
+      await api.assignAttributeToProduct(productId, selectedGroupId);
+      const updated = await api.getProductAttributeGroups(productId);
+      setAssignedGroups(updated);
+      setSelectedGroupId('');
+      success('Özellik grubu eklendi');
+    } catch (e) {
+      error(e.message || 'Eklenemedi');
+    } finally {
+      setAttributeAssigning(false);
+    }
+  };
+
+  const handleRemoveGroup = async (groupId) => {
+    try {
+      await api.removeAttributeFromProduct(productId, groupId);
+      setAssignedGroups((prev) => prev.filter((g) => g.id !== groupId));
+    } catch (e) {
+      error(e.message || 'Kaldırılamadı');
+    }
+  };
 
   useEffect(() => {
     if (!isNew || categoryId) return;
@@ -131,13 +170,15 @@ export default function MenuProductEditorPage() {
   };
 
   const addPortion = () => {
-    setPortions((prev) => {
-      const n = prev.length + 1;
-      const row = { key: `p${Date.now()}`, label: `Porsiyon ${n}`, price: '', is_default: false };
-      const next = [...prev, row];
-      setActivePortionIdx(next.length - 1);
-      return next;
-    });
+    const nextIndex = portions.length;
+    const row = {
+      key: `p${Date.now()}`,
+      label: `Porsiyon ${nextIndex + 1}`,
+      price: '',
+      is_default: false,
+    };
+    setPortions((prev) => [...prev, row]);
+    setActivePortionIdx(nextIndex);
   };
 
   const removePortion = (idx) => {
@@ -145,16 +186,15 @@ export default function MenuProductEditorPage() {
       error('En az bir porsiyon olmalı');
       return;
     }
-    setPortions((prev) => {
-      const next = prev.filter((_, i) => i !== idx);
-      const hasDef = next.some((p) => p.is_default);
-      const fixed = !hasDef ? next.map((p, i) => ({ ...p, is_default: i === 0 })) : next;
-      setActivePortionIdx((cur) => {
-        if (cur === idx) return Math.min(idx, fixed.length - 1);
-        if (cur > idx) return cur - 1;
-        return cur;
-      });
-      return fixed;
+    const next = portions.filter((_, i) => i !== idx);
+    const fixed = next.some((p) => p.is_default)
+      ? next
+      : next.map((p, i) => ({ ...p, is_default: i === 0 }));
+    setPortions(fixed);
+    setActivePortionIdx((cur) => {
+      if (cur === idx) return Math.min(idx, fixed.length - 1);
+      if (cur > idx) return cur - 1;
+      return cur;
     });
   };
 
@@ -487,6 +527,73 @@ export default function MenuProductEditorPage() {
           </div>
         </div>
       </section>
+
+      {/* ── Özellik Grupları (sadece mevcut ürünlerde) ── */}
+      {!isNew && (
+        <section className="menu-product-section">
+          <h2 className="menu-product-section-title">Özellik grupları</h2>
+          <p className="menu-product-section-lead" style={{ marginTop: -4, marginBottom: 12 }}>
+            Siparişte bu ürün seçildiğinde görünecek özellik gruplarını buradan atayın (örn. Yumurta, Acılık, Pişirme).
+          </p>
+
+          {assignedGroups.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+              {assignedGroups.map((g) => (
+                <div
+                  key={g.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 12px',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 8, border: '1px solid var(--border)',
+                  }}
+                >
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{g.name}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {g.selection_type === 'single' ? 'Tekli' : 'Çoklu'}
+                    {Number(g.is_required) ? ' · Zorunlu' : ''}
+                  </span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {(g.options || []).length} seçenek
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-icon btn-sm"
+                    onClick={() => handleRemoveGroup(g.id)}
+                    title="Kaldır"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <select
+              className="input"
+              style={{ flex: 1, minWidth: 180 }}
+              value={selectedGroupId}
+              onChange={(e) => setSelectedGroupId(e.target.value)}
+            >
+              <option value="">— Özellik grubu seç —</option>
+              {allAttributeGroups
+                .filter((g) => Number(g.is_active) && !assignedGroups.some((a) => a.id === g.id))
+                .map((g) => (
+                  <option key={g.id} value={g.id}>{g.name}</option>
+                ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={!selectedGroupId || attributeAssigning}
+              onClick={handleAssignGroup}
+            >
+              <Plus size={15} /> Ekle
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* ── Combo Menü (sadece mevcut ürünlerde) ── */}
       {!isNew && (

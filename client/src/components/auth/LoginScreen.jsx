@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { Lock, Mail, Loader } from 'lucide-react';
+import api from '../../services/api.js';
+import ForgotPasswordModal from './ForgotPasswordModal.jsx';
+import ForcePasswordChangeModal from './ForcePasswordChangeModal.jsx';
 
 export default function LoginScreen() {
   const { login } = useAuth();
@@ -10,6 +13,36 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [businesses, setBusinesses] = useState(null);
   const [selectedBusinessId, setSelectedBusinessId] = useState('');
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotSuccessMessage, setForgotSuccessMessage] = useState('');
+  const [passwordResetContext, setPasswordResetContext] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordResetError, setPasswordResetError] = useState('');
+  const [passwordResetLoading, setPasswordResetLoading] = useState(false);
+
+  const closeForgotPassword = () => {
+    setForgotOpen(false);
+    setForgotError('');
+    setForgotSuccessMessage('');
+  };
+
+  const openForgotPassword = () => {
+    setForgotEmail(email.trim());
+    setForgotError('');
+    setForgotSuccessMessage('');
+    setForgotOpen(true);
+  };
+
+  const closePasswordReset = () => {
+    setPasswordResetContext(null);
+    setNewPassword('');
+    setConfirmNewPassword('');
+    setPasswordResetError('');
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,6 +56,17 @@ export default function LoginScreen() {
         setBusinesses(err.businesses);
         setSelectedBusinessId(err.businesses[0].id);
         setError(err.message || 'İşletme seçin');
+      } else if (err.mustChangePassword) {
+        setBusinesses(null);
+        setError('');
+        setPasswordResetContext({
+          email: err.email || email.trim(),
+          businessId: err.businessId || selectedBusinessId || undefined,
+          currentPassword: password,
+        });
+        setNewPassword('');
+        setConfirmNewPassword('');
+        setPasswordResetError('');
       } else {
         setBusinesses(null);
         setError(err.message || 'Giriş başarısız');
@@ -45,6 +89,54 @@ export default function LoginScreen() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (event) => {
+    event.preventDefault();
+    setForgotError('');
+    setForgotLoading(true);
+    try {
+      const response = await api.forgotPassword(forgotEmail.trim());
+      setForgotSuccessMessage(
+        response?.message ||
+          'Talebiniz alındı. Geçici şifre tanımlandığında bu ekrandan giriş yapabilirsiniz.',
+      );
+    } catch (err) {
+      setForgotError(err.message || 'Talep gönderilemedi');
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleForcedPasswordChange = async (event) => {
+    event.preventDefault();
+    if (!passwordResetContext) return;
+    if (!newPassword || !confirmNewPassword) {
+      setPasswordResetError('Lütfen yeni şifrenizi iki alana da girin');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordResetError('Yeni şifre ve tekrar alanı aynı olmalı');
+      return;
+    }
+
+    setPasswordResetError('');
+    setPasswordResetLoading(true);
+    try {
+      await api.changePassword(
+        passwordResetContext.email,
+        passwordResetContext.currentPassword,
+        newPassword,
+        passwordResetContext.businessId,
+      );
+      setPassword(newPassword);
+      await login(passwordResetContext.email, newPassword, passwordResetContext.businessId);
+      closePasswordReset();
+    } catch (err) {
+      setPasswordResetError(err.message || 'Şifre güncellenemedi');
+    } finally {
+      setPasswordResetLoading(false);
     }
   };
 
@@ -82,6 +174,7 @@ export default function LoginScreen() {
             <div style={{ position: 'relative' }}>
               <Mail size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)}
+                data-testid="login-email-input"
                 placeholder="ornek@restoran.com" style={{ paddingLeft: 38 }} autoComplete="email" />
             </div>
           </div>
@@ -107,11 +200,22 @@ export default function LoginScreen() {
             <div style={{ position: 'relative' }}>
               <Lock size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)}
+                data-testid="login-password-input"
                 placeholder="••••••" style={{ paddingLeft: 38 }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={openForgotPassword}
+                style={{ paddingInline: 0, minHeight: 'auto' }}
+              >
+                Şifremi unuttum
+              </button>
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading}>
+          <button type="submit" className="btn btn-primary btn-block btn-lg" disabled={loading} data-testid="login-submit-button">
             {loading ? <Loader size={18} style={{ animation: 'spin 1s linear infinite' }} /> : 'Giriş Yap'}
           </button>
         </form>
@@ -128,7 +232,11 @@ export default function LoginScreen() {
               { label: 'Garson', email: 'garson@demo.com', color: 'var(--warning)' },
               { label: 'Mutfak', email: 'mutfak@demo.com', color: 'var(--orange)' },
             ].map(q => (
-              <button key={q.email} className="btn btn-ghost btn-sm" onClick={() => quickLogin(q.email)}
+              <button
+                key={q.email}
+                className="btn btn-ghost btn-sm"
+                data-testid={`quick-login-${q.email.split('@')[0]}`}
+                onClick={() => quickLogin(q.email)}
                 style={{ justifyContent: 'flex-start', gap: 8 }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: q.color, flexShrink: 0 }} />
                 <span>{q.label}</span>
@@ -139,6 +247,30 @@ export default function LoginScreen() {
       </div>
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
+      <ForgotPasswordModal
+        open={forgotOpen}
+        email={forgotEmail}
+        error={forgotError}
+        loading={forgotLoading}
+        successMessage={forgotSuccessMessage}
+        onClose={closeForgotPassword}
+        onEmailChange={setForgotEmail}
+        onSubmit={handleForgotPasswordSubmit}
+      />
+
+      <ForcePasswordChangeModal
+        open={!!passwordResetContext}
+        email={passwordResetContext?.email || ''}
+        newPassword={newPassword}
+        confirmPassword={confirmNewPassword}
+        error={passwordResetError}
+        loading={passwordResetLoading}
+        onClose={closePasswordReset}
+        onNewPasswordChange={setNewPassword}
+        onConfirmPasswordChange={setConfirmNewPassword}
+        onSubmit={handleForcedPasswordChange}
+      />
     </div>
   );
 }

@@ -94,7 +94,7 @@ npm run start:prod     # production sunucu (önce build alınmış olmalı)
 
 ### Electron masaüstü kabuğu (deneysel)
 
-Tarayıcı yerine **Electron** penceresi açılır; arka planda **ayrı bir Node süreci** mevcut Express sunucusunu (`server/index.js`) production modda çalıştırır. Pencere adresi **`http://127.0.0.1:PORT/`** — `file://` kullanılmaz; `/api` yapısı değişmez.
+Tarayıcı yerine **Electron** penceresi açılır; arka planda **ayrı bir Node süreci** mevcut Express sunucusunu (`server/index.js`) production modda çalıştırır. Yerel modda BrowserWindow, paketlenmiş `client/dist/index.html` dosyasını açar; API tabanı preload üzerinden renderer'a enjekte edilir. Cloud URL tanımlıysa pencere o URL'yi yükler.
 
 **Geliştirme (Vite + API) ile fark:** Günlük geliştirme için **`npm run dev`** kullanın (Vite 5173 + API 3001). Electron, **önceden alınmış client build** ile tek portta çalışır; canlı HMR istemiyorsanız masaüstü denemesi için uygundur.
 
@@ -140,7 +140,7 @@ Tarayıcı yerine **Electron** penceresi açılır; arka planda **ayrı bir Node
 |-----|--------|-----|
 | Geliştirme | http://localhost:5173 | http://localhost:3001 |
 | Production (tarayıcı) | http://localhost:3001 (tek sunucu) | aynı origin, `/api/...` |
-| Electron | `http://127.0.0.1:PORT` (BrowserWindow) | aynı süreçte başlatılan child Express |
+| Electron | `client/dist/index.html` (local) veya cloud URL | aynı süreçte başlatılan child Express |
 
 ### Windows: tek tık / kolay başlatma
 

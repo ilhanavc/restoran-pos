@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { applyDisplaySettings, persistDisplaySettings } from '../../utils/displayTheme.js';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 
 const defaults = { theme: 'dark', language: 'tr', density: 'comfortable' };
@@ -18,6 +20,7 @@ export default function DisplaySettingsPage() {
   const [loaded, setLoaded] = useState(defaults);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -40,7 +43,16 @@ export default function DisplaySettingsPage() {
   const dirty = useMemo(() => JSON.stringify(form) !== JSON.stringify(loaded), [form, loaded]);
 
   const handleBack = () => {
-    if (dirty && !window.confirm('Kaydedilmemiş değişiklikler var. Çıkmak istiyor musunuz?')) return;
+    if (dirty) {
+      requestConfirm({
+        title: 'Kaydedilmemiş değişiklikler var',
+        body: 'Ekran ayarlarındaki değişiklikler kaybolacak. Çıkmak istiyor musunuz?',
+        confirmLabel: 'Çık',
+        tone: 'danger',
+        onConfirm: () => navigate('/settings'),
+      });
+      return;
+    }
     navigate('/settings');
   };
 
@@ -68,7 +80,6 @@ export default function DisplaySettingsPage() {
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Ekran Ayarları" onBack={handleBack} />
-
       <div style={{ marginBottom: 14 }}>
         <button type="button" className="btn btn-primary btn-sm" onClick={save} disabled={loading || saving || !dirty}>
           Kaydet
@@ -154,6 +165,16 @@ export default function DisplaySettingsPage() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

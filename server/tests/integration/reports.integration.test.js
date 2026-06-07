@@ -53,6 +53,15 @@ beforeAll(async () => {
   ).run(seeds.businessId, seeds.tableId, seeds.userId);
 
   db.prepare(
+    `INSERT OR IGNORE INTO order_items (
+      id, order_id, product_id, product_name, quantity, unit_price, status,
+      category_id_snapshot, category_name_snapshot, printer_target_snapshot, created_by
+    ) VALUES ('rpt-item-1', 'rpt-order-1', ?, 'Lahmacun', 2, 125, 'served', ?, 'Eski Kategori', 'kitchen', ?)`,
+  ).run(seeds.productId, seeds.categoryId, seeds.userId);
+
+  db.prepare(`UPDATE categories SET name = 'Yeni Kategori' WHERE id = ?`).run(seeds.categoryId);
+
+  db.prepare(
     `INSERT OR IGNORE INTO payments (id, order_id, business_id, amount, payment_type, created_at, created_by)
      VALUES ('rpt-pay-1', 'rpt-order-1', ?, 250, 'cash', datetime('now'), ?)`,
   ).run(seeds.businessId, seeds.userId);
@@ -81,6 +90,7 @@ describe('GET /api/reports/daily', () => {
     expect(res.body.orderStats.total_orders).toBe(1);
     expect(res.body.revenue).toBe(250);
     expect(res.body.avgOrderValue).toBe(250);
+    expect(res.body.categoryBreakdown[0].category_name).toBe('Eski Kategori');
   });
 
   it('?date parametresiyle belirli gün raporu döner', async () => {
@@ -96,6 +106,32 @@ describe('GET /api/reports/daily', () => {
   it('token olmadan 401 döner', async () => {
     const res = await request(app).get('/api/reports/daily');
     expect(res.status).toBe(401);
+  });
+
+  it('paket teslim ödemesini (source=system_takeaway_delivery) gerçek payment_type (card) altında gruplar', async () => {
+    dbRef.current.prepare(`
+      INSERT OR IGNORE INTO orders
+      (id, business_id, user_id, order_type, status, grand_total, created_at, updated_at, closed_at)
+      VALUES ('rpt-order-system-delivery', ?, ?, 'takeaway', 'closed', 140, datetime('now'), datetime('now'), datetime('now'))
+    `).run(seeds.businessId, seeds.userId);
+    dbRef.current.prepare(`
+      INSERT OR IGNORE INTO payments
+      (id, order_id, business_id, amount, payment_type, source, created_at, created_by)
+      VALUES ('rpt-pay-system-delivery', 'rpt-order-system-delivery', ?, 140, 'card', 'system_takeaway_delivery', datetime('now'), ?)
+    `).run(seeds.businessId, seeds.userId);
+
+    const res = await request(app)
+      .get('/api/reports/daily')
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    expect(res.body.paymentBreakdown).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ payment_type: 'cash', total: 250 }),
+        expect.objectContaining({ payment_type: 'card', total: 140 }),
+      ]),
+    );
+    expect(res.body.paymentBreakdown.find((p) => p.payment_type === 'system_takeaway_delivery')).toBeUndefined();
   });
 });
 
@@ -142,6 +178,17 @@ describe('GET /api/reports/closed-orders', () => {
     expect(res.status).toBe(200);
     expect(res.body.page).toBe(1);
     expect(res.body.limit).toBe(10);
+  });
+
+  it('paket teslim siparişinin payment_type alanı seçilen kart/nakit değerini yansıtır', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await request(app)
+      .get(`/api/reports/closed-orders?date=${today}`)
+      .set('Authorization', authHeader);
+
+    expect(res.status).toBe(200);
+    const systemOrder = res.body.orders.find((order) => order.id === 'rpt-order-system-delivery');
+    expect(systemOrder?.payment_type).toBe('card');
   });
 });
 

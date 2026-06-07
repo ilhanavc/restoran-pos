@@ -97,3 +97,25 @@ export function resolveReceiptPrinter(businessId) {
   if (pr) return { printer: pr, source: 'type_receipt' };
   return { printer: null, source: 'none' };
 }
+
+/**
+ * Paket etiketi mutfak/kurye tarafına gider. Manuel UI da kitchen rolü seçtirdiği
+ * için varsayılan çözümleyici aynı rolü kullanmalı.
+ */
+export function resolveTakeawayLabelPrinter(businessId) {
+  const cfg = getJsonSetting(businessId, 'printer.config', {});
+  if (cfg.takeawayLabelPrinterId) {
+    const pr = getActivePrinter(cfg.takeawayLabelPrinterId, businessId);
+    if (pr && pr.type === 'kitchen') return { printer: pr, source: 'takeawayLabelPrinterId' };
+  }
+
+  if (cfg.usageKitchenId) {
+    const pr = getActivePrinter(cfg.usageKitchenId, businessId);
+    if (pr && pr.type === 'kitchen') return { printer: pr, source: 'usageKitchenId' };
+  }
+
+  const kitchen = findFirstPrinterByType(businessId, 'kitchen');
+  if (kitchen) return { printer: kitchen, source: 'type_kitchen' };
+
+  return { printer: null, source: 'none' };
+}

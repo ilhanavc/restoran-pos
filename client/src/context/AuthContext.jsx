@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import api from '../services/api.js';
+import { setSentryUser } from '../services/sentry.js';
 import { applyDisplaySettings, loadStoredDisplaySettings } from '../utils/displayTheme.js';
 
 const AuthContext = createContext(null);
@@ -15,9 +16,10 @@ export function AuthProvider({ children }) {
       api.me()
         .then((data) => {
           setUser(data.user);
+          setSentryUser(data.user);
           if (data.display) applyDisplaySettings(data.display);
         })
-        .catch(() => { api.setToken(null); setUser(null); })
+        .catch(() => { api.setToken(null); setUser(null); setSentryUser(null); })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -28,6 +30,7 @@ export function AuthProvider({ children }) {
     const data = await api.login(email, password, businessId);
     api.setToken(data.token);
     setUser(data.user);
+    setSentryUser(data.user);
     if (data.display) applyDisplaySettings(data.display);
     return data.user;
   }, []);
@@ -35,6 +38,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     api.setToken(null);
     setUser(null);
+    setSentryUser(null);
     applyDisplaySettings(loadStoredDisplaySettings());
   }, []);
 

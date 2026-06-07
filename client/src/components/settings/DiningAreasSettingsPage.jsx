@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { LayoutGrid, Plus, Pencil, Trash2 } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 import SettingsDetailHeader from './SettingsDetailHeader.jsx';
 
 export default function DiningAreasSettingsPage() {
@@ -21,6 +23,7 @@ export default function DiningAreasSettingsPage() {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -142,26 +145,26 @@ export default function DiningAreasSettingsPage() {
   };
 
   const removeArea = async (a) => {
-    if (
-      !window.confirm(
-        `"${a.name}" bölgesini silmek istediğinize emin misiniz? Bu bölgede aktif masa olmamalıdır.`,
-      )
-    ) {
-      return;
-    }
-    try {
-      await api.deleteAdminDiningArea(a.id);
-      success('Bölge kaldırıldı');
-      await load();
-    } catch (e) {
-      error(e.message || 'Silinemedi');
-    }
+    requestConfirm({
+      title: 'Bölge silinsin mi?',
+      body: `"${a.name}" bölgesi kaldırılacak. Bu işlem yalnızca bölgede aktif masa yoksa tamamlanır.`,
+      confirmLabel: 'Sil',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.deleteAdminDiningArea(a.id);
+          success('Bölge kaldırıldı');
+          await load();
+        } catch (e) {
+          error(e.message || 'Silinemedi');
+        }
+      },
+    });
   };
 
   return (
     <div className="page-container">
       <SettingsDetailHeader title="Salon bölgeleri ve masa sayısı" onBack={handleBack} />
-
       <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
         Her bölge için hedef masa sayısını girin. Boş masalar güvenle kapatılır; dolu masa veya açık adisyon varken
         sayı düşürülemez.
@@ -314,6 +317,15 @@ export default function DiningAreasSettingsPage() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

@@ -1,180 +1,353 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  BarChart,
-  Bar,
-  CartesianGrid,
-  Legend,
-  LineChart,
-  Line,
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import ReactApexChart from 'react-apexcharts';
+import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { formatCurrency, PAYMENT_TYPES } from '../../constants/index.js';
 import api from '../../services/api.js';
+import { useSocket } from '../../context/SocketContext.jsx';
+import { addDaysToDateString, formatTimeInIstanbul, parseDateLike, todayInIstanbul } from '../../utils/time.js';
 
-const PAYMENT_COLORS = ['var(--accent)', 'var(--success)', 'var(--warning)', 'var(--info)', 'var(--purple)'];
+const PAYMENT_COLORS = ['#6366f1', '#10b981', '#f59e0b', '#3b82f6', '#8b5cf6'];
+const LIVE_REFRESH_MS = 20000;
+const ALERTS_REFRESH_MS = 60000;
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+const OP_HOURS = ['06','07','08','09','10','11','12','13','14','15','16','17','18','19','20','21','22','23','00','01','02'];
+
+function todayStr() { return todayInIstanbul(); }
+function addDaysStr(days) { return addDaysToDateString(todayInIstanbul(), days); }
+function formatPctDelta(a, b) {
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= 0) return null;
+  return Math.round(((a - b) / b) * 100);
+}
+function parseIso(iso) {
+  if (!iso) return null;
+  const t = parseDateLike(iso);
+  return t && Number.isFinite(t.getTime()) ? t : null;
+}
+function formatHms(iso) {
+  const d = parseIso(iso);
+  return d ? formatTimeInIstanbul(d, { second: '2-digit' }) : '';
+}
+function formatHm(iso) {
+  const d = parseIso(iso);
+  return d ? formatTimeInIstanbul(d) : '';
 }
 
-function dateDaysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
+// ── KPI Kart ──────────────────────────────────────────────────────────────────
+function KpiCard({ label, value, pct, trendData, accent }) {
+  const up   = pct > 0;
+  const down = pct < 0;
+
+  const sparkOptions = useMemo(() => ({
+    chart: { type: 'area', sparkline: { enabled: true }, animations: { enabled: false } },
+    stroke: { curve: 'smooth', width: 1.5 },
+    fill: { type: 'gradient', gradient: { opacityFrom: 0.25, opacityTo: 0 } },
+    colors: [accent || 'var(--accent)'],
+    tooltip: { enabled: false },
+  }), [accent]);
+
+  const sparkSeries = useMemo(() => [{ data: (trendData || []).map(Number) }], [trendData]);
+
+  return (
+    <div className="kpi-card">
+      <div className="kpi-label">{label}</div>
+      <div className="kpi-value">{value}</div>
+      {pct !== null && (
+        <div className={`kpi-trend kpi-trend-${up ? 'up' : down ? 'down' : 'flat'}`}>
+          {up ? <TrendingUp size={12} /> : down ? <TrendingDown size={12} /> : <Minus size={12} />}
+          <span>%{Math.abs(pct)} {up ? 'artış' : down ? 'düşüş' : ''} dünden</span>
+        </div>
+      )}
+      {(trendData?.length || 0) > 1 && (
+        <div className="kpi-spark">
+          <ReactApexChart type="area" height={36} options={sparkOptions} series={sparkSeries} />
+        </div>
+      )}
+    </div>
+  );
 }
 
+// ── Ana Component ──────────────────────────────────────────────────────────────
 export default function HomeScreen() {
-  const [daily, setDaily] = useState(null);
-  const [range, setRange] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const socket   = useSocket();
 
-  const loadDashboard = useCallback(async () => {
-    setLoading(true);
+  const [daily,          setDaily]          = useState(null);
+  const [hourlyToday,    setHourlyToday]    = useState([]);
+  const [rangeDays,      setRangeDays]      = useState([]);
+  const [compare,        setCompare]        = useState(null);
+  const [alerts,         setAlerts]         = useState([]);
+  const [recent,         setRecent]         = useState([]);
+  const [recentClosed,   setRecentClosed]   = useState([]);
+  const [loading,        setLoading]        = useState(true);
+
+  const liveTimer  = useRef(null);
+  const alertTimer = useRef(null);
+
+  const loadLive = useCallback(async () => {
     try {
-      const today = todayStr();
-      const from = dateDaysAgo(6);
-      const [dailyData, rangeData] = await Promise.all([
-        api.getDailyReport(today),
-        api.getRangeReport(from, today),
-      ]);
-      setDaily(dailyData);
-      setRange(rangeData);
-    } finally {
-      setLoading(false);
-    }
+      const b = await api.getDashboardCompare();
+      setCompare(b);
+    } catch (e) { console.error('dashboard compare failed', e); }
+    try {
+      const c = await api.getDashboardRecentOrders(8);
+      setRecent(Array.isArray(c?.orders) ? c.orders : []);
+    } catch (e) { console.error('dashboard recent-orders failed', e); }
+    try {
+      const cl = await api.getClosedOrders({ date: todayStr(), limit: 8, page: 1 });
+      setRecentClosed(Array.isArray(cl?.orders) ? cl.orders : []);
+    } catch (e) { console.error('closed-orders failed', e); }
   }, []);
 
+  const loadAlerts = useCallback(async () => {
+    try { const d = await api.getDashboardAlerts(); setAlerts(d.alerts || []); }
+    catch { /* silent */ }
+  }, []);
+
+  const loadHeavy = useCallback(async () => {
+    try {
+      const today = todayStr();
+      const [dailyData, ht, range] = await Promise.all([
+        api.getDailyReport(today),
+        api.getHourlyReport(today),
+        api.getRangeReport(addDaysStr(-6), today),
+      ]);
+      setDaily(dailyData);
+      setHourlyToday(ht?.data || []);
+      setRangeDays(range?.revenue || []);
+    } catch { /* silent */ }
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try { await Promise.all([loadLive(), loadAlerts(), loadHeavy()]); }
+    finally { setLoading(false); }
+  }, [loadLive, loadAlerts, loadHeavy]);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
   useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
+    liveTimer.current  = setInterval(loadLive,   LIVE_REFRESH_MS);
+    alertTimer.current = setInterval(loadAlerts, ALERTS_REFRESH_MS);
+    return () => { clearInterval(liveTimer.current); clearInterval(alertTimer.current); };
+  }, [loadLive, loadAlerts]);
 
-  const paymentChartData = useMemo(
-    () =>
-      (daily?.paymentBreakdown || []).map((item) => ({
-        name: PAYMENT_TYPES[item.payment_type]?.label || item.payment_type || 'Diğer',
-        value: Number(item.total || 0),
-        count: Number(item.count || 0),
-      })),
-    [daily],
-  );
+  useEffect(() => {
+    if (!socket?.subscribe) return undefined;
+    const bump    = () => { loadLive(); loadHeavy(); };
+    const unsubs = [
+      socket.subscribe('order:created', () => {
+        bump();
+        api.getDashboardRecentOrders(8).then((d) => setRecent(d.orders || [])).catch(() => {});
+      }),
+      socket.subscribe('order:updated',     bump),
+      socket.subscribe('payment:created',   bump),
+    ];
+    return () => unsubs.forEach((u) => u?.());
+  }, [socket, loadLive, loadHeavy]);
 
-  const salesTrendData = useMemo(
-    () =>
-      (range?.revenue || []).map((item) => ({
-        date: String(item.date || '').slice(5),
-        total: Number(item.total || 0),
-      })),
-    [range],
-  );
+  // Grafik: işletme saatleri
+  const chartRows = useMemo(() => {
+    const m = {};
+    for (const r of hourlyToday) m[r.hour] = Number(r.revenue || 0);
+    return OP_HOURS.map((h) => ({ label: `${h}:00`, value: m[h] || 0 }));
+  }, [hourlyToday]);
 
-  const topProductsData = useMemo(
-    () =>
-      (daily?.topProducts || []).slice(0, 8).map((item) => ({
-        name: item.product_name || '-',
-        qty: Number(item.total_qty || 0),
-      })),
-    [daily],
-  );
+  const areaOptions = useMemo(() => ({
+    chart: { type: 'area', height: 240, toolbar: { show: false }, animations: { enabled: true, speed: 600 }, background: 'transparent', fontFamily: 'inherit' },
+    dataLabels: { enabled: false },
+    stroke: { curve: 'smooth', width: [2.5] },
+    fill: { type: 'gradient', gradient: { type: 'vertical', opacityFrom: [0.4], opacityTo: [0.0] } },
+    colors: ['#6366f1'],
+    xaxis: {
+      categories: chartRows.map((r) => r.label),
 
-  const metricCards = useMemo(
-    () => [
-      { label: 'Bugün Ciro', value: formatCurrency(daily?.revenue || 0) },
-      { label: 'Toplam Sipariş', value: Number(daily?.orderStats?.total_orders || 0) },
-      { label: 'Ortalama Sipariş', value: formatCurrency(daily?.avgOrderValue || 0) },
-      { label: 'İptal Sipariş', value: Number(daily?.orderStats?.cancelled_count || 0) },
-    ],
-    [daily],
-  );
+      axisBorder: { show: false }, axisTicks: { show: false },
+      labels: { style: { colors: '#94a3b8', fontSize: '11px' }, rotate: 0 },
+      tickAmount: 8,
+    },
+    yaxis: { labels: { style: { colors: '#94a3b8', fontSize: '11px' }, formatter: (v) => v === 0 ? '₺0' : `₺${(v / 1000).toFixed(0)}K` } },
+    grid: { borderColor: 'rgba(148,163,184,0.12)', strokeDashArray: 3, xaxis: { lines: { show: false } }, padding: { left: 4, right: 8 } },
+    tooltip: { theme: 'dark', y: { formatter: (v) => formatCurrency(v) } },
+    legend: { show: false },
+  }), [chartRows]);
+
+  const areaSeries = useMemo(() => [
+    { name: 'Bugün', data: chartRows.map((r) => r.value) },
+  ], [chartRows]);
+
+  // Donut
+  const pb = daily?.paymentBreakdown || [];
+  const donutLabels = pb.map((p) => PAYMENT_TYPES[p.payment_type]?.label || p.payment_type || 'Diğer');
+  const donutSeries = pb.map((p) => Number(p.total || 0));
+  const donutTotal  = donutSeries.reduce((s, v) => s + v, 0);
+  const donutOptions = useMemo(() => ({
+    chart: { type: 'donut', animations: { enabled: true }, background: 'transparent', fontFamily: 'inherit' },
+    labels: donutLabels,
+    colors: PAYMENT_COLORS,
+    legend: { position: 'bottom', labels: { colors: '#94a3b8' }, fontSize: '12px', itemMargin: { horizontal: 8 } },
+    plotOptions: {
+      pie: { donut: { size: '70%', labels: { show: true,
+        name:  { show: true, color: '#94a3b8', fontSize: '12px', offsetY: 18 },
+        value: { show: true, color: 'var(--text, #0f172a)', fontSize: '20px', fontWeight: '700', formatter: (v) => formatCurrency(Number(v)), offsetY: -10 },
+        total: { show: true, showAlways: false, label: 'Toplam', color: '#94a3b8', fontSize: '12px', formatter: () => formatCurrency(donutTotal) },
+      } } },
+    },
+    dataLabels: { enabled: false },
+    stroke: { width: 0 },
+    tooltip: { theme: 'dark', y: { formatter: (v) => formatCurrency(v) } },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [JSON.stringify(donutLabels), donutTotal]);
+
+  // Metrikler
+  const revenue  = Number(daily?.revenue || 0);
+  const orders   = Number(daily?.orderStats?.total_orders || 0);
+  const avg      = Number(daily?.avgOrderValue || 0);
+  const spark    = useMemo(() => rangeDays.map((r) => Number(r.total || 0)), [rangeDays]);
+  const revPct   = compare ? formatPctDelta(compare.today?.revenue, compare.yesterday?.revenue) : null;
+  const ordPct   = compare ? formatPctDelta(compare.today?.orderCount, compare.yesterday?.orderCount) : null;
+
+  // Top ürünler
+  const top    = (daily?.topProducts || []).slice(0, 6);
+  const maxQty = top.reduce((m, p) => Math.max(m, Number(p.total_qty || 0)), 1);
+
 
   return (
     <div className="page-container home-page">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Anasayfa</h1>
-          <div className="home-subtitle">Günlük operasyon özeti ve canlı satış görünümü</div>
-        </div>
-        <button className="btn btn-ghost" onClick={loadDashboard} disabled={loading}>
-          Yenile
-        </button>
+
+      <div className="home-header-actions">
+        <span className={`conn-dot ${socket?.isConnected ? 'conn-dot-on' : 'conn-dot-off'}`} title={socket?.isConnected ? 'Canlı' : 'Bağlantı kesik'} />
+        <button className="btn btn-ghost" onClick={loadAll} disabled={loading}>Yenile</button>
       </div>
 
-      <div className="home-metric-grid">
-        {metricCards.map((card) => (
-          <div key={card.label} className="card home-metric-card">
-            <div className="home-metric-label">{card.label}</div>
-            <div className="home-metric-value">{card.value}</div>
-          </div>
-        ))}
+      {/* Uyarılar */}
+      {alerts.length > 0 && (
+        <div className="home-alerts">
+          {alerts.map((a) => (
+            <button type="button" key={a.id} className={`home-alert home-alert-${a.severity}`} onClick={() => a.href && navigate(a.href)}>
+              <span className="home-alert-title">{a.title}</span>
+              <span className="home-alert-message">{a.message}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* KPI Kartları */}
+      <div className="kpi-grid">
+        <KpiCard label="Bugün Ciro"      value={formatCurrency(revenue)} pct={revPct} trendData={spark}  accent="#6366f1" />
+        <KpiCard label="Toplam Sipariş"  value={String(orders)}          pct={ordPct} trendData={spark}  accent="#10b981" />
+        <KpiCard label="Ortalama Hesap"  value={formatCurrency(avg)}     pct={null}                      accent="#f59e0b" />
       </div>
 
-      <div className="home-chart-grid">
-        <div className="card card-padded home-chart-card">
-          <div className="home-chart-title">Son 7 Gün Ciro Trendi</div>
-          <div className="home-chart-body">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={salesTrendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="date" stroke="var(--text-muted)" />
-                <YAxis stroke="var(--text-muted)" />
-                <Tooltip
-                  contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
-                  formatter={(value) => formatCurrency(value)}
-                />
-                <Line type="monotone" dataKey="total" stroke="var(--accent)" strokeWidth={3} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
+      {/* Saatlik Grafik */}
+      <div className="card card-padded home-area-card">
+        <div className="hc-header">
+          <span className="hc-title">Saatlik Ciro</span>
+          <span className="hc-sub">Bugün · İşletme saatleri (06:00–02:00)</span>
+        </div>
+        <ReactApexChart type="area" height={240} options={areaOptions} series={areaSeries} />
+      </div>
+
+      {/* Alt Grid */}
+      <div className="home-bottom-grid">
+
+        {/* Ödeme Dağılımı */}
+        <div className="card card-padded">
+          <div className="hc-title" style={{ marginBottom: 8 }}>Ödeme Dağılımı</div>
+          {donutSeries.length === 0
+            ? <div className="home-empty">Bugün ödeme kaydı yok</div>
+            : <ReactApexChart type="donut" height={260} options={donutOptions} series={donutSeries} />}
+        </div>
+
+        {/* En Çok Satan */}
+        <div className="card card-padded">
+          <div className="hc-title" style={{ marginBottom: 12 }}>En Çok Satan</div>
+          {top.length === 0
+            ? <div className="home-empty">Bugün satış yok</div>
+            : (
+              <div className="product-list">
+                {top.map((p, i) => {
+                  const qty = Number(p.total_qty || 0);
+                  const pct = Math.round((qty / maxQty) * 100);
+                  return (
+                    <div key={p.product_name} className="product-row">
+                      <span className="product-rank">{i + 1}</span>
+                      <div className="product-body">
+                        <div className="product-name-row">
+                          <span className="product-name">{p.product_name}</span>
+                          <span className="product-rev">{formatCurrency(Number(p.total_revenue || 0))}</span>
+                        </div>
+                        <div className="product-bar-bg">
+                          <div className="product-bar-fill" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                      <span className="product-qty">{qty}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+        </div>
+
+      </div>
+
+      {/* Sipariş Akışları */}
+      <div className="home-orders-grid">
+        {/* Son Siparişler */}
+        <div className="card card-padded">
+          <div className="hc-title" style={{ marginBottom: 12 }}>Son Siparişler</div>
+          <div className="feed-list">
+            {recent.length === 0
+              ? <div className="home-empty">Henüz sipariş yok</div>
+              : recent.map((o) => (
+                <div key={o.id} className="feed-row">
+                  <div className={`feed-type-dot feed-type-${o.order_type}`} />
+                  <div className="feed-body">
+                    <div className="feed-title">
+                      {o.order_type === 'takeaway' ? (o.customer_name || 'Paket') : (o.table_name || 'Masa')}
+                      {o.order_no ? <span className="feed-no"> #{o.order_no}</span> : null}
+                    </div>
+                    <div className="feed-meta">{o.user_name || '—'} · {formatHms(o.created_at)}</div>
+                  </div>
+                  <div className={`feed-amount ${o.status === 'cancelled' ? 'feed-cancelled' : o.status === 'closed' ? 'feed-closed' : ''}`}>
+                    {formatCurrency(o.grand_total || 0)}
+                  </div>
+                </div>
+              ))}
           </div>
         </div>
 
-        <div className="card card-padded home-chart-card">
-          <div className="home-chart-title">Ödeme Türü Dağılımı</div>
-          <div className="home-chart-body">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={paymentChartData}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius={58}
-                  outerRadius={92}
-                  paddingAngle={3}
+        {/* Kapanan Siparişler */}
+        <div className="card card-padded">
+          <div className="hc-title" style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Kapanan Siparişler</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/reports')}>Tümü</button>
+          </div>
+          <div className="feed-list">
+            {recentClosed.length === 0
+              ? <div className="home-empty">Bugün kapanan sipariş yok</div>
+              : recentClosed.map((o) => (
+                <button
+                  type="button"
+                  key={o.id}
+                  className="feed-row feed-row-clickable"
+                  onClick={() => navigate('/reports')}
+                  title="Detay için Raporlar sayfasına git"
                 >
-                  {paymentChartData.map((entry, idx) => (
-                    <Cell key={`${entry.name}-${idx}`} fill={PAYMENT_COLORS[idx % PAYMENT_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
-                  formatter={(value) => formatCurrency(value)}
-                />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+                  <div className={`feed-type-dot feed-type-${o.order_type}`} />
+                  <div className="feed-body">
+                    <div className="feed-title">
+                      {o.order_type === 'takeaway' ? (o.customer_name || 'Paket') : (o.table_name || 'Masa')}
+                      {o.order_no ? <span className="feed-no"> #{o.order_no}</span> : null}
+                    </div>
+                    <div className="feed-meta">{o.user_name || '—'} · {formatHm(o.closed_at || o.created_at)}</div>
+                  </div>
+                  <div className="feed-amount feed-closed">
+                    {formatCurrency(o.grand_total || 0)}
+                  </div>
+                </button>
+              ))}
           </div>
-        </div>
-      </div>
-
-      <div className="card card-padded home-chart-card home-chart-card-full">
-        <div className="home-chart-title">En Çok Satan Ürünler</div>
-        <div className="home-chart-body">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={topProductsData} margin={{ top: 8, right: 16, left: 0, bottom: 40 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="name" stroke="var(--text-muted)" angle={-15} textAnchor="end" interval={0} height={65} />
-              <YAxis stroke="var(--text-muted)" />
-              <Tooltip
-                contentStyle={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
-                formatter={(value) => [`${value} adet`, 'Satış']}
-              />
-              <Bar dataKey="qty" fill="var(--success)" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
         </div>
       </div>
     </div>

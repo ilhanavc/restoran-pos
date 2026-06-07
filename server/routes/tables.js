@@ -1,13 +1,29 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { auditLog } from '../utils/helpers.js';
 import { emitToRoom } from '../socket.js';
+import { validate } from '../middleware/validate.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
 
 const tableStaff = authorize('admin', 'cashier', 'waiter');
+const transferTableSchema = {
+  body: z.object({
+    targetTableId: z.string().min(1, 'Hedef masa kimliği gerekli'),
+  }),
+};
+const updateTableStatusSchema = {
+  body: z.object({
+    status: z.enum(['empty', 'occupied', 'reserved']).optional(),
+    guest_count: z.number().int().min(0).max(999).optional(),
+    note: z.string().max(500).optional().nullable(),
+  }).refine((body) => Object.keys(body).length > 0, {
+    message: 'En az bir güncellenecek alan gerekli',
+  }),
+};
 
 // GET /api/tables - list all tables with areas
 router.get('/', tableStaff, (req, res) => {
@@ -56,11 +72,17 @@ router.get('/', tableStaff, (req, res) => {
 });
 
 // PATCH /api/tables/:id/status
-router.patch('/:id/status', tableStaff, (req, res) => {
+router.patch('/:id/status', tableStaff, validate(updateTableStatusSchema), (req, res) => {
   try {
     const { status, guest_count, note } = req.body;
     const table = db.prepare('SELECT * FROM tables WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
     if (!table) return res.status(404).json({ error: 'Masa bulunamadı' });
+    if (status === 'occupied' && !table.current_order_id) {
+      return res.status(400).json({ error: 'Aktif sipariş olmadan masa dolu yapılamaz' });
+    }
+    if ((status === 'empty' || status === 'reserved') && table.current_order_id) {
+      return res.status(400).json({ error: 'Aktif siparişi olan masa bu duruma alınamaz' });
+    }
 
     const updates = [];
     const params = [];
@@ -83,12 +105,9 @@ router.patch('/:id/status', tableStaff, (req, res) => {
 });
 
 // POST /api/tables/:id/transfer
-router.post('/:id/transfer', tableStaff, (req, res) => {
+router.post('/:id/transfer', tableStaff, validate(transferTableSchema), (req, res) => {
   try {
     const { targetTableId } = req.body;
-    if (!targetTableId) {
-      return res.status(400).json({ error: 'Hedef masa (targetTableId) gerekli' });
-    }
     if (targetTableId === req.params.id) {
       return res.status(400).json({ error: 'Kaynak ve hedef masa aynı olamaz' });
     }
@@ -96,7 +115,9 @@ router.post('/:id/transfer', tableStaff, (req, res) => {
     const target = db.prepare('SELECT * FROM tables WHERE id = ? AND business_id = ?').get(targetTableId, req.businessId);
     
     if (!source || !target) return res.status(404).json({ error: 'Masa bulunamadı' });
-    if (target.status === 'occupied') return res.status(400).json({ error: 'Hedef masa dolu' });
+    if (target.status !== 'empty') {
+      return res.status(400).json({ error: 'Hedef masa boş olmalı' });
+    }
 
     const txn = db.transaction(() => {
       if (source.current_order_id) {

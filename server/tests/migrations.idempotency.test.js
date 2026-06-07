@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { migrations } from '../migrations/run.js';
+import { BASELINE_SCHEMA_VERSION } from '../migrations/versions/index.js';
+import { migrateDatabase, migrations, validateVersionedMigrations } from '../migrations/run.js';
 
 /**
  * Migration idempotency testleri.
@@ -10,12 +11,7 @@ import { migrations } from '../migrations/run.js';
 
 /** migrations dizisini in-memory DB üzerinde çalıştırır */
 function applyMigrations(db) {
-  const migrate = db.transaction(() => {
-    for (const sql of migrations) {
-      db.exec(sql);
-    }
-  });
-  migrate();
+  migrateDatabase(db);
 }
 
 // ── Temel tablolar oluştu mu? ─────────────────────────────────────────────────
@@ -44,6 +40,7 @@ describe('Migrations — fresh DB', () => {
       'businesses', 'users', 'roles', 'dining_areas', 'tables',
       'categories', 'products', 'orders', 'order_items',
       'payments', 'printers', 'print_jobs', 'customers', 'audit_logs',
+      'schema_migrations', 'entity_mutations',
     ];
 
     for (const t of required) {
@@ -62,12 +59,62 @@ describe('Migrations — fresh DB', () => {
     db.close();
   });
 
+  it('print_jobs lease ve teşhis kolonlarını içeriyor', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    const cols = db.prepare(`PRAGMA table_info(print_jobs)`).all().map(c => c.name);
+    expect(cols).toContain('claimed_until');
+    expect(cols).toContain('attempt_count');
+    expect(cols).toContain('last_attempt_at');
+    expect(cols).toContain('last_error_code');
+    db.close();
+  });
+
   it('orders tablosu order_type kolonu içeriyor', () => {
     const db = new Database(':memory:');
     applyMigrations(db);
 
     const cols = db.prepare(`PRAGMA table_info(orders)`).all().map(c => c.name);
     expect(cols).toContain('order_type');
+    db.close();
+  });
+
+  it('schema_migrations baseline kaydını içeriyor', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    const row = db.prepare(`SELECT version, name, applied_at FROM schema_migrations WHERE version = ?`).get(BASELINE_SCHEMA_VERSION);
+    expect(row).toBeDefined();
+    expect(row.name).toBe('Legacy schema baseline');
+    expect(row.applied_at).toBeTruthy();
+    db.close();
+  });
+
+  it('entity_mutations audit trail tablosunu ve indekslerini oluşturur', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+
+    const cols = db.prepare(`PRAGMA table_info(entity_mutations)`).all().map((c) => c.name);
+    expect(cols).toEqual(expect.arrayContaining([
+      'id',
+      'business_id',
+      'entity_table',
+      'entity_id',
+      'action',
+      'before_json',
+      'after_json',
+      'actor_user_id',
+      'reason',
+      'request_id',
+      'source',
+      'created_at',
+    ]));
+
+    const indexes = db.prepare(`PRAGMA index_list(entity_mutations)`).all().map((idx) => idx.name);
+    expect(indexes).toContain('idx_entity_mutations_business_created');
+    expect(indexes).toContain('idx_entity_mutations_entity');
+    expect(indexes).toContain('idx_entity_mutations_actor_created');
     db.close();
   });
 });
@@ -116,5 +163,51 @@ describe('Migrations — idempotency (iki kez çalıştırma)', () => {
     expect(row).not.toBeNull();
     expect(row.name).toBe('Test Restoran');
     db.close();
+  });
+
+  it('baseline migration kaydı iki kez çalıştırmada tek kalır', () => {
+    const db = new Database(':memory:');
+    applyMigrations(db);
+    applyMigrations(db);
+
+    const row = db.prepare(`SELECT COUNT(*) as c FROM schema_migrations WHERE version = ?`).get(BASELINE_SCHEMA_VERSION);
+    expect(row.c).toBe(1);
+    db.close();
+  });
+});
+
+describe('Migrations — forward-only discipline', () => {
+  it('numbered migration dosyaları up-only formatını takip eder', () => {
+    expect(() =>
+      validateVersionedMigrations([
+        {
+          version: '0001_test_migration',
+          name: 'Test migration',
+          up() {},
+        },
+      ]),
+    ).not.toThrow();
+  });
+
+  it('rollback/down export edilen migration reddedilir', () => {
+    expect(() =>
+      validateVersionedMigrations([
+        {
+          version: '0001_bad_rollback',
+          name: 'Bad rollback',
+          up() {},
+          down() {},
+        },
+      ]),
+    ).toThrow(/forward-only/);
+  });
+
+  it('duplicate version reddedilir', () => {
+    expect(() =>
+      validateVersionedMigrations([
+        { version: '0001_duplicate', name: 'First', up() {} },
+        { version: '0001_duplicate', name: 'Second', up() {} },
+      ]),
+    ).toThrow(/Duplicate migration version/);
   });
 });

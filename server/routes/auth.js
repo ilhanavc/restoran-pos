@@ -5,10 +5,15 @@ import jwt from 'jsonwebtoken';
 import config from '../config/index.js';
 import db from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
-import { auditLog } from '../utils/helpers.js';
+import { auditLog, genId } from '../utils/helpers.js';
+import { generateRefreshToken, hashToken } from '../utils/tokenUtils.js';
+import { validatePassword } from '../utils/password.js';
 import { validate } from '../middleware/validate.js';
 
 const router = Router();
+const MOBILE_ACCESS_TOKEN_EXPIRES_IN = '15m';
+const MOBILE_ACCESS_TOKEN_EXPIRES_SECONDS = 15 * 60;
+const DESKTOP_ACCESS_TOKEN_EXPIRES_IN = '8h';
 
 function getDisplaySettings(businessId) {
   const row = db.prepare(`SELECT value FROM settings WHERE business_id = ? AND key = 'app.display'`).get(businessId);
@@ -25,14 +30,76 @@ const loginSchema = {
   body: z.object({
     email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
     password: z.string().min(1, 'Şifre gerekli').max(128),
-    business_id: z.number().int().positive().optional(),
+    business_id: z.string().trim().min(1).optional(),
+    device_id: z.string().trim().max(128).optional(),
+    deviceId: z.string().trim().max(128).optional(),
   }),
 };
+
+const refreshSchema = {
+  body: z.object({
+    refreshToken: z.string().trim().min(1),
+  }),
+};
+
+const logoutSchema = {
+  body: z.object({
+    refreshToken: z.string().trim().min(1).optional(),
+  }).optional().default({}),
+};
+
+const changePasswordSchema = {
+  body: z.object({
+    email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
+    oldPassword: z.string().min(1, 'Mevcut şifre gerekli').max(128),
+    newPassword: z.string().min(1, 'Yeni şifre gerekli').max(128),
+    business_id: z.string().trim().min(1).optional(),
+  }),
+};
+
+const forgotPasswordSchema = {
+  body: z.object({
+    email: z.string().email('Geçerli bir e-posta adresi girin').max(254),
+    business_id: z.string().trim().min(1).optional(),
+  }),
+};
+
+function signAccessToken(user, expiresIn) {
+  return jwt.sign(
+    { userId: user.id, role: user.role_slug, businessId: user.business_id },
+    config.jwt.secret,
+    { expiresIn },
+  );
+}
+
+function getMobileDeviceId(req) {
+  return req.body.device_id || req.body.deviceId || req.headers['x-device-id'] || null;
+}
+
+function createRefreshTokenRecord({ userId, clientType = 'mobile', deviceId = null }) {
+  const refreshToken = generateRefreshToken();
+  db.prepare(`
+    INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, client_type, expires_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now', '+30 days'))
+  `).run(genId(), userId, hashToken(refreshToken), deviceId, clientType);
+  return refreshToken;
+}
+
+function getActiveUsersByEmail(email) {
+  return db.prepare(`
+    SELECT u.id, u.business_id, u.email, u.full_name,
+           b.name as business_name
+    FROM users u
+    JOIN businesses b ON b.id = u.business_id
+    WHERE u.email = ? AND u.is_active = 1
+  `).all(email.toLowerCase().trim());
+}
 
 // POST /api/auth/login
 router.post('/login', validate(loginSchema), (req, res) => {
   try {
     const { email, password, business_id } = req.body;
+    const clientType = req.headers['x-client-type'] === 'mobile' ? 'mobile' : 'desktop';
     if (!email || !password) {
       return res.status(400).json({ error: 'E-posta ve şifre gerekli' });
     }
@@ -47,6 +114,8 @@ router.post('/login', validate(loginSchema), (req, res) => {
     `).all(email.toLowerCase().trim());
 
     if (!rows.length) {
+      // Başarısız giriş — hangi e-posta denendi, logluyoruz (şifre asla loglanmaz)
+      console.warn('[auth] Başarısız giriş denemesi — kullanıcı bulunamadı:', email.toLowerCase().trim());
       return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
     }
 
@@ -68,17 +137,34 @@ router.post('/login', validate(loginSchema), (req, res) => {
     }
 
     if (!bcryptjs.compareSync(password, user.password_hash)) {
+      // Başarısız giriş — yanlış şifre, kullanıcı kaydı mevcuttu
+      console.warn('[auth] Başarısız giriş denemesi — yanlış şifre, kullanıcı:', user.id, 'işletme:', user.business_id);
+      try {
+        auditLog(user.business_id, null, 'login_failed', 'user', user.id);
+      } catch (_e) { /* audit tablosu yazılamazsa girişi engelleme */ }
       return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
     }
 
-    const token = jwt.sign({ userId: user.id, businessId: user.business_id }, config.jwt.secret, {
-      expiresIn: config.jwt.expiresIn,
-    });
+    // Zorunlu şifre değişimi (yeni user veya admin reset sonrası) — token verilmez,
+    // frontend /auth/change-password akışına yönlendirir.
+    if (Number(user.must_change_password) === 1) {
+      return res.status(403).json({
+        error: 'Şifrenizi değiştirmeniz gerekiyor',
+        must_change_password: true,
+        email: user.email,
+        businessId: user.business_id,
+      });
+    }
+
+    const token = signAccessToken(
+      user,
+      clientType === 'mobile' ? MOBILE_ACCESS_TOKEN_EXPIRES_IN : DESKTOP_ACCESS_TOKEN_EXPIRES_IN,
+    );
 
     db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id);
     auditLog(user.business_id, user.id, 'login', 'user', user.id);
 
-    res.json({
+    const response = {
       token,
       user: {
         id: user.id,
@@ -92,9 +178,228 @@ router.post('/login', validate(loginSchema), (req, res) => {
         branchId: user.branch_id,
       },
       display: getDisplaySettings(user.business_id),
-    });
+    };
+
+    if (clientType === 'mobile') {
+      response.refreshToken = createRefreshTokenRecord({
+        userId: user.id,
+        clientType,
+        deviceId: getMobileDeviceId(req),
+      });
+      response.expiresIn = MOBILE_ACCESS_TOKEN_EXPIRES_SECONDS;
+    }
+
+    res.json(response);
   } catch (err) {
     console.error('Login error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/refresh
+router.post('/refresh', validate(refreshSchema), (req, res) => {
+  try {
+    const tokenHash = hashToken(req.body.refreshToken);
+    const existing = db.prepare(`
+      SELECT id, user_id, device_id, client_type, expires_at
+      FROM refresh_tokens
+      WHERE token_hash = ?
+    `).get(tokenHash);
+
+    if (!existing) {
+      return res.status(401).json({ error: 'Geçersiz refresh token' });
+    }
+
+    const expired = db
+      .prepare(`SELECT datetime(?) <= datetime('now') AS expired`)
+      .get(existing.expires_at).expired;
+    if (expired) {
+      db.prepare('DELETE FROM refresh_tokens WHERE id = ?').run(existing.id);
+      return res.status(401).json({ error: 'Refresh token süresi doldu' });
+    }
+
+    const user = db.prepare(`
+      SELECT u.id, u.business_id, u.branch_id, u.email, u.full_name, u.is_active,
+             r.slug as role_slug, r.name as role_name, r.permissions
+      FROM users u JOIN roles r ON u.role_id = r.id
+      WHERE u.id = ?
+    `).get(existing.user_id);
+
+    if (!user || !user.is_active) {
+      db.prepare('DELETE FROM refresh_tokens WHERE id = ?').run(existing.id);
+      return res.status(401).json({ error: 'Geçersiz oturum' });
+    }
+
+    const nextRefreshToken = generateRefreshToken();
+    const rotate = db.transaction(() => {
+      db.prepare('DELETE FROM refresh_tokens WHERE id = ?').run(existing.id);
+      db.prepare(`
+        INSERT INTO refresh_tokens (id, user_id, token_hash, device_id, client_type, expires_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now', '+30 days'))
+      `).run(
+        genId(),
+        user.id,
+        hashToken(nextRefreshToken),
+        existing.device_id,
+        existing.client_type || 'mobile',
+      );
+    });
+    rotate();
+
+    res.json({
+      token: signAccessToken(user, MOBILE_ACCESS_TOKEN_EXPIRES_IN),
+      refreshToken: nextRefreshToken,
+      expiresIn: MOBILE_ACCESS_TOKEN_EXPIRES_SECONDS,
+    });
+  } catch (err) {
+    console.error('Refresh error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/logout
+router.post('/logout', authenticate, validate(logoutSchema), (req, res) => {
+  try {
+    if (req.body.refreshToken) {
+      db.prepare('DELETE FROM refresh_tokens WHERE token_hash = ?').run(hashToken(req.body.refreshToken));
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/change-password — authentication gerekmez; eski şifre doğrulanır.
+// Hem normal parola değişimi hem de `must_change_password=1` sonrası zorunlu
+// değişim için kullanılır. Başarıda must_change_password=0 yapılır.
+router.post('/change-password', validate(changePasswordSchema), (req, res) => {
+  try {
+    const { email, oldPassword, newPassword, business_id } = req.body;
+    const emNorm = email.toLowerCase().trim();
+
+    const rows = db.prepare(`
+      SELECT u.id, u.business_id, u.password_hash, u.is_active
+      FROM users u
+      WHERE u.email = ? AND u.is_active = 1
+    `).all(emNorm);
+
+    if (!rows.length) {
+      return res.status(401).json({ error: 'Geçersiz e-posta veya şifre' });
+    }
+
+    let user;
+    if (rows.length > 1) {
+      if (!business_id) {
+        return res.status(400).json({
+          error: 'Bu e-posta birden fazla işletmede kayıtlı. Lütfen işletme seçin.',
+          requireBusinessId: true,
+        });
+      }
+      user = rows.find((r) => r.business_id === business_id);
+      if (!user) return res.status(401).json({ error: 'Geçersiz işletme seçimi veya şifre' });
+    } else {
+      user = rows[0];
+    }
+
+    if (!bcryptjs.compareSync(oldPassword, user.password_hash)) {
+      try {
+        auditLog(user.business_id, null, 'change_password_failed', 'user', user.id);
+      } catch (_e) { /* yoksay */ }
+      return res.status(401).json({ error: 'Mevcut şifre yanlış' });
+    }
+
+    // Yeni şifre politika kontrolü (min 8, büyük harf, rakam).
+    const pwErr = validatePassword(newPassword);
+    if (pwErr) return res.status(400).json({ error: pwErr });
+
+    // Eski şifreyle aynı olmasın
+    if (bcryptjs.compareSync(newPassword, user.password_hash)) {
+      return res.status(400).json({ error: 'Yeni şifre eski şifreden farklı olmalı' });
+    }
+
+    const newHash = bcryptjs.hashSync(newPassword, 10);
+    db.prepare(`
+      UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = datetime('now')
+      WHERE id = ?
+    `).run(newHash, user.id);
+
+    // Güvenlik: açık tüm refresh token'ları iptal et — diğer cihazlar yeniden login olsun.
+    try {
+      db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(user.id);
+    } catch (_e) { /* refresh_tokens tablosu yoksa yoksay */ }
+
+    auditLog(user.business_id, user.id, 'change_password', 'user', user.id);
+    res.json({ success: true, message: 'Şifre güncellendi. Yeni şifre ile giriş yapabilirsiniz.' });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/forgot-password
+// E-posta altyapısı olmadığı için talep kaydı oluşturulur; yönetici geçici şifre
+// tanımladığında kullanıcı mevcut change-password akışıyla kalıcı şifresini seçer.
+router.post('/forgot-password', validate(forgotPasswordSchema), (req, res) => {
+  try {
+    const { email, business_id } = req.body;
+    const emNorm = email.toLowerCase().trim();
+    const rows = getActiveUsersByEmail(emNorm);
+    const matchedRows = business_id
+      ? rows.filter((row) => row.business_id === business_id)
+      : rows;
+
+    for (const row of matchedRows) {
+      const existingPending = db.prepare(`
+        SELECT id
+        FROM password_reset_requests
+        WHERE user_id = ? AND status = 'pending'
+        ORDER BY requested_at DESC
+        LIMIT 1
+      `).get(row.id);
+
+      if (existingPending) {
+        db.prepare(`
+          UPDATE password_reset_requests
+          SET requested_at = datetime('now'), updated_at = datetime('now')
+          WHERE id = ?
+        `).run(existingPending.id);
+      } else {
+        db.prepare(`
+          INSERT INTO password_reset_requests (
+            id, business_id, user_id, email, status, requested_at, channel, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 'pending', datetime('now'), 'login_screen', datetime('now'), datetime('now'))
+        `).run(genId(), row.business_id, row.id, row.email);
+      }
+
+      try {
+        auditLog(row.business_id, null, 'forgot_password_requested', 'user', row.id, {
+          email: row.email,
+          businessName: row.business_name,
+        });
+      } catch (_e) {
+        // Audit kaydı başarısız olsa bile kullanıcı akışını bozma.
+      }
+    }
+
+    res.json({
+      success: true,
+      message:
+        'Eğer bu e-posta sistemde kayıtlıysa şifre sıfırlama talebiniz kaydedildi. İşletme yöneticiniz geçici şifre tanımladığında giriş yapıp yeni şifrenizi belirleyebilirsiniz.',
+    });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/auth/logout-all
+router.post('/logout-all', authenticate, (req, res) => {
+  try {
+    const info = db.prepare('DELETE FROM refresh_tokens WHERE user_id = ?').run(req.user.id);
+    res.json({ success: true, revoked: info.changes || 0 });
+  } catch (err) {
+    console.error('Logout all error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });

@@ -3,13 +3,52 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
-import { formatCurrency, ORDER_ITEM_LINE_STATUS } from '../../constants/index.js';
+import { useCatalog } from './hooks/useCatalog.js';
+import { useCart } from './hooks/useCart.js';
+import { formatCurrency } from '../../constants/index.js';
 import { masaLabelInArea } from '../../utils/tableUtils.js';
 import {
-  ArrowLeft, Search, Plus, Minus, Trash2, Save,
-  CreditCard, X, ArrowRightLeft, Phone, User,
+  canEditOrderItem,
+  canOpenOrderPayment,
+  canSaveOrderDraft,
+  canVoidOrderItem,
+  getOrderTotalsForDisplay,
+  hasUnsavedOrderChanges,
+  isOrderClosedOrCancelled,
+} from '../../utils/orderActionPolicy.js';
+import {
+  Search, Plus, Minus, Trash2, Save,
+  CreditCard, X, ArrowRightLeft, Phone, User, ChevronLeft, Banknote, Printer,
 } from 'lucide-react';
 import OrderProductDetailModal from './OrderProductDetailModal.jsx';
+import ModifierModal from './ModifierModal.jsx';
+import ClipboardEmpty from './ClipboardEmpty.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import CustomerDetailsModal from './CustomerDetailsModal.jsx';
+import ManualPrintSelectorModal from '../common/ManualPrintSelectorModal.jsx';
+import { formatTimeInIstanbul, parseDateLike } from '../../utils/time.js';
+
+function toOrderAttributePayload(selectedAttributes = []) {
+  const byGroup = new Map();
+  for (const attr of selectedAttributes || []) {
+    if (!attr?.group_id) continue;
+    const optionIds = Array.isArray(attr.option_ids)
+      ? attr.option_ids
+      : attr.option_id
+        ? [attr.option_id]
+        : [];
+    if (optionIds.length === 0) continue;
+    const bucket = byGroup.get(attr.group_id) || new Set();
+    for (const optionId of optionIds) {
+      if (optionId) bucket.add(optionId);
+    }
+    byGroup.set(attr.group_id, bucket);
+  }
+  return Array.from(byGroup.entries()).map(([group_id, optionIds]) => ({
+    group_id,
+    option_ids: Array.from(optionIds),
+  }));
+}
 
 export default function OrderScreen({
   table,
@@ -23,28 +62,48 @@ export default function OrderScreen({
   onQuickPayment,
   onNavigateToTables,
 }) {
-  const [categories, setCategories] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [activeCat, setActiveCat] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [cartItems, setCartItems] = useState([]);
+  const {
+    categories, products, activeCat, searchQuery, categoriesLoading,
+    loadCategories, handleCategorySelect, handleSearch,
+  } = useCatalog();
+  const {
+    cartItems, setCartItems,
+    addItemToCart, updateQuantity, removeItem: removeCartItem,
+    getCartQtyForProduct, decrementProductInCart, applyCartLineEdit,
+  } = useCart();
   const [existingOrder, setExistingOrder] = useState(null);
   const [modifierModal, setModifierModal] = useState(null); // { product, groups, pendingLine? }
   /** Satır düzenleme: gridden açılmaz */
   const [lineDetailModal, setLineDetailModal] = useState(null); // { kind: 'cart', index } | { kind: 'existing', itemId }
   const [saving, setSaving] = useState(false);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [emptyTables, setEmptyTables] = useState([]);
   const [takeawayPhone, setTakeawayPhone] = useState('');
   const [selectedCustomer, setSelectedCustomer] = useState(customer ?? null);
   const [customerModalOpen, setCustomerModalOpen] = useState(false);
+  const [customerDetailsOpen, setCustomerDetailsOpen] = useState(false);
+  const [pendingCustomerChange, setPendingCustomerChange] = useState(null); // { ...customer }
+  const [savingCustomerChange, setSavingCustomerChange] = useState(false);
+  const [printSelectorOpen, setPrintSelectorOpen] = useState(false);
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [customerList, setCustomerList] = useState([]);
   const [customerListLoading, setCustomerListLoading] = useState(false);
   const [newCustomerMode, setNewCustomerMode] = useState(false);
-  const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', address_title: 'Ev' });
+  const [newCustomer, setNewCustomer] = useState({
+    first_name: '',
+    last_name: '',
+    phone: '',
+    phone_2: '',
+    address: '',
+    address_title: 'Ev',
+    address_note: '',
+    province: '',
+    district: '',
+    neighborhood: '',
+  });
   const [selectedTakeawayAddress, setSelectedTakeawayAddress] = useState(customer?.selectedAddress || '');
+  const [paymentTypeModalOpen, setPaymentTypeModalOpen] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const toast = useToast();
   const { hasRole } = useAuth();
   const searchRef = useRef(null);
@@ -52,6 +111,7 @@ export default function OrderScreen({
 
   useEffect(() => {
     loadCategories();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only; loadCategories is not memoized
   }, []);
 
   useEffect(() => {
@@ -100,57 +160,12 @@ export default function OrderScreen({
     return [];
   };
 
-  const loadCategories = async () => {
-    setCategoriesLoading(true);
-    try {
-      const cats = await api.getCategories();
-      setCategories(cats);
-      if (cats.length > 0) {
-        setActiveCat(cats[0].id);
-        loadProducts(cats[0].id);
-      }
-    } catch (err) { toast.error('Kategoriler yüklenemedi'); }
-    finally { setCategoriesLoading(false); }
-  };
-
-  const loadProducts = async (catId) => {
-    try {
-      const prods = catId === '__all__'
-        ? await api.getProducts({})
-        : await api.getProducts({ category_id: catId });
-      setProducts(prods);
-    } catch (err) { toast.error('Ürünler yüklenemedi'); }
-  };
-
   const loadExistingOrder = async (orderId) => {
     try {
       const order = await api.getOrder(orderId);
       setExistingOrder(order);
     } catch {
       /* sipariş yok veya ağ hatası */
-    }
-  };
-
-  const handleCategorySelect = (catId) => {
-    setActiveCat(catId);
-    setSearchQuery('');
-    loadProducts(catId);
-  };
-
-  const handleSearch = async (q) => {
-    setSearchQuery(q);
-    if (q.length >= 2) {
-      try {
-        const prods = await api.getProducts({ search: q });
-        setProducts(prods);
-        setActiveCat(null);
-      } catch (err) {}
-    } else if (q === '') {
-      const catId = activeCat || categories[0]?.id;
-      if (catId) {
-        setActiveCat(catId);
-        loadProducts(catId);
-      }
     }
   };
 
@@ -167,6 +182,7 @@ export default function OrderScreen({
         portion_label = def.label || '';
         effectiveProduct = { ...fullProduct, price: Number(def.price) };
       }
+      // Eski modifier sistemi (geriye uyumluluk)
       const modGroups = await api.getModifiers(product.id);
       if (Object.keys(modGroups).length > 0) {
         setModifierModal({
@@ -180,24 +196,6 @@ export default function OrderScreen({
     } catch (e) {
       toast.error(e.message || 'Ürün eklenemedi');
     }
-  };
-
-  const applyCartLineEdit = (index, { quantity, note, effectiveProduct, portion_id, portion_label }) => {
-    setCartItems((prev) => {
-      const ci = prev[index];
-      if (!ci) return prev;
-      const modDelta = (ci.modifiers || []).reduce((s, m) => s + (m.price_delta || 0), 0);
-      const updated = {
-        ...ci,
-        quantity,
-        note,
-        portion_id: portion_id ?? null,
-        portion_label: portion_label ?? null,
-        unit_price: Number(effectiveProduct.price) + modDelta,
-        base_price: Number(effectiveProduct.price),
-      };
-      return prev.map((c, i) => (i === index ? updated : c));
-    });
   };
 
   const saveExistingLineFromModal = async (itemId, { quantity, note, portion_id }) => {
@@ -240,52 +238,6 @@ export default function OrderScreen({
     saveExistingLineFromModal(ctx.itemId, payload);
   };
 
-  const addItemToCart = (product, modifiers, options = {}) => {
-    const quantity = options.quantity != null ? Math.max(1, Math.floor(Number(options.quantity)) || 1) : 1;
-    const note = options.note != null ? String(options.note) : '';
-    const portion_id = options.portion_id != null ? options.portion_id : null;
-    const portion_label = options.portion_label != null ? options.portion_label : null;
-
-    const modDelta = modifiers.reduce((sum, m) => sum + (m.price_delta || 0), 0);
-    const existing = cartItems.findIndex(
-      (ci) =>
-        ci.product_id === product.id &&
-        (ci.portion_id || null) === (portion_id || null) &&
-        JSON.stringify(ci.modifiers || []) === JSON.stringify(modifiers) &&
-        (ci.note || '') === (note || ''),
-    );
-
-    if (existing >= 0) {
-      setCartItems((prev) =>
-        prev.map((ci, i) => (i === existing ? { ...ci, quantity: ci.quantity + quantity } : ci)),
-      );
-    } else {
-      setCartItems((prev) => [
-        ...prev,
-        {
-          product_id: product.id,
-          product_name: product.name,
-          unit_price: product.price + modDelta,
-          base_price: product.price,
-          quantity,
-          modifiers,
-          note,
-          category_name: product.category_name,
-          portion_id,
-          portion_label,
-        },
-      ]);
-    }
-  };
-
-  const updateQuantity = (index, delta) => {
-    setCartItems(prev => prev.map((ci, i) => {
-      if (i !== index) return ci;
-      const newQty = ci.quantity + delta;
-      return newQty <= 0 ? null : { ...ci, quantity: newQty };
-    }).filter(Boolean));
-  };
-
   const removeItem = (index) => {
     setLineDetailModal((m) => {
       if (!m || m.kind !== 'cart') return m;
@@ -293,39 +245,19 @@ export default function OrderScreen({
       if (m.index > index) return { ...m, index: m.index - 1 };
       return m;
     });
-    setCartItems((prev) => prev.filter((_, i) => i !== index));
+    removeCartItem(index);
   };
 
-  const getCartQtyForProduct = (productId) =>
-    cartItems
-      .filter((ci) => ci.product_id === productId)
-      .reduce((sum, ci) => sum + ci.quantity, 0);
-
-  const decrementProductInCart = (productId) => {
-    setCartItems((prev) => {
-      const simpleIdx = prev.findIndex(
-        (ci) => ci.product_id === productId &&
-          JSON.stringify(ci.modifiers || []) === JSON.stringify([]) &&
-          !ci.note &&
-          !ci.portion_id,
-      );
-      const idx = simpleIdx >= 0 ? simpleIdx : prev.findIndex((ci) => ci.product_id === productId);
-      if (idx < 0) return prev;
-      return prev
-        .map((ci, i) => {
-          if (i !== idx) return ci;
-          const newQty = ci.quantity - 1;
-          return newQty <= 0 ? null : { ...ci, quantity: newQty };
-        })
-        .filter(Boolean);
-    });
-  };
-
-  const handleSaveOrder = async ({ skipNavigate = false } = {}) => {
-    if (cartItems.length === 0) { toast.error('Sipariş boş'); return null; }
-    if (orderType === 'takeaway' && !selectedCustomer?.id) {
+  const handleSaveOrder = async ({ skipNavigate = false, plannedPaymentType = null } = {}) => {
+    const draftState = canSaveOrderDraft({ cartItems, orderType, selectedCustomer });
+    if (!draftState.ok && draftState.reason === 'empty') { toast.error('Sipariş boş'); return null; }
+    if (!draftState.ok && draftState.reason === 'customer-required') {
       openCustomerModal();
       toast.error('Paket sipariş için müşteri seçimi zorunludur');
+      return null;
+    }
+    if (orderType === 'takeaway' && !existingOrder && !plannedPaymentType) {
+      setPaymentTypeModalOpen(true);
       return null;
     }
     setSaving(true);
@@ -337,10 +269,11 @@ export default function OrderScreen({
           modifiers: ci.modifiers,
           note: ci.note,
           ...(ci.portion_id ? { portion_id: ci.portion_id } : {}),
+          ...(ci.selected_attributes?.length ? { selected_attributes: toOrderAttributePayload(ci.selected_attributes) } : {}),
         })));
         setExistingOrder(result);
         setCartItems([]);
-        toast.success('Ürünler eklendi');
+        toast.success('Ürünler kaydedildi');
         if (!skipNavigate && onNavigateToTables) onNavigateToTables();
         return { order: result, isNew: false };
       }
@@ -351,12 +284,14 @@ export default function OrderScreen({
         call_log_id: callLogId != null ? String(callLogId).trim() || null : null,
         guest_count: table?.guest_count || 0,
         delivery_address: selectedTakeawayAddress || customer?.selectedAddress || null,
+        takeaway_planned_payment_type: orderType === 'takeaway' ? plannedPaymentType : null,
         items: cartItems.map((ci) => ({
           product_id: ci.product_id,
           quantity: ci.quantity,
           modifiers: ci.modifiers,
           note: ci.note,
           ...(ci.portion_id ? { portion_id: ci.portion_id } : {}),
+          ...(ci.selected_attributes?.length ? { selected_attributes: toOrderAttributePayload(ci.selected_attributes) } : {}),
         })),
       };
       const result = await api.createOrder(orderData);
@@ -381,21 +316,28 @@ export default function OrderScreen({
   };
 
   const handleVoidItem = async (itemId) => {
-    if (!window.confirm('Bu ürünü iptal (void) etmek istediğinize emin misiniz?')) return;
-    try {
-      setSaving(true);
-      await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
-      toast.success('Ürün iptal edildi');
-      const updated = await api.getOrder(existingOrder.id);
-      setExistingOrder(updated);
-      if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
-        onNavigateToTables();
-      }
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
+    setConfirmDialog({
+      title: 'Ürün iptal edilsin mi?',
+      body: 'Bu ürün siparişten iptal edilecek.',
+      confirmLabel: 'Ürünü İptal Et',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          setSaving(true);
+          await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
+          toast.success('Ürün iptal edildi');
+          const updated = await api.getOrder(existingOrder.id);
+          setExistingOrder(updated);
+          if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
+            onNavigateToTables();
+          }
+        } catch (err) {
+          toast.error(err.message);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   };
 
   const refreshOrder = async () => {
@@ -410,21 +352,28 @@ export default function OrderScreen({
     if (!item || item.status !== 'new' || item.is_comped) return;
     const next = item.quantity + delta;
     if (next <= 0) {
-      if (!window.confirm('Bu satırı iptal etmek istiyor musunuz?')) return;
-      try {
-        setSaving(true);
-        await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
-        toast.success('Satır iptal edildi');
-        const updated = await api.getOrder(existingOrder.id);
-        setExistingOrder(updated);
-        if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
-          onNavigateToTables();
-        }
-      } catch (err) {
-        toast.error(err.message);
-      } finally {
-        setSaving(false);
-      }
+      setConfirmDialog({
+        title: 'Satır iptal edilsin mi?',
+        body: 'Adet sıfıra düşürüldüğü için bu satır siparişten iptal edilecek.',
+        confirmLabel: 'Satırı İptal Et',
+        tone: 'danger',
+        onConfirm: async () => {
+          try {
+            setSaving(true);
+            await api.updateOrderItem(existingOrder.id, itemId, { status: 'cancelled' });
+            toast.success('Satır iptal edildi');
+            const updated = await api.getOrder(existingOrder.id);
+            setExistingOrder(updated);
+            if (updated.status === 'cancelled' && orderType === 'dine_in' && onNavigateToTables) {
+              onNavigateToTables();
+            }
+          } catch (err) {
+            toast.error(err.message);
+          } finally {
+            setSaving(false);
+          }
+        },
+      });
       return;
     }
     try {
@@ -461,21 +410,33 @@ export default function OrderScreen({
     const target = emptyTables.find((x) => x.id === targetTableId);
     const fromLabel = table.displayName || 'Masa';
     const toLabel = target?.displayName || 'Masa';
-    if (!window.confirm(`${fromLabel} → ${toLabel} masasına taşınsın mı?`)) return;
-    try {
-      setSaving(true);
-      await api.transferTable(table.id, targetTableId);
-      toast.success('Sipariş hedef masaya taşındı');
-      setMoveModalOpen(false);
-      if (onNavigateToTables) onNavigateToTables();
-    } catch (err) {
-      toast.error(err.message);
-    } finally {
-      setSaving(false);
-    }
+    setConfirmDialog({
+      title: 'Masa taşınsın mı?',
+      body: `${fromLabel} siparişi ${toLabel} masasına taşınacak.`,
+      confirmLabel: 'Masayı Taşı',
+      tone: 'primary',
+      onConfirm: async () => {
+        try {
+          setSaving(true);
+          await api.transferTable(table.id, targetTableId);
+          toast.success('Sipariş hedef masaya taşındı');
+          setMoveModalOpen(false);
+          if (onNavigateToTables) onNavigateToTables({ highlightTableId: targetTableId });
+        } catch (err) {
+          toast.error(err.message);
+        } finally {
+          setSaving(false);
+        }
+      },
+    });
   };
 
   const loadCustomersForModal = async (q = '') => {
+    if (orderType === 'takeaway' && q.length < 2) {
+      setCustomerList([]);
+      setCustomerListLoading(false);
+      return;
+    }
     setCustomerListLoading(true);
     try {
       let data;
@@ -498,8 +459,23 @@ export default function OrderScreen({
     setCustomerModalOpen(true);
     setCustomerSearchQuery('');
     setNewCustomerMode(false);
-    setNewCustomer({ full_name: '', phone: '', address: '', address_title: 'Ev' });
-    loadCustomersForModal('');
+    setNewCustomer({
+      first_name: '',
+      last_name: '',
+      phone: '',
+      phone_2: '',
+      address: '',
+      address_title: 'Ev',
+      address_note: '',
+      province: '',
+      district: '',
+      neighborhood: '',
+    });
+    if (orderType === 'takeaway') {
+      setCustomerList([]);
+    } else {
+      loadCustomersForModal('');
+    }
   };
 
   const handleCustomerSearchInput = (q) => {
@@ -507,7 +483,11 @@ export default function OrderScreen({
     if (q.length >= 2) {
       loadCustomersForModal(q);
     } else if (q === '') {
-      loadCustomersForModal('');
+      if (orderType === 'takeaway') {
+        setCustomerList([]);
+      } else {
+        loadCustomersForModal('');
+      }
     }
   };
 
@@ -530,7 +510,11 @@ export default function OrderScreen({
       setSelectedTakeawayAddress(defaultAddr?.address || '');
     }
     setCustomerModalOpen(false);
-    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
+    if (orderType === 'takeaway' && !existingOrder) {
+      setPaymentTypeModalOpen(true);
+      return;
+    }
+    if (existingOrder?.id && !isOrderClosedOrCancelled(existingOrder)) {
       try {
         setSaving(true);
         const updated = await api.patchOrderCustomer(existingOrder.id, cust.id);
@@ -549,7 +533,7 @@ export default function OrderScreen({
     if (orderType === 'takeaway') return;
     setSelectedCustomer(null);
     setCustomerModalOpen(false);
-    if (existingOrder?.id && !['closed', 'cancelled'].includes(existingOrder.status)) {
+    if (existingOrder?.id && !isOrderClosedOrCancelled(existingOrder)) {
       try {
         setSaving(true);
         const updated = await api.patchOrderCustomer(existingOrder.id, null);
@@ -571,23 +555,33 @@ export default function OrderScreen({
       setSelectedTakeawayAddress(newCustomer.address || '');
       setCustomerModalOpen(false);
       setNewCustomerMode(false);
-      setNewCustomer({ full_name: '', phone: '', address: '', address_title: 'Ev' });
+      setNewCustomer({
+      first_name: '',
+      last_name: '',
+      phone: '',
+      phone_2: '',
+      address: '',
+      address_title: 'Ev',
+      address_note: '',
+      province: '',
+      district: '',
+      neighborhood: '',
+    });
       toast.success('Müşteri oluşturuldu');
+      if (orderType === 'takeaway' && !existingOrder) {
+        setPaymentTypeModalOpen(true);
+      }
     } catch (err) {
       toast.error(err.message || 'Müşteri oluşturulamadı');
     }
   };
 
   // Fiyatlar KDV dahil; grand_total = satır toplamı − indirim
-  const cartSubtotal = cartItems.reduce((sum, ci) => sum + ci.unit_price * ci.quantity, 0);
-  const savedTotal = Number(existingOrder?.grand_total) || 0;
-  const displayTotal = savedTotal + cartSubtotal;
-  const araTotal = (Number(existingOrder?.subtotal) || 0) + cartSubtotal;
+  const { displayTotal, araTotal } = getOrderTotalsForDisplay(existingOrder, cartItems);
 
   const allExistingItems = existingOrder?.items || [];
-  const activeExistingItems = allExistingItems.filter((i) => i.status !== 'cancelled');
-  const hasUnsavedChanges = cartItems.length > 0;
-  const canOpenPayment = Boolean(existingOrder && !hasUnsavedChanges && existingOrder.status !== 'closed' && activeExistingItems.length > 0);
+  const hasUnsavedChanges = hasUnsavedOrderChanges(cartItems);
+  const canOpenPayment = canOpenOrderPayment(existingOrder, cartItems);
   const tableDisplayName = table
     ? (table.displayName || `Masa ${table.name}`)
     : existingOrder?.table_name || null;
@@ -628,7 +622,6 @@ export default function OrderScreen({
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-primary" onClick={() => navigate('/settings/menu')}>Menü ayarları</button>
-            <button type="button" className="btn btn-ghost" onClick={onBack}>← Masalara dön</button>
           </div>
         </div>
       </div>
@@ -640,15 +633,16 @@ export default function OrderScreen({
       {/* Sol: üst bar + arama + yatay kategoriler + ürün ızgarası */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border)' }}>
         <div className="order-screen-topbar">
-          <button
-            type="button"
-            className="order-screen-back-zone"
-            onClick={onBack}
-            aria-label="Geri"
-          >
-            <span className="order-screen-back-zone-icon" aria-hidden>
-              <ArrowLeft size={22} strokeWidth={2.25} />
-            </span>
+          <div className="order-screen-back-zone">
+            <button
+              type="button"
+              className="order-screen-back-zone-icon"
+              onClick={onBack}
+              title="Masalar ekranına dön"
+              aria-label="Masalar ekranına dön"
+            >
+              <ChevronLeft size={20} />
+            </button>
             <span className="order-screen-back-zone-body">
               <span className="order-screen-table-title">
                 {table
@@ -661,10 +655,31 @@ export default function OrderScreen({
                 <span className="order-screen-area-pill">{table.area_name}</span>
               )}
               {orderType === 'dine_in' && selectedCustomer?.full_name && (
-                <span className="order-screen-customer-line">{selectedCustomer.full_name}</span>
+                <span
+                  className="order-screen-customer-line order-screen-customer-line-clickable"
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setCustomerDetailsOpen(true); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setCustomerDetailsOpen(true);
+                    }
+                  }}
+                  title="Müşteri bilgilerini düzenle"
+                >
+                  {selectedCustomer.full_name}
+                </span>
               )}
               {orderType === 'takeaway' && selectedCustomer?.full_name && (
-                <span className="order-screen-customer-line">{selectedCustomer.full_name}</span>
+                <span
+                  className="order-screen-customer-line"
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                  style={{ pointerEvents: 'auto' }}
+                >
+                  {selectedCustomer.full_name}
+                </span>
               )}
               {orderType === 'takeaway' && (customer || (takeawayPhone && takeawayPhone.trim() !== '')) && (
                 <span className="order-screen-customer-line order-screen-takeaway-phone">
@@ -673,7 +688,7 @@ export default function OrderScreen({
                 </span>
               )}
             </span>
-          </button>
+          </div>
 
           {orderType === 'dine_in' && table && (
             <>
@@ -682,6 +697,7 @@ export default function OrderScreen({
                 type="button"
                 className="order-screen-topbar-icon-btn"
                 onClick={openCustomerModal}
+                data-testid="order-select-customer-button"
                 disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
                 title={selectedCustomer ? 'Müşteriyi değiştir' : 'Müşteri seç'}
               >
@@ -690,9 +706,36 @@ export default function OrderScreen({
             </>
           )}
 
-          {existingOrder && (
-            <span className="badge badge-info order-screen-order-badge" style={{ fontSize: 11 }}>#{existingOrder.order_no}</span>
+          {orderType === 'takeaway' && selectedCustomer?.id && (
+            <>
+              <span className="order-screen-topbar-divider" aria-hidden />
+              <button
+                type="button"
+                className="order-screen-topbar-icon-btn"
+                onClick={() => setCustomerDetailsOpen(true)}
+                disabled={saving || (existingOrder && ['closed', 'cancelled'].includes(existingOrder.status))}
+                title="Müşteri bilgileri"
+              >
+                <User size={22} strokeWidth={2} />
+              </button>
+            </>
           )}
+
+          {existingOrder?.id && (
+            <>
+              <span className="order-screen-topbar-divider" aria-hidden />
+              <button
+                type="button"
+                className="order-screen-topbar-icon-btn"
+                onClick={() => setPrintSelectorOpen(true)}
+                disabled={saving}
+                title="Yazdır"
+              >
+                <Printer size={22} strokeWidth={2} />
+              </button>
+            </>
+          )}
+
 
           <div className="order-screen-topbar-search">
             <div style={{ position: 'relative', width: '100%' }}>
@@ -798,6 +841,7 @@ export default function OrderScreen({
                   <button
                     type="button"
                     onClick={() => quickAddFromGrid(prod)}
+                    data-testid={`product-card-${prod.id}`}
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -845,6 +889,8 @@ export default function OrderScreen({
                           color: 'inherit',
                           cursor: 'pointer',
                           padding: 4,
+                          minWidth: 34,
+                          minHeight: 34,
                           lineHeight: 1,
                           fontSize: 18,
                           fontWeight: 700,
@@ -867,6 +913,8 @@ export default function OrderScreen({
                           color: 'inherit',
                           cursor: 'pointer',
                           padding: 4,
+                          minWidth: 34,
+                          minHeight: 34,
                           lineHeight: 1,
                           fontSize: 18,
                           fontWeight: 700,
@@ -937,9 +985,7 @@ export default function OrderScreen({
               </div>
               {allExistingItems.filter((i) => i.status !== 'cancelled').map((item) => {
                 const mods = JSON.parse(item.modifiers || '[]');
-                const st = ORDER_ITEM_LINE_STATUS[item.status] || ORDER_ITEM_LINE_STATUS.sent;
-                const lineBadge = item.status && item.status !== 'new' ? st : null;
-                const canEditQty = item.status === 'new' && !item.is_comped && existingOrder.status !== 'closed';
+                const canEditQty = canEditOrderItem(item, existingOrder);
                 return (
                   <div
                     key={item.id}
@@ -966,11 +1012,11 @@ export default function OrderScreen({
                   >
                     {canEditQty ? (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, -1)} disabled={saving}>
+                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minWidth: 40, minHeight: 40 }} onClick={() => handleUpdateExistingQty(item.id, -1)} disabled={saving}>
                           <Minus size={14} />
                         </button>
                         <span style={{ fontSize: 15, fontWeight: 700, minWidth: 26, textAlign: 'center' }}>{item.quantity}</span>
-                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minHeight: 'auto' }} onClick={() => handleUpdateExistingQty(item.id, 1)} disabled={saving}>
+                        <button type="button" className="btn btn-ghost" style={{ padding: 6, minWidth: 40, minHeight: 40 }} onClick={() => handleUpdateExistingQty(item.id, 1)} disabled={saving}>
                           <Plus size={14} />
                         </button>
                       </div>
@@ -982,14 +1028,30 @@ export default function OrderScreen({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600 }}>{item.product_name}</span>
-                        {lineBadge && (
-                          <span style={{
-                            fontSize: 8, fontWeight: 800, padding: '2px 6px', borderRadius: 4,
-                            background: lineBadge.bg, color: lineBadge.color,
-                          }}>
-                            {lineBadge.short}
-                          </span>
-                        )}
+                        {(() => {
+                          const parts = [];
+                          if (item.created_by_name) parts.push(item.created_by_name);
+                          if (item.created_at) {
+                            const d = parseDateLike(item.created_at);
+                            if (d && !Number.isNaN(d.getTime())) {
+                              parts.push(formatTimeInIstanbul(d));
+                            }
+                          }
+                          return parts.length > 0 ? (
+                            <span style={{
+                              fontSize: 8,
+                              fontWeight: 800,
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              background: 'var(--warning-muted)',
+                              color: 'var(--warning)',
+                              textTransform: 'uppercase',
+                              letterSpacing: '0.03em',
+                            }}>
+                              {parts.join(' · ')}
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                       {item.portion_label && (
                         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{item.portion_label}</div>
@@ -999,6 +1061,15 @@ export default function OrderScreen({
                           {mods.map((m) => m.name).join(', ')}
                         </div>
                       )}
+                      {(() => {
+                        let attrs = [];
+                        try { attrs = JSON.parse(item.selected_attributes || '[]'); } catch {}
+                        return attrs.length > 0 ? (
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                            {attrs.map((a) => a.option_name).join(', ')}
+                          </div>
+                        ) : null;
+                      })()}
                       <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
                         {item.is_comped ? (
                           <span style={{ color: 'var(--danger)' }}>İKRAM</span>
@@ -1012,13 +1083,13 @@ export default function OrderScreen({
                       {item.note && <div style={{ fontSize: 12, color: 'var(--warning)', marginTop: 2 }}>📝 {item.note}</div>}
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                      {!item.is_comped && item.status === 'new' && existingOrder.status !== 'closed' && (
-                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }} onClick={() => handleVoidItem(item.id)} title="Satırı iptal">
+                      {canVoidOrderItem(item, existingOrder, false) && (
+                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, minWidth: 40, minHeight: 40 }} onClick={() => handleVoidItem(item.id)} title="Satırı iptal">
                           <Trash2 size={16} />
                         </button>
                       )}
-                      {hasRole('admin', 'cashier') && existingOrder.status !== 'closed' && item.status !== 'new' && !item.is_comped && (
-                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }} onClick={() => handleVoidItem(item.id)} title="İptal (void)">
+                      {item.status !== 'new' && canVoidOrderItem(item, existingOrder, hasRole('admin', 'cashier')) && (
+                        <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, minWidth: 40, minHeight: 40 }} onClick={() => handleVoidItem(item.id)} title="İptal (void)">
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -1033,8 +1104,19 @@ export default function OrderScreen({
           {cartItems.length > 0 && (
             <div style={{ padding: '8px 0' }}>
               {allExistingItems.length > 0 && (
-                <div style={{ padding: '6px 18px', fontSize: 11, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Yeni Eklenen
+                <div style={{ padding: '6px 18px', display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <span>Yeni Eklenen</span>
+                  <span style={{
+                    borderRadius: 6,
+                    border: '1px solid var(--accent)',
+                    padding: '2px 6px',
+                    color: 'var(--accent)',
+                    background: 'var(--accent-muted)',
+                    letterSpacing: 0,
+                    textTransform: 'none',
+                  }}>
+                    Kaydedilmedi
+                  </span>
                 </div>
               )}
               {cartItems.map((item, idx) => {
@@ -1063,12 +1145,12 @@ export default function OrderScreen({
                     {/* Quantity Controls */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }} onClick={(e) => e.stopPropagation()}>
                       <button type="button" className="btn btn-ghost" onClick={() => updateQuantity(idx, -1)}
-                        style={{ padding: 6, minHeight: 'auto', borderRadius: 4 }}>
+                        style={{ padding: 6, minWidth: 40, minHeight: 40, borderRadius: 4 }}>
                         <Minus size={14} />
                       </button>
                       <span style={{ fontSize: 15, fontWeight: 700, width: 28, textAlign: 'center' }}>{item.quantity}</span>
                       <button type="button" className="btn btn-ghost" onClick={() => updateQuantity(idx, 1)}
-                        style={{ padding: 6, minHeight: 'auto', borderRadius: 4 }}>
+                        style={{ padding: 6, minWidth: 40, minHeight: 40, borderRadius: 4 }}>
                         <Plus size={14} />
                       </button>
                     </div>
@@ -1084,6 +1166,11 @@ export default function OrderScreen({
                           {mods.map(m => m.name).join(', ')}
                         </div>
                       )}
+                      {(item.selected_attributes || []).length > 0 && (
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                          {item.selected_attributes.map((a) => a.option_name).join(', ')}
+                        </div>
+                      )}
                       {item.note && <div style={{ fontSize: 12, color: 'var(--warning)' }}>📝 {item.note}</div>}
                     </div>
 
@@ -1094,7 +1181,7 @@ export default function OrderScreen({
 
                     {/* Actions */}
                     <div style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
-                      <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4 }}
+                      <button type="button" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--danger)', padding: 4, minWidth: 40, minHeight: 40 }}
                         onClick={() => removeItem(idx)}>
                         <Trash2 size={16} />
                       </button>
@@ -1148,10 +1235,44 @@ export default function OrderScreen({
             </div>
           )}
 
-          {hasUnsavedChanges ? (
+          {pendingCustomerChange ? (
+            <>
+              <div style={{ fontSize: 13, lineHeight: 1.3, marginBottom: 6, color: 'var(--text-muted)' }}>
+                Müşteri değiştirilecek:
+                <strong style={{ marginLeft: 6, color: 'var(--text)' }}>
+                  {pendingCustomerChange.full_name || `${pendingCustomerChange.first_name || ''} ${pendingCustomerChange.last_name || ''}`.trim()}
+                </strong>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
+                disabled={savingCustomerChange}
+                onClick={async () => {
+                  setSavingCustomerChange(true);
+                  try {
+                    if (existingOrder?.id) {
+                      await api.patchOrderCustomer(existingOrder.id, pendingCustomerChange.id);
+                    }
+                    setSelectedCustomer(pendingCustomerChange);
+                    setPendingCustomerChange(null);
+                    toast.success('Müşteri güncellendi');
+                    onBack?.();
+                  } catch (err) {
+                    toast.error(err?.message || 'Müşteri değiştirilemedi');
+                  } finally {
+                    setSavingCustomerChange(false);
+                  }
+                }}
+              >
+                <Save size={16} /> {savingCustomerChange ? 'Kaydediliyor...' : 'Kaydet'}
+              </button>
+            </>
+          ) : hasUnsavedChanges ? (
             <button
               type="button"
               className="btn btn-primary"
+              data-testid="order-save-button"
               style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
               onClick={handleSaveOrder}
               disabled={saving}
@@ -1163,6 +1284,7 @@ export default function OrderScreen({
               <button
                 type="button"
                 className="btn btn-primary"
+                data-testid="order-payment-button"
                 style={{ width: '100%', minHeight: 46, justifyContent: 'center' }}
                 onClick={() => openPaymentFlow('detail')}
                 disabled={saving}
@@ -1228,6 +1350,7 @@ export default function OrderScreen({
               note: item.note,
               portion_id: item.portion_id,
               portion_label: item.portion_label,
+              selected_attributes: item.selected_attributes || [],
             }}
             modifiersDisplay={item.modifiers?.length ? item.modifiers : null}
             onClose={() => setLineDetailModal(null)}
@@ -1238,7 +1361,7 @@ export default function OrderScreen({
       {lineDetailModal?.kind === 'existing' && existingOrder && (() => {
         const item = (existingOrder.items || []).find((i) => i.id === lineDetailModal.itemId);
         if (!item) return null;
-        let mods = [];
+        let mods;
         try {
           mods = JSON.parse(item.modifiers || '[]');
         } catch {
@@ -1257,8 +1380,10 @@ export default function OrderScreen({
               note: item.note || '',
               portion_id: item.portion_id,
               portion_label: item.portion_label,
+              selected_attributes: (() => { try { return JSON.parse(item.selected_attributes || '[]'); } catch { return []; } })(),
             }}
             modifiersDisplay={mods.length ? mods : null}
+            readOnlyAttributes
             readOnlyQuantity={closed || comped || !isNew}
             readOnlyPortion={closed || comped || !isNew}
             readOnlyNote={closed || comped}
@@ -1294,6 +1419,65 @@ export default function OrderScreen({
         />
       )}
 
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={() => setConfirmDialog(null)}
+        onConfirm={() => {
+          const onConfirm = confirmDialog?.onConfirm;
+          setConfirmDialog(null);
+          onConfirm?.();
+        }}
+      />
+
+      <ManualPrintSelectorModal
+        open={printSelectorOpen && !!existingOrder?.id}
+        onClose={() => setPrintSelectorOpen(false)}
+        printRole="receipt"
+        title="Siparişi Yazdır"
+        description="Hangi yazıcıdan yazdırmak istiyorsunuz?"
+        onConfirm={async (printerId) => {
+          if (!existingOrder?.id) return;
+          try {
+            await api.printOrderReceipt(existingOrder.id, { printer_id: printerId });
+            toast.success('Yazdırma isteği gönderildi');
+          } catch (err) {
+            toast.error(err?.message || 'Yazdırma isteği gönderilemedi');
+          }
+        }}
+      />
+
+      {customerDetailsOpen && selectedCustomer?.id && (
+        <CustomerDetailsModal
+          customerId={selectedCustomer.id}
+          initialCustomer={selectedCustomer}
+          onClose={() => setCustomerDetailsOpen(false)}
+          onClearSelection={() => {
+            setSelectedCustomer(null);
+            setCustomerDetailsOpen(false);
+          }}
+          onSaved={(updated) => {
+            setSelectedCustomer((prev) => ({ ...prev, ...updated }));
+          }}
+          onSelectCustomer={(c) => {
+            // Aynı müşteri seçildiyse pending'i iptal et
+            if (c?.id === selectedCustomer?.id) {
+              setPendingCustomerChange(null);
+            } else {
+              setPendingCustomerChange(c);
+            }
+          }}
+          onCreateNew={() => {
+            setCustomerDetailsOpen(false);
+            setNewCustomerMode(true);
+            setCustomerModalOpen(true);
+          }}
+        />
+      )}
+
       {customerModalOpen && (
         <div className="modal-overlay" onClick={() => setCustomerModalOpen(false)}>
           <div className="modal modal-md order-customer-modal" onClick={(e) => e.stopPropagation()}>
@@ -1308,11 +1492,13 @@ export default function OrderScreen({
                 <Search size={15} className="order-customer-modal-search-icon" />
                 <input
                   className="input"
+                  data-testid="order-customer-search-input"
                   placeholder="Ad veya telefon ile ara..."
                   value={customerSearchQuery}
                   onChange={(e) => handleCustomerSearchInput(e.target.value)}
                   autoComplete="off"
                   spellCheck={false}
+                  autoFocus
                 />
               </div>
               {selectedCustomer && (
@@ -1340,29 +1526,77 @@ export default function OrderScreen({
               )}
               {newCustomerMode && !selectedCustomer && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <input
+                      className="input"
+                      placeholder="Müşteri Adı *"
+                      value={newCustomer.first_name}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, first_name: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Müşteri Soyadı"
+                      value={newCustomer.last_name}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, last_name: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Müşteri Telefonu"
+                      value={newCustomer.phone}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, phone: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Müşteri Telefonu 2"
+                      value={newCustomer.phone_2}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, phone_2: e.target.value }))}
+                    />
+                  </div>
                   <input
                     className="input"
-                    placeholder="Ad Soyad"
-                    value={newCustomer.full_name}
-                    onChange={(e) => setNewCustomer((p) => ({ ...p, full_name: e.target.value }))}
+                    placeholder="Adres Başlığı (Ev, İşyeri, Diğer — maks. 15 karakter)"
+                    maxLength={15}
+                    value={newCustomer.address_title}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, address_title: e.target.value }))}
                   />
-                  <input
+                  <textarea
                     className="input"
-                    placeholder="Telefon"
-                    value={newCustomer.phone}
-                    onChange={(e) => setNewCustomer((p) => ({ ...p, phone: e.target.value }))}
-                  />
-                  <input
-                    className="input"
+                    rows={2}
                     placeholder="Adres"
                     value={newCustomer.address}
                     onChange={(e) => setNewCustomer((p) => ({ ...p, address: e.target.value }))}
                   />
+                  <input
+                    className="input"
+                    placeholder="Adres Tarifi / Notu"
+                    value={newCustomer.address_note}
+                    onChange={(e) => setNewCustomer((p) => ({ ...p, address_note: e.target.value }))}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                    <input
+                      className="input"
+                      placeholder="İl"
+                      value={newCustomer.province}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, province: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="İlçe"
+                      value={newCustomer.district}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, district: e.target.value }))}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Mahalle"
+                      value={newCustomer.neighborhood}
+                      onChange={(e) => setNewCustomer((p) => ({ ...p, neighborhood: e.target.value }))}
+                    />
+                  </div>
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
                     onClick={handleCreateCustomerFromModal}
-                    disabled={!newCustomer.full_name || !newCustomer.phone}
+                    disabled={!newCustomer.first_name}
                   >
                     Müşteri Oluştur
                   </button>
@@ -1376,6 +1610,7 @@ export default function OrderScreen({
                     <button
                       key={c.id}
                       type="button"
+                      data-testid={`customer-row-${c.id}`}
                       className={`order-customer-row ${selectedCustomer?.id === c.id ? 'is-active' : ''}`}
                       onClick={() => handlePickCustomer(c)}
                       disabled={saving}
@@ -1391,7 +1626,11 @@ export default function OrderScreen({
                 )}
                 {!customerListLoading && customerList.length === 0 && (
                   <div className="empty-state" style={{ padding: 20 }}>
-                    <div className="empty-state-text">Müşteri bulunamadı</div>
+                    <div className="empty-state-text">
+                      {orderType === 'takeaway' && customerSearchQuery.trim().length < 2
+                        ? 'Seçmek istediğiniz müşteriyi arama yaparak bulabilirsiniz'
+                        : 'Müşteri bulunamadı'}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1411,86 +1650,109 @@ export default function OrderScreen({
               )}
             </div>
             <div className="modal-footer">
-              <button type="button" className="btn btn-ghost" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
+              <button type="button" className="btn btn-ghost" data-testid="order-customer-modal-close-button" onClick={() => setCustomerModalOpen(false)}>Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {paymentTypeModalOpen && (
+        <div className="modal-overlay" onClick={() => !saving && setPaymentTypeModalOpen(false)}>
+          <div
+            className="modal modal-md"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="takeaway-payment-type-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-header" style={{ alignItems: 'flex-start' }}>
+              <div>
+                <h2 id="takeaway-payment-type-title" style={{ margin: 0, fontSize: 18 }}>Ödeme Tipi Seçiniz</h2>
+                <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.45 }}>
+                  Siparişiniz teslim edildiğinde seçilen tipte ödeme kaydı oluşturulacak.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon"
+                onClick={() => setPaymentTypeModalOpen(false)}
+                disabled={saving}
+                title="Kapat"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: 14,
+              }}>
+                <button
+                  type="button"
+                  data-testid="takeaway-payment-type-cash"
+                  disabled={saving}
+                  onClick={async () => {
+                    setPaymentTypeModalOpen(false);
+                    await handleSaveOrder({ plannedPaymentType: 'cash' });
+                  }}
+                  style={{
+                    minHeight: 120,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    padding: 16,
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    fontSize: 15,
+                    fontWeight: 800,
+                  }}
+                >
+                  <Banknote size={34} color="var(--success)" strokeWidth={1.8} />
+                  Nakit
+                </button>
+                <button
+                  type="button"
+                  data-testid="takeaway-payment-type-card"
+                  disabled={saving}
+                  onClick={async () => {
+                    setPaymentTypeModalOpen(false);
+                    await handleSaveOrder({ plannedPaymentType: 'card' });
+                  }}
+                  style={{
+                    minHeight: 120,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    padding: 16,
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-primary)',
+                    cursor: saving ? 'not-allowed' : 'pointer',
+                    fontFamily: 'inherit',
+                    fontSize: 15,
+                    fontWeight: 800,
+                  }}
+                >
+                  <CreditCard size={34} color="var(--accent)" strokeWidth={1.8} />
+                  Kredi Kartı
+                </button>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setPaymentTypeModalOpen(false)}
+                disabled={saving}
+              >
+                Vazgeç
+              </button>
             </div>
           </div>
         </div>
       )}
     </div>
-  );
-}
-
-function ModifierModal({ product, groups, onConfirm, onClose }) {
-  const [selected, setSelected] = useState({});
-
-  const toggle = (groupName, mod) => {
-    setSelected(prev => {
-      const current = prev[groupName] || [];
-      const exists = current.find(m => m.id === mod.id);
-      if (exists) return { ...prev, [groupName]: current.filter(m => m.id !== mod.id) };
-      return { ...prev, [groupName]: [...current, mod] };
-    });
-  };
-
-  const allSelected = Object.values(selected).flat();
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal modal-sm" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <h2>{product.name}</h2>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Seçenekleri belirleyin</div>
-          </div>
-          <button className="btn btn-ghost btn-icon" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div className="modal-body">
-          {Object.entries(groups).map(([groupName, mods]) => (
-            <div key={groupName} style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
-                {groupName}
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {mods.map(mod => {
-                  const isSelected = (selected[groupName] || []).find(m => m.id === mod.id);
-                  return (
-                    <button key={mod.id} onClick={() => toggle(groupName, mod)}
-                      style={{
-                        padding: '8px 14px', borderRadius: 'var(--radius-sm)',
-                        border: `1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
-                        background: isSelected ? 'var(--accent-muted)' : 'var(--bg-tertiary)',
-                        color: isSelected ? 'var(--accent)' : 'var(--text-secondary)',
-                        cursor: 'pointer', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-                      }}>
-                      {mod.name}
-                      {mod.price_delta !== 0 && (
-                        <span style={{ marginLeft: 4, fontSize: 10, opacity: 0.7 }}>
-                          {mod.price_delta > 0 ? '+' : ''}{formatCurrency(mod.price_delta)}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="modal-footer">
-          <button className="btn btn-ghost" onClick={onClose}>Vazgeç</button>
-          <button className="btn btn-primary" onClick={() => onConfirm(allSelected)}>
-            Ekle {allSelected.length > 0 && `(${allSelected.length})`}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ClipboardEmpty() {
-  return (
-    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="empty-state-icon">
-      <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-      <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-    </svg>
   );
 }

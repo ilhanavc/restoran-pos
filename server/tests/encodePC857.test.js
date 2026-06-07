@@ -179,6 +179,27 @@ describe('encodeWin1254', () => {
 });
 
 describe('payloadToEscPosBuffer encoding commands', () => {
+  it('varsayılan modda Windows-1254 ESC t 32 kullanır ve Phoenix FS komutunu göndermez', () => {
+    const buffer = payloadToEscPosBuffer({
+      payload: {
+        kind: 'receipt',
+        user_name: 'İlhan Avcı',
+        table_name: 'Masa 1',
+        items: [],
+        grand_total: 0,
+      },
+    });
+
+    const escTIndex = buffer.findIndex((byte, index) => byte === 0x1b && buffer[index + 1] === 0x74);
+    const phoenixIndex = buffer.findIndex(
+      (byte, index) => byte === 0x1c && buffer[index + 1] === 0x7d && buffer[index + 2] === 0x26,
+    );
+
+    expect(escTIndex).toBeGreaterThanOrEqual(0);
+    expect(buffer[escTIndex + 2]).toBe(32);
+    expect(phoenixIndex).toBe(-1);
+  });
+
   it('Windows-1254 modunda ESC t 32 kullanır ve Phoenix FS komutunu göndermez', () => {
     const buffer = payloadToEscPosBuffer(
       {
@@ -201,5 +222,29 @@ describe('payloadToEscPosBuffer encoding commands', () => {
     expect(escTIndex).toBeGreaterThanOrEqual(0);
     expect(buffer[escTIndex + 2]).toBe(32);
     expect(phoenixIndex).toBe(-1);
+  });
+
+  it('PC857 modunda ESC t 12 kullanır ve Phoenix FS komutunu korur', () => {
+    const buffer = payloadToEscPosBuffer(
+      {
+        payload: {
+          kind: 'kitchen',
+          order_no: 42,
+          table_name: 'Masa 1',
+          lines: [{ product_name: 'Çorba', quantity: 1 }],
+        },
+      },
+      { encodingMode: 'pc857' },
+    );
+
+    const escTIndex = buffer.findIndex((byte, index) => byte === 0x1b && buffer[index + 1] === 0x74);
+    const phoenixIndex = buffer.findIndex(
+      (byte, index) => byte === 0x1c && buffer[index + 1] === 0x7d && buffer[index + 2] === 0x26,
+    );
+
+    expect(escTIndex).toBeGreaterThanOrEqual(0);
+    expect(buffer[escTIndex + 2]).toBe(12);
+    expect(phoenixIndex).toBeGreaterThanOrEqual(0);
+    expect(buffer.includes(0x80)).toBe(true);
   });
 });

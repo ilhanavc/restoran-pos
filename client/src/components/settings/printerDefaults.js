@@ -78,6 +78,17 @@ function defaultCopies() {
   };
 }
 
+function defaultAutoPrint() {
+  return {
+    onTableOrderCreate: false,
+    onTakeawayOrderCreate: false,
+    onOrderAdjustment: false,
+    onPaymentComplete: false,
+    onTableClose: false,
+    onTakeawayComplete: false,
+  };
+}
+
 export function defaultTemplateForType(type) {
   if (type === 'kitchen' || type === 'bar') {
     return [
@@ -129,6 +140,7 @@ export function createEmptyPrintOptions(type) {
     copies: defaultCopies(),
     printOnSave: false,
     printOnIntegrationApprove: false,
+    autoPrint: defaultAutoPrint(),
     skipPhoenixCmd: true,
     encodingMode: 'win1254',
     roles: {
@@ -184,6 +196,7 @@ export function normalizePrintOptions(po, type) {
       typeof parsed.printOnIntegrationApprove === 'boolean'
         ? parsed.printOnIntegrationApprove
         : e.printOnIntegrationApprove,
+    autoPrint: { ...e.autoPrint, ...(parsed.autoPrint || {}) },
     skipPhoenixCmd:
       typeof parsed.skipPhoenixCmd === 'boolean' ? parsed.skipPhoenixCmd : e.skipPhoenixCmd,
     encodingMode: parsed.encodingMode === 'pc857' ? 'pc857' : e.encodingMode,

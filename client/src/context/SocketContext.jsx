@@ -1,12 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext.jsx';
+import { BASE_URL } from '../services/api/core.js';
 
 const SocketContext = createContext(null);
 
-// Electron prod: window.location.origin = http://127.0.0.1:3001
+// Electron prod (loadFile): window.location.origin = 'null' — use explicit BASE_URL
 // Dev (Vite proxy): window.location.origin = http://localhost:5173 → proxy → 3001
-const SOCKET_URL = window.location.origin;
+const SOCKET_URL = BASE_URL;
 
 export function SocketProvider({ children }) {
   const { user } = useAuth();

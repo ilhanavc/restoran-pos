@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import db from '../config/database.js';
 import { authenticate, businessScope } from '../middleware/auth.js';
-import { genId, normalizePhone } from '../utils/helpers.js';
+import { genId } from '../utils/helpers.js';
+import { recordEntityMutation } from '../services/entityMutationService.js';
 import { normalizePhoneDigits } from '../utils/phoneNormalize.js';
 
 const router = Router();
@@ -26,14 +27,6 @@ function normalizeSearchTextTR(value) {
     .toLocaleLowerCase('tr-TR');
 }
 
-function parseMoney(value) {
-  const raw = cleanText(value);
-  if (!raw) return 0;
-  const normalized = raw.replace(/\./g, '').replace(',', '.').replace(/[^\d.-]/g, '');
-  const n = parseFloat(normalized);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function parseIntSafe(value) {
   const raw = cleanText(value);
   if (!raw) return 0;
@@ -49,28 +42,59 @@ function rowPick(row, keys) {
   return '';
 }
 
+function splitFullName(full) {
+  const trimmed = cleanText(full).replace(/\s+/g, ' ');
+  if (!trimmed) return { first_name: '', last_name: '' };
+  const parts = trimmed.split(' ');
+  if (parts.length === 1) return { first_name: parts[0], last_name: '' };
+  return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
+}
+
+function composeFullName(first, last) {
+  return [cleanText(first), cleanText(last)].filter(Boolean).join(' ');
+}
+
 function normalizeImportRow(row) {
-  const full_name = cleanText(rowPick(row, ['Ad Soyad', 'ad soyad', 'full_name', 'name', 'Müşteri', 'musteri']));
-  const phoneRaw = cleanText(rowPick(row, ['Telefon', 'telefon', 'phone', 'Telefon Numarası', 'Tel']));
-  const normalizedPhone = normalizePhoneDigits(phoneRaw);
-  const phone = normalizedPhone || (phoneRaw ? normalizePhone(phoneRaw) : '');
-  const address = cleanText(rowPick(row, ['Adres', 'adres', 'address']));
-  const district = cleanText(rowPick(row, ['Mahalle', 'mahalle', 'district']));
-  const legacyNo = cleanText(rowPick(row, ['No', 'no', 'Müşteri No']));
-  const legacyBalance = parseMoney(rowPick(row, ['Bakiye', 'bakiye', 'balance']));
-  const legacyTotalAmount = parseMoney(rowPick(row, ['Toplam Tutar', 'toplam tutar', 'total_amount']));
-  const legacyDiscountAmount = parseMoney(rowPick(row, ['İndirim Tutarı', 'indirim tutarı', 'Indirim Tutari', 'discount_amount']));
+  const firstDirect = cleanText(rowPick(row, ['Müşteri Adı', 'Musteri Adi', 'first_name']));
+  const lastDirect = cleanText(rowPick(row, ['Müşteri Soyadı', 'Musteri Soyadi', 'last_name']));
+  let first_name = firstDirect;
+  let last_name = lastDirect;
+  let full_name = composeFullName(first_name, last_name);
+  if (!first_name && !last_name) {
+    const raw = cleanText(rowPick(row, ['Ad Soyad', 'ad soyad', 'full_name', 'name', 'Müşteri', 'musteri']));
+    if (raw) {
+      const split = splitFullName(raw);
+      first_name = split.first_name;
+      last_name = split.last_name;
+      full_name = raw;
+    }
+  }
+
+  const phoneRaw = cleanText(rowPick(row, ['Müşteri Telefonu', 'Telefon', 'telefon', 'phone', 'Telefon Numarası', 'Tel']));
+  const phone2Raw = cleanText(rowPick(row, ['Müşteri Telefonu 2', 'Telefon 2', 'phone_2', 'Tel 2']));
+  const phone = normalizePhoneDigits(phoneRaw);
+  const phone_2 = normalizePhoneDigits(phone2Raw);
+
+  const address = cleanText(rowPick(row, ['Müşteri Adresi', 'Adres', 'adres', 'address']));
+  const address_title = cleanText(rowPick(row, ['Adres Başlığı', 'Adres Basligi', 'title'])) || 'Ev';
+  const address_note = cleanText(rowPick(row, ['Adres Tarifi', 'Adres Notu', 'address_note']));
+  const province = cleanText(rowPick(row, ['İl', 'Il', 'province']));
+  const district = cleanText(rowPick(row, ['İlçe', 'Ilce', 'district']));
+  const neighborhood = cleanText(rowPick(row, ['Mahalle', 'mahalle', 'neighborhood']));
   const totalOrders = parseIntSafe(rowPick(row, ['Toplam Sipariş Sayısı', 'Toplam Siparis Sayisi', 'toplam sipariş sayısı', 'total_orders']));
   return {
     full_name,
+    first_name,
+    last_name,
     phone,
-    normalized_phone: normalizedPhone || '',
+    phone_2,
+    normalized_phone: phone,
     address,
+    address_title,
+    address_note,
+    province,
     district,
-    legacy_no: legacyNo || null,
-    legacy_balance: legacyBalance,
-    legacy_total_amount: legacyTotalAmount,
-    legacy_discount_amount: legacyDiscountAmount,
+    neighborhood,
     total_orders: totalOrders,
   };
 }
@@ -238,18 +262,15 @@ router.post('/import/commit', (req, res) => {
             customerId = genId();
             db.prepare(`
               INSERT INTO customers (
-                id, business_id, full_name, total_orders,
-                legacy_no, legacy_balance, legacy_total_amount, legacy_discount_amount
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                id, business_id, full_name, first_name, last_name, total_orders
+              ) VALUES (?, ?, ?, ?, ?, ?)
             `).run(
               customerId,
               req.businessId,
               n.full_name,
+              n.first_name || null,
+              n.last_name || null,
               n.total_orders || 0,
-              n.legacy_no,
-              n.legacy_balance || 0,
-              n.legacy_total_amount || 0,
-              n.legacy_discount_amount || 0,
             );
             result.inserted += 1;
           } else {
@@ -257,37 +278,34 @@ router.post('/import/commit', (req, res) => {
               UPDATE customers
               SET
                 full_name = COALESCE(NULLIF(?, ''), full_name),
+                first_name = COALESCE(NULLIF(?, ''), first_name),
+                last_name = COALESCE(NULLIF(?, ''), last_name),
                 total_orders = CASE WHEN ? > total_orders THEN ? ELSE total_orders END,
-                legacy_no = COALESCE(?, legacy_no),
-                legacy_balance = ?,
-                legacy_total_amount = ?,
-                legacy_discount_amount = ?,
                 updated_at = datetime('now')
               WHERE id = ? AND business_id = ?
             `).run(
               n.full_name,
+              n.first_name,
+              n.last_name,
               n.total_orders || 0,
               n.total_orders || 0,
-              n.legacy_no,
-              n.legacy_balance || 0,
-              n.legacy_total_amount || 0,
-              n.legacy_discount_amount || 0,
               customerId,
               req.businessId,
             );
             result.updated += 1;
           }
 
-          if (n.phone) {
-            const existsPhone = n.normalized_phone
-              ? db.prepare('SELECT id FROM customer_phones WHERE customer_id = ? AND normalized_phone = ?').get(customerId, n.normalized_phone)
-              : db.prepare('SELECT id FROM customer_phones WHERE customer_id = ? AND phone = ?').get(customerId, n.phone);
+          const phonesToInsert = [n.phone, n.phone_2].filter(Boolean);
+          for (const p of phonesToInsert) {
+            const existsPhone = db.prepare(
+              'SELECT id FROM customer_phones WHERE customer_id = ? AND (normalized_phone = ? OR phone = ?)',
+            ).get(customerId, p, p);
             if (!existsPhone) {
               const hasPrimary = db.prepare('SELECT id FROM customer_phones WHERE customer_id = ? AND is_primary = 1 LIMIT 1').get(customerId);
               db.prepare(`
                 INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone)
                 VALUES (?, ?, ?, ?, ?)
-              `).run(genId(), customerId, n.phone, hasPrimary ? 0 : 1, n.normalized_phone || n.phone);
+              `).run(genId(), customerId, p, hasPrimary ? 0 : 1, p);
             }
           }
 
@@ -300,9 +318,19 @@ router.post('/import/commit', (req, res) => {
             if (!existsAddr) {
               const hasDefault = db.prepare('SELECT id FROM customer_addresses WHERE customer_id = ? AND is_default = 1 LIMIT 1').get(customerId);
               db.prepare(`
-                INSERT INTO customer_addresses (id, customer_id, title, address, address_note, is_default)
-                VALUES (?, ?, ?, ?, ?, ?)
-              `).run(genId(), customerId, 'Ev', n.address, n.district || null, hasDefault ? 0 : 1);
+                INSERT INTO customer_addresses (id, customer_id, title, address, address_note, province, district, neighborhood, is_default)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              `).run(
+                genId(),
+                customerId,
+                n.address_title || 'Ev',
+                n.address,
+                n.address_note || null,
+                n.province || null,
+                n.district || null,
+                n.neighborhood || null,
+                hasDefault ? 0 : 1,
+              );
             }
           }
         } catch (e) {
@@ -444,17 +472,23 @@ router.get('/export', (req, res) => {
     }
 
     const rows = customers.map((c) => {
-      const selectedPhone = pickPrimaryOrFirst(phoneMap[c.id], 'is_primary');
+      const phonesArr = phoneMap[c.id] || [];
+      const primaryPhone = pickPrimaryOrFirst(phonesArr, 'is_primary');
+      const secondaryPhone = phonesArr.find((p) => p && p.id !== primaryPhone?.id) || null;
       const selectedAddress = pickPrimaryOrFirst(addressMap[c.id], 'is_default');
+      const first = c.first_name || (c.full_name ? splitFullName(c.full_name).first_name : '');
+      const last = c.last_name || (c.full_name ? splitFullName(c.full_name).last_name : '');
       return {
-        No: c.legacy_no || '',
-        'Ad Soyad': c.full_name || '',
-        Telefon: selectedPhone?.phone || '',
-        Mahalle: selectedAddress?.address_note || '',
+        'Müşteri Adı': first || '',
+        'Müşteri Soyadı': last || '',
+        'Müşteri Telefonu': primaryPhone?.phone || '',
+        'Müşteri Telefonu 2': secondaryPhone?.phone || '',
+        'Adres Başlığı': selectedAddress?.title || '',
         Adres: selectedAddress?.address || '',
-        Bakiye: Number(c.legacy_balance || 0),
-        'Toplam Tutar': Number(c.legacy_total_amount || 0),
-        'İndirim Tutarı': Number(c.legacy_discount_amount || 0),
+        'Adres Tarifi': selectedAddress?.address_note || '',
+        İl: selectedAddress?.province || '',
+        İlçe: selectedAddress?.district || '',
+        Mahalle: selectedAddress?.neighborhood || '',
         'Toplam Sipariş Sayısı': Number(c.total_orders || 0),
       };
     });
@@ -492,24 +526,64 @@ router.get('/:id', (req, res) => {
 // POST /api/customers
 router.post('/', (req, res) => {
   try {
-    const { full_name, phone, address, address_title, address_note, note } = req.body;
-    if (!full_name) return res.status(400).json({ error: 'Müşteri adı gerekli' });
+    const {
+      first_name: firstRaw,
+      last_name: lastRaw,
+      full_name: fullRaw,
+      phone,
+      phone_2,
+      address,
+      address_title,
+      address_note,
+      province,
+      district,
+      neighborhood,
+      address_is_default,
+      note,
+    } = req.body;
+
+    let first_name = cleanText(firstRaw);
+    let last_name = cleanText(lastRaw);
+    if (!first_name && !last_name && fullRaw) {
+      const split = splitFullName(fullRaw);
+      first_name = split.first_name;
+      last_name = split.last_name;
+    }
+    if (!first_name) return res.status(400).json({ error: 'Müşteri adı gerekli' });
+    const full_name = composeFullName(first_name, last_name);
+
+    const phonesToInsert = [];
+    const phone1Norm = normalizePhoneDigits(phone);
+    if (phone1Norm) phonesToInsert.push(phone1Norm);
+    const phone2Norm = normalizePhoneDigits(phone_2);
+    if (phone2Norm && phone2Norm !== phone1Norm) phonesToInsert.push(phone2Norm);
 
     const customerId = genId();
     const txn = db.transaction(() => {
-      db.prepare('INSERT INTO customers (id, business_id, full_name, note) VALUES (?, ?, ?, ?)')
-        .run(customerId, req.businessId, full_name, note || null);
+      db.prepare('INSERT INTO customers (id, business_id, full_name, first_name, last_name, note) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(customerId, req.businessId, full_name, first_name || null, last_name || null, note || null);
 
-      if (phone) {
-        const digits = normalizePhoneDigits(phone);
-        const stored = digits || normalizePhone(phone);
+      phonesToInsert.forEach((p, idx) => {
         db.prepare(
-          'INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, 1, ?)',
-        ).run(genId(), customerId, stored, digits || stored);
-      }
+          'INSERT INTO customer_phones (id, customer_id, phone, is_primary, normalized_phone) VALUES (?, ?, ?, ?, ?)',
+        ).run(genId(), customerId, p, idx === 0 ? 1 : 0, p);
+      });
+
       if (address) {
-        db.prepare('INSERT INTO customer_addresses (id, customer_id, title, address, address_note, is_default) VALUES (?, ?, ?, ?, ?, 1)')
-          .run(genId(), customerId, address_title || 'Ev', address, address_note || null);
+        db.prepare(
+          `INSERT INTO customer_addresses (id, customer_id, title, address, address_note, province, district, neighborhood, is_default)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          genId(),
+          customerId,
+          cleanText(address_title) || 'Ev',
+          cleanText(address),
+          cleanText(address_note) || null,
+          cleanText(province) || null,
+          cleanText(district) || null,
+          cleanText(neighborhood) || null,
+          address_is_default === false ? 0 : 1,
+        );
       }
     });
     txn();
@@ -517,6 +591,15 @@ router.post('/', (req, res) => {
     const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(customerId);
     customer.phones = db.prepare('SELECT * FROM customer_phones WHERE customer_id = ?').all(customerId);
     customer.addresses = db.prepare('SELECT * FROM customer_addresses WHERE customer_id = ?').all(customerId);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'customers',
+      entityId: customerId,
+      action: 'create',
+      after: customer,
+      actorUserId: req.user?.id || null,
+      requestId: req.requestId,
+    });
     res.status(201).json(customer);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -526,13 +609,40 @@ router.post('/', (req, res) => {
 // PATCH /api/customers/:id
 router.patch('/:id', (req, res) => {
   try {
-    const { full_name, note } = req.body;
-    db.prepare("UPDATE customers SET full_name = COALESCE(?, full_name), note = COALESCE(?, note), updated_at = datetime('now') WHERE id = ? AND business_id = ?")
-      .run(full_name, note, req.params.id, req.businessId);
-    
+    const { first_name: firstRaw, last_name: lastRaw, full_name: fullRaw, note } = req.body;
+    const before = db.prepare('SELECT * FROM customers WHERE id = ? AND business_id = ?').get(req.params.id, req.businessId);
+    if (!before) return res.status(404).json({ error: 'Müşteri bulunamadı' });
+
+    let first_name = firstRaw != null ? cleanText(firstRaw) : null;
+    let last_name = lastRaw != null ? cleanText(lastRaw) : null;
+    if (first_name == null && last_name == null && fullRaw != null) {
+      const split = splitFullName(fullRaw);
+      first_name = split.first_name;
+      last_name = split.last_name;
+    }
+    const newFirst = first_name != null ? first_name : before.first_name;
+    const newLast = last_name != null ? last_name : before.last_name;
+    const full_name = composeFullName(newFirst, newLast) || (fullRaw != null ? cleanText(fullRaw) : before.full_name);
+
+    db.prepare(
+      `UPDATE customers
+       SET full_name = ?, first_name = ?, last_name = ?, note = COALESCE(?, note), updated_at = datetime('now')
+       WHERE id = ? AND business_id = ?`,
+    ).run(full_name || null, newFirst || null, newLast || null, note ?? null, req.params.id, req.businessId);
+
     const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(req.params.id);
     customer.phones = db.prepare('SELECT * FROM customer_phones WHERE customer_id = ?').all(customer.id);
     customer.addresses = db.prepare('SELECT * FROM customer_addresses WHERE customer_id = ?').all(customer.id);
+    recordEntityMutation({
+      businessId: req.businessId,
+      entityTable: 'customers',
+      entityId: req.params.id,
+      action: 'update',
+      before,
+      after: customer,
+      actorUserId: req.user?.id || null,
+      requestId: req.requestId,
+    });
     res.json(customer);
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -543,11 +653,11 @@ router.patch('/:id', (req, res) => {
 router.post('/:id/phones', (req, res) => {
   try {
     const { phone } = req.body;
-    const digits = normalizePhoneDigits(phone);
-    const stored = digits || normalizePhone(phone);
+    const stored = normalizePhoneDigits(phone);
+    if (!stored) return res.status(400).json({ error: 'Telefon gerekli' });
     db.prepare(
       'INSERT INTO customer_phones (id, customer_id, phone, normalized_phone) VALUES (?, ?, ?, ?)',
-    ).run(genId(), req.params.id, stored, digits || stored);
+    ).run(genId(), req.params.id, stored, stored);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });
@@ -557,9 +667,118 @@ router.post('/:id/phones', (req, res) => {
 // POST /api/customers/:id/addresses
 router.post('/:id/addresses', (req, res) => {
   try {
-    const { title, address, address_note } = req.body;
-    db.prepare('INSERT INTO customer_addresses (id, customer_id, title, address, address_note) VALUES (?, ?, ?, ?, ?)')
-      .run(genId(), req.params.id, title || 'Diğer', address, address_note || null);
+    const {
+      title,
+      address,
+      address_note,
+      province,
+      district,
+      neighborhood,
+      is_default,
+    } = req.body;
+    if (!address) return res.status(400).json({ error: 'Adres gerekli' });
+    const titleVal = cleanText(title).slice(0, 15) || 'Diğer';
+
+    const txn = db.transaction(() => {
+      if (is_default) {
+        db.prepare('UPDATE customer_addresses SET is_default = 0 WHERE customer_id = ?').run(req.params.id);
+      }
+      db.prepare(
+        `INSERT INTO customer_addresses
+         (id, customer_id, title, address, address_note, province, district, neighborhood, is_default)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        genId(),
+        req.params.id,
+        titleVal,
+        cleanText(address),
+        cleanText(address_note) || null,
+        cleanText(province) || null,
+        cleanText(district) || null,
+        cleanText(neighborhood) || null,
+        is_default ? 1 : 0,
+      );
+    });
+    txn();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// PATCH /api/customers/:id/addresses/:addressId
+router.patch('/:id/addresses/:addressId', (req, res) => {
+  try {
+    const {
+      title,
+      address,
+      address_note,
+      province,
+      district,
+      neighborhood,
+      is_default,
+    } = req.body;
+
+    const existing = db
+      .prepare('SELECT id FROM customer_addresses WHERE id = ? AND customer_id = ?')
+      .get(req.params.addressId, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Adres bulunamadı' });
+
+    const txn = db.transaction(() => {
+      if (is_default) {
+        db.prepare('UPDATE customer_addresses SET is_default = 0 WHERE customer_id = ?').run(req.params.id);
+      }
+      const titleVal = title != null ? cleanText(title).slice(0, 15) : null;
+      db.prepare(
+        `UPDATE customer_addresses
+         SET title = COALESCE(?, title),
+             address = COALESCE(?, address),
+             address_note = COALESCE(?, address_note),
+             province = COALESCE(?, province),
+             district = COALESCE(?, district),
+             neighborhood = COALESCE(?, neighborhood),
+             is_default = CASE WHEN ? IS NOT NULL THEN ? ELSE is_default END
+         WHERE id = ? AND customer_id = ?`,
+      ).run(
+        titleVal || null,
+        address != null ? cleanText(address) : null,
+        address_note != null ? cleanText(address_note) : null,
+        province != null ? cleanText(province) : null,
+        district != null ? cleanText(district) : null,
+        neighborhood != null ? cleanText(neighborhood) : null,
+        is_default === undefined ? null : (is_default ? 1 : 0),
+        is_default ? 1 : 0,
+        req.params.addressId,
+        req.params.id,
+      );
+    });
+    txn();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// DELETE /api/customers/:id/addresses/:addressId
+router.delete('/:id/addresses/:addressId', (req, res) => {
+  try {
+    const info = db
+      .prepare('DELETE FROM customer_addresses WHERE id = ? AND customer_id = ?')
+      .run(req.params.addressId, req.params.id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Adres bulunamadı' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// DELETE /api/customers/:id/phones/:phoneId
+router.delete('/:id/phones/:phoneId', (req, res) => {
+  try {
+    const info = db
+      .prepare('DELETE FROM customer_phones WHERE id = ? AND customer_id = ?')
+      .run(req.params.phoneId, req.params.id);
+    if (info.changes === 0) return res.status(404).json({ error: 'Telefon bulunamadı' });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Sunucu hatası' });

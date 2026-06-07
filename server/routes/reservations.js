@@ -4,6 +4,8 @@ import db from '../config/database.js';
 import { authenticate, businessScope, authorize } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { genId } from '../utils/helpers.js';
+import { createOrder } from '../services/orderService.js';
+import { getStoreDate } from '../utils/time.js';
 
 const router = Router();
 router.use(authenticate, businessScope);
@@ -19,6 +21,12 @@ const reservationSchema = z.object({
   status: z.enum(['confirmed', 'arrived', 'cancelled', 'no_show']).default('confirmed'),
 });
 
+const seatReservationSchema = {
+  body: z.object({
+    table_id: z.string().min(1).optional().nullable(),
+  }),
+};
+
 // GET /api/reservations?date=YYYY-MM-DD
 router.get('/', authorize('admin', 'cashier'), (req, res) => {
   try {
@@ -32,7 +40,7 @@ router.get('/', authorize('admin', 'cashier'), (req, res) => {
         ORDER BY r.reservation_date, r.reservation_time
       `).all(req.businessId, from, to);
     } else {
-      const targetDate = date || new Date().toISOString().slice(0, 10);
+      const targetDate = date || getStoreDate();
       rows = db.prepare(`
         SELECT r.*, t.name as table_name
         FROM reservations r LEFT JOIN tables t ON r.table_id = t.id
@@ -74,15 +82,66 @@ router.patch('/:id', authorize('admin', 'cashier'), (req, res) => {
     const allowed = ['table_id', 'customer_name', 'customer_phone', 'party_size', 'reservation_date', 'reservation_time', 'notes', 'status'];
     const fields = Object.keys(req.body).filter(k => allowed.includes(k));
     if (fields.length === 0) return res.status(400).json({ error: 'Güncellenecek alan yok' });
+    if (['cancelled', 'no_show'].includes(existing.status) && req.body.status && req.body.status !== existing.status) {
+      return res.status(400).json({ error: 'İptal veya gelmedi durumundaki rezervasyon yeniden açılamaz' });
+    }
 
     const sets = fields.map(f => `${f} = ?`).join(', ');
     const vals = fields.map(f => req.body[f] ?? null);
     db.prepare(`UPDATE reservations SET ${sets}, updated_at = datetime('now') WHERE id = ?`).run(...vals, id);
+    if (req.body.status === 'arrived' && !existing.arrived_at) {
+      db.prepare(`UPDATE reservations SET arrived_at = datetime('now') WHERE id = ?`).run(id);
+    }
 
     const row = db.prepare(`SELECT r.*, t.name as table_name FROM reservations r LEFT JOIN tables t ON r.table_id = t.id WHERE r.id = ?`).get(id);
     res.json(row);
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: 'Sunucu hatası' });
+  }
+});
+
+// POST /api/reservations/:id/seat
+router.post('/:id/seat', authorize('admin', 'cashier'), validate(seatReservationSchema), (req, res) => {
+  try {
+    const reservation = db.prepare('SELECT * FROM reservations WHERE id = ? AND business_id = ?')
+      .get(req.params.id, req.businessId);
+    if (!reservation) return res.status(404).json({ error: 'Rezervasyon bulunamadı' });
+    if (['cancelled', 'no_show'].includes(reservation.status)) {
+      return res.status(400).json({ error: 'İptal veya gelmedi durumundaki rezervasyon masaya oturtulamaz' });
+    }
+    if (reservation.seated_order_id) {
+      return res.status(409).json({ error: 'Bu rezervasyon zaten masaya oturtulmuş' });
+    }
+
+    const tableId = req.body.table_id || reservation.table_id;
+    if (!tableId) return res.status(400).json({ error: 'Masa seçimi gerekli' });
+
+    const order = createOrder(req.businessId, req.branchId, req.user.id, {
+      order_type: 'dine_in',
+      table_id: tableId,
+      items: [],
+      guest_count: reservation.party_size || 0,
+      note: `Rezervasyon: ${reservation.customer_name}`,
+    });
+
+    db.prepare(`
+      UPDATE reservations
+      SET table_id = ?, status = 'arrived', arrived_at = COALESCE(arrived_at, datetime('now')),
+          seated_order_id = ?, updated_at = datetime('now')
+      WHERE id = ? AND business_id = ?
+    `).run(tableId, order.id, reservation.id, req.businessId);
+
+    const row = db.prepare(`
+      SELECT r.*, t.name as table_name
+      FROM reservations r LEFT JOIN tables t ON r.table_id = t.id
+      WHERE r.id = ?
+    `).get(reservation.id);
+    res.status(201).json({ reservation: row, order });
+  } catch (err) {
+    if (err.isBadRequest || err.status === 400) return res.status(400).json({ error: err.message });
+    if (err.status === 409) return res.status(409).json({ error: err.message });
+    console.error('Reservation seating error:', err);
     res.status(500).json({ error: 'Sunucu hatası' });
   }
 });

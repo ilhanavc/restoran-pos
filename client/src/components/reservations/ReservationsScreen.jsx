@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { CalendarDays, Plus, X, Users, Clock, Phone, Edit2, Trash2, Check } from 'lucide-react';
 import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
+import { todayInIstanbul } from '../../utils/time.js';
 
 const STATUS_LABELS = {
   confirmed: { label: 'Onaylı', color: 'var(--info)', bg: 'var(--info-muted)' },
@@ -10,7 +13,7 @@ const STATUS_LABELS = {
   no_show:   { label: 'Gelmedi', color: 'var(--text-muted)', bg: 'var(--bg-tertiary)' },
 };
 
-function today() { return new Date().toISOString().slice(0, 10); }
+function today() { return todayInIstanbul(); }
 
 function ReservationModal({ reservation, tables, onClose, onSave }) {
   const [form, setForm] = useState({
@@ -109,6 +112,7 @@ export default function ReservationsScreen() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingReservation, setEditingReservation] = useState(null);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -127,7 +131,7 @@ export default function ReservationsScreen() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleSave = (result) => {
+  const handleSave = (_result) => {
     setModalOpen(false);
     setEditingReservation(null);
     load();
@@ -135,12 +139,19 @@ export default function ReservationsScreen() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Bu rezervasyonu silmek istiyor musunuz?')) return;
-    try {
-      await api.deleteReservation(id);
-      toast.success('Silindi');
-      load();
-    } catch (err) { toast.error(err.message); }
+    requestConfirm({
+      title: 'Rezervasyon silinsin mi?',
+      body: 'Bu işlem rezervasyonu takvimden kaldırır.',
+      confirmLabel: 'Sil',
+      tone: 'danger',
+      onConfirm: async () => {
+        try {
+          await api.deleteReservation(id);
+          toast.success('Silindi');
+          load();
+        } catch (err) { toast.error(err.message); }
+      },
+    });
   };
 
   const handleStatusQuick = async (id, status) => {
@@ -148,6 +159,28 @@ export default function ReservationsScreen() {
       await api.updateReservation(id, { status });
       load();
     } catch (err) { toast.error(err.message); }
+  };
+
+  const handleSeatReservation = async (reservation) => {
+    if (!reservation.table_id) {
+      toast.error('Önce rezervasyona masa seçin');
+      return;
+    }
+    requestConfirm({
+      title: 'Masaya oturtulsun mu?',
+      body: `${reservation.customer_name} için ${reservation.table_name || 'seçili masa'} üzerinde adisyon açılacak.`,
+      confirmLabel: 'Oturt',
+      tone: 'primary',
+      onConfirm: async () => {
+        try {
+          await api.seatReservation(reservation.id, { table_id: reservation.table_id });
+          toast.success('Rezervasyon masaya oturtuldu');
+          load();
+        } catch (err) {
+          toast.error(err.message || 'Masaya oturtulamadı');
+        }
+      },
+    });
   };
 
   const grouped = reservations.reduce((acc, r) => {
@@ -160,11 +193,13 @@ export default function ReservationsScreen() {
   return (
     <div className="page-container">
       <div className="page-header">
-        <h1 className="page-title">
-          <CalendarDays size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-          Rezervasyonlar
-        </h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="page-header-main page-title-line">
+          <h1 className="page-title">
+            <CalendarDays size={22} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
+            Rezervasyonlar
+          </h1>
+        </div>
+        <div className="page-header-actions">
           <input type="date" className="input" value={selectedDate}
             onChange={e => setSelectedDate(e.target.value)} style={{ width: 180 }} />
           <button className="btn btn-primary" onClick={() => { setEditingReservation(null); setModalOpen(true); }}>
@@ -172,7 +207,6 @@ export default function ReservationsScreen() {
           </button>
         </div>
       </div>
-
       {loading ? (
         <div className="empty-state">Yükleniyor...</div>
       ) : reservations.length === 0 ? (
@@ -215,6 +249,14 @@ export default function ReservationsScreen() {
                             <Check size={12} /> Geldi
                           </button>
                         )}
+                        {['confirmed', 'arrived'].includes(r.status) && !r.seated_order_id && (
+                          <button className="btn btn-primary btn-sm" onClick={() => handleSeatReservation(r)} disabled={!r.table_id}>
+                            Masaya Oturt
+                          </button>
+                        )}
+                        {r.seated_order_id && (
+                          <span className="badge badge-success">Adisyon açıldı</span>
+                        )}
                         {r.status !== 'cancelled' && r.status !== 'no_show' && (
                           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => handleStatusQuick(r.id, 'cancelled')}>
                             İptal
@@ -244,6 +286,15 @@ export default function ReservationsScreen() {
           onSave={handleSave}
         />
       )}
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

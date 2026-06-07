@@ -59,6 +59,29 @@ function startDiscoveryLoop({ api, cfg, log }) {
   };
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForHealthyApi({ api, cfg, log }) {
+  let attempt = 0;
+  for (;;) {
+    attempt += 1;
+    try {
+      const health = await api.health();
+      log.log('[store-bridge] health:', health);
+      return health;
+    } catch (err) {
+      const waitMs = cfg.healthRetryMs || 3000;
+      log.error?.(
+        `[store-bridge] POS API hazır değil; ${waitMs} ms sonra tekrar denenecek (attempt=${attempt})`,
+        err?.message || err,
+      );
+      await delay(waitMs);
+    }
+  }
+}
+
 async function main() {
   const cfg = loadConfig();
   // Renderer tarafında tek mağaza saat dilimini deterministik kullan.
@@ -69,8 +92,7 @@ async function main() {
   process.env.BRIDGE_PRINT_FORCE_TR_ASCII = String(cfg.printForceTrAscii || '0');
   const api = createApiClient(cfg);
 
-  const health = await api.health();
-  console.log('[store-bridge] health:', health);
+  await waitForHealthyApi({ api, cfg, log: console });
 
   const cid = new Cid812Provider({ api, cfg, log: console });
   cid.start();

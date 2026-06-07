@@ -17,7 +17,8 @@ import api from '../../services/api.js';
 import { useToast } from '../../context/ToastContext.jsx';
 import { formatCurrency } from '../../constants/index.js';
 import { MENU_ICON_OPTIONS, MENU_COLOR_OPTIONS } from '../../constants/menuUi.js';
-import SettingsDetailHeader from './SettingsDetailHeader.jsx';
+import ConfirmDialog from '../common/ConfirmDialog.jsx';
+import useConfirmDialog from '../common/useConfirmDialog.js';
 
 const PRINTER_OPTIONS = [
   { value: 'kitchen', label: 'Mutfak' },
@@ -261,6 +262,8 @@ export default function MenuSettingsPage() {
   const [openMenuCatId, setOpenMenuCatId] = useState(null);
   const [dropdownPos, setDropdownPos] = useState(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [working, setWorking] = useState(false);
+  const { confirmDialog, requestConfirm, cancelConfirm, acceptConfirm } = useConfirmDialog();
 
   const menuRef = useRef(null);
 
@@ -288,7 +291,7 @@ export default function MenuSettingsPage() {
   );
 
   const loadCategories = useCallback(async () => {
-    const rows = await api.getCategories({ include_inactive: 1 });
+    const rows = await api.getCategories();
     setCategories(rows);
   }, []);
 
@@ -365,51 +368,73 @@ export default function MenuSettingsPage() {
 
   const deleteCategory = async (id) => {
     const n = productCountByCat[id] || 0;
-    const msg =
-      n > 0
-        ? `Bu kategori pasif yapılacak ve içindeki ${n} ürün menüden kaldırılacak. Devam edilsin mi?`
-        : 'Bu kategori pasif yapılacak. Devam edilsin mi?';
-    if (!window.confirm(msg)) return;
-    try {
-      await api.deleteCategory(id);
-      success('Kategori kaldırıldı');
-      await load();
-      if (activeCategoryId === id) {
-        setFilterMode('all');
-        setActiveCategoryId(null);
-      }
-      if (bulkMode?.categoryId === id) {
-        setBulkMode(null);
-        setBulkSelected(new Set());
-      }
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    }
+    requestConfirm({
+      title: 'Kategori kalıcı olarak silinsin mi?',
+      body:
+        n > 0
+          ? `Bu kategori ve içindeki ${n} ürün kalıcı olarak silinecek. Bu işlem geri alınamaz.`
+          : 'Bu kategori kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+      confirmLabel: 'Kalıcı Sil',
+      tone: 'danger',
+      onConfirm: async () => {
+        setWorking(true);
+        try {
+          await api.deleteCategory(id);
+          success('Kategori silindi');
+          await load();
+          if (activeCategoryId === id) {
+            setFilterMode('all');
+            setActiveCategoryId(null);
+          }
+          if (bulkMode?.categoryId === id) {
+            setBulkMode(null);
+            setBulkSelected(new Set());
+          }
+        } catch (e) {
+          error(e.message || 'İşlem başarısız');
+        } finally {
+          setWorking(false);
+        }
+      },
+    });
   };
 
   const deleteProduct = async (id) => {
-    if (!window.confirm('Ürün menüden kaldırılsın mı?')) return;
-    try {
-      await api.deleteProduct(id);
-      success('Ürün kaldırıldı');
-      await loadProducts();
-      setBulkSelected((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    }
+    requestConfirm({
+      title: 'Ürün menüden kaldırılsın mı?',
+      body: 'Ürün aktif menüden gizlenecek. Daha sonra tekrar aktifleştirilebilir.',
+      confirmLabel: 'Kaldır',
+      tone: 'danger',
+      onConfirm: async () => {
+        setWorking(true);
+        try {
+          await api.deleteProduct(id);
+          success('Ürün kaldırıldı');
+          await loadProducts();
+          setBulkSelected((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        } catch (e) {
+          error(e.message || 'İşlem başarısız');
+        } finally {
+          setWorking(false);
+        }
+      },
+    });
   };
 
   const restoreProduct = async (id) => {
+    setWorking(true);
     try {
       await api.patchProduct(id, { is_deleted: 0, is_active: 1 });
       success('Ürün tekrar aktif');
       await loadProducts();
     } catch (e) {
       error(e.message || 'İşlem başarısız');
+    } finally {
+      setWorking(false);
     }
   };
 
@@ -485,6 +510,7 @@ export default function MenuSettingsPage() {
       error('Hedef kategori ve en az bir ürün seçin');
       return;
     }
+    setWorking(true);
     try {
       for (const id of bulkSelected) {
         await api.patchProduct(id, { category_id: bulkTargetCategoryId });
@@ -494,6 +520,8 @@ export default function MenuSettingsPage() {
       await loadProducts();
     } catch (e) {
       error(e.message || 'İşlem başarısız');
+    } finally {
+      setWorking(false);
     }
   };
 
@@ -502,20 +530,28 @@ export default function MenuSettingsPage() {
       error('En az bir ürün seçin');
       return;
     }
-    if (!window.confirm(`${bulkSelected.size} ürün pasif yapılsın mı? (Menüden gizlenir.)`)) return;
-    try {
-      for (const id of bulkSelected) {
-        await api.patchProduct(id, { is_active: 0 });
-      }
-      success('Seçilen ürünler pasif yapıldı');
-      exitBulkMode();
-      await loadProducts();
-    } catch (e) {
-      error(e.message || 'İşlem başarısız');
-    }
+    requestConfirm({
+      title: 'Seçilen ürünler pasif yapılsın mı?',
+      body: `${bulkSelected.size} ürün menüden gizlenecek.`,
+      confirmLabel: 'Pasif yap',
+      tone: 'danger',
+      onConfirm: async () => {
+        setWorking(true);
+        try {
+          for (const id of bulkSelected) {
+            await api.patchProduct(id, { is_active: 0 });
+          }
+          success('Seçilen ürünler pasif yapıldı');
+          exitBulkMode();
+          await loadProducts();
+        } catch (e) {
+          error(e.message || 'İşlem başarısız');
+        } finally {
+          setWorking(false);
+        }
+      },
+    });
   };
-
-  const handleBack = () => navigate('/settings');
 
   const dropdownValue = filterMode === 'all' ? 'all' : activeCategoryId || 'all';
   const selectedCategory = useMemo(
@@ -523,20 +559,9 @@ export default function MenuSettingsPage() {
     [activeCategoryId, categories],
   );
   const toolbarTitle = filterMode === 'all' ? 'Tüm ürünler' : selectedCategory?.name || 'Kategori seçin';
-  const toolbarSummary = searchNorm
-    ? `"${search.trim()}" için ${filteredProducts.length} sonuç`
-    : filterMode === 'all'
-      ? `${filteredProducts.length} ürün listeleniyor`
-      : `${productCountByCat[activeCategoryId] || 0} ürün bu kategoride`;
 
   return (
     <div className="page-container menu-settings-page">
-      <SettingsDetailHeader title="Menü tanımları" onBack={handleBack} />
-
-      <p className="menu-settings-lead">
-        Kategori ve ürünleri buradan yönetin; sipariş ekranı bu listeyi kullanır.
-      </p>
-
       {loading ? (
         <div className="empty-state">Yükleniyor…</div>
       ) : (
@@ -546,13 +571,16 @@ export default function MenuSettingsPage() {
             <div className="menu-settings-sidebar-head">
               <div className="menu-settings-sidebar-copy">
                 <span className="menu-settings-sidebar-label">Kategoriler</span>
-                <strong className="menu-settings-sidebar-title">
-                  {activeCategories.length} aktif, {categories.length} toplam
-                </strong>
+                <span className="menu-settings-sidebar-count">{activeCategories.length}/{categories.length}</span>
               </div>
-              <button type="button" className="btn btn-primary btn-sm menu-settings-add-cat" onClick={() => setCatModal('new')}>
-                <Plus size={16} />
-                Kategori Ekle
+              <button
+                type="button"
+                className="btn btn-primary btn-sm menu-settings-add-cat"
+                onClick={() => setCatModal('new')}
+                disabled={working}
+              >
+                <Plus size={14} />
+                Ekle
               </button>
             </div>
             <div
@@ -576,6 +604,7 @@ export default function MenuSettingsPage() {
                         type="button"
                         className="menu-settings-cat-main"
                         onClick={() => handleSidebarSelect(cat.id)}
+                        disabled={working}
                       >
                         <span
                           className="menu-settings-cat-icon"
@@ -600,6 +629,7 @@ export default function MenuSettingsPage() {
                             aria-expanded={openMenuCatId === cat.id}
                             aria-label="Kategori işlemleri"
                             onClick={(e) => toggleCategoryMenu(e, cat)}
+                            disabled={working}
                           >
                             <MoreVertical size={18} />
                           </button>
@@ -614,68 +644,56 @@ export default function MenuSettingsPage() {
 
           <section className="menu-settings-main">
             <div className="menu-settings-main-head">
-              <div className="menu-settings-main-copy">
-                <span className="menu-settings-main-eyebrow">Menü görünümü</span>
-                <div className="menu-settings-main-title-row">
-                  <h2 className="menu-settings-main-title">{toolbarTitle}</h2>
-                  {filterMode === 'one' && selectedCategory && !isCatActive(selectedCategory) && (
-                    <span className="badge badge-warning">Pasif kategori</span>
-                  )}
-                </div>
-                <p className="menu-settings-main-subtitle">{toolbarSummary}</p>
+              <div className="menu-settings-main-title-row">
+                <h2 className="menu-settings-main-title">{toolbarTitle}</h2>
+                {filterMode === 'one' && selectedCategory && !isCatActive(selectedCategory) && (
+                  <span className="badge badge-warning">Pasif kategori</span>
+                )}
               </div>
               <div className="menu-settings-main-stats" aria-label="Menü özet bilgileri">
                 <span className="menu-settings-stat-chip">
-                  <strong>{categories.length}</strong>
-                  kategori
+                  <strong>{categories.length}</strong> kategori
                 </span>
                 <span className="menu-settings-stat-chip">
-                  <strong>{products.filter((p) => !p.is_deleted).length}</strong>
-                  aktif ürün
+                  <strong>{products.filter((p) => !p.is_deleted).length}</strong> ürün
                 </span>
               </div>
             </div>
 
             <div className="menu-settings-toolbar">
-              <div className="menu-settings-toolbar-field">
-                <span className="menu-settings-toolbar-label">Kategori</span>
-                <select
-                  className="input menu-settings-toolbar-filter"
-                  value={dropdownValue}
-                  onChange={(e) => handleFilterDropdown(e.target.value)}
-                >
-                  <option value="all">Tüm kategoriler</option>
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                      {!isCatActive(c) ? ' (pasif)' : ''}
-                    </option>
-                  ))}
-                </select>
+              <div className="menu-settings-search-wrap">
+                <Search size={15} className="menu-settings-search-icon" aria-hidden />
+                <input
+                  className="input menu-settings-search"
+                  placeholder="Ürün ara…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  disabled={working}
+                />
               </div>
-              <div className="menu-settings-toolbar-field menu-settings-toolbar-field--search">
-                <span className="menu-settings-toolbar-label">Ara</span>
-                <div className="menu-settings-search-wrap">
-                  <Search size={18} className="menu-settings-search-icon" aria-hidden />
-                  <input
-                    className="input menu-settings-search"
-                    placeholder="Ürün adı veya açıklama ara"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="menu-settings-toolbar-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm menu-settings-new-prod"
-                  onClick={openNewProduct}
-                  disabled={activeCategories.length === 0}
-                >
-                  <Plus size={16} />
-                  Yeni ürün ekle
-                </button>
-              </div>
+              <select
+                className="input menu-settings-toolbar-filter"
+                value={dropdownValue}
+                onChange={(e) => handleFilterDropdown(e.target.value)}
+                disabled={working}
+              >
+                <option value="all">Tüm kategoriler</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                    {!isCatActive(c) ? ' (pasif)' : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm menu-settings-new-prod"
+                onClick={openNewProduct}
+                disabled={activeCategories.length === 0 || working}
+              >
+                <Plus size={15} />
+                Yeni ürün ekle
+              </button>
             </div>
 
             {bulkMode && (
@@ -685,16 +703,17 @@ export default function MenuSettingsPage() {
                   Toplu işlem —{' '}
                   {categories.find((c) => c.id === bulkMode.categoryId)?.name || 'Kategori'}
                 </span>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={selectAllInBulkScope}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={selectAllInBulkScope} disabled={working}>
                   Bu kategorideki tümünü seç
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={clearBulkSelection}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={clearBulkSelection} disabled={working}>
                   Seçimi temizle
                 </button>
                 <select
                   className="input menu-settings-bulk-target"
                   value={bulkTargetCategoryId}
                   onChange={(e) => setBulkTargetCategoryId(e.target.value)}
+                  disabled={working}
                 >
                   <option value="">Taşı: hedef kategori…</option>
                   {activeCategories.filter((c) => c.id !== bulkMode.categoryId).map((c) => (
@@ -703,13 +722,13 @@ export default function MenuSettingsPage() {
                     </option>
                   ))}
                 </select>
-                <button type="button" className="btn btn-primary btn-sm" onClick={applyBulkMove} disabled={bulkSelected.size === 0 || !bulkTargetCategoryId}>
+                <button type="button" className="btn btn-primary btn-sm" onClick={applyBulkMove} disabled={working || bulkSelected.size === 0 || !bulkTargetCategoryId}>
                   Seçilenleri taşı
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={applyBulkDeactivate} disabled={bulkSelected.size === 0}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={applyBulkDeactivate} disabled={working || bulkSelected.size === 0}>
                   Pasifleştir
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={exitBulkMode}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={exitBulkMode} disabled={working}>
                   İptal
                 </button>
                 <span className="menu-settings-bulk-count">{bulkSelected.size} seçili</span>
@@ -733,21 +752,26 @@ export default function MenuSettingsPage() {
                         className={`menu-settings-prod-card ${prod.is_deleted ? 'menu-settings-prod-card--deleted' : ''} ${bulkOn ? 'menu-settings-prod-card--bulk' : ''}`}
                         style={{ '--menu-category-color': cat?.color || '#6366f1' }}
                       >
-                        <div className="menu-settings-prod-card-top">
-                          <div className="menu-settings-prod-top-left">
-                            {bulkOn && (
+                        {/* Üst satır: ürün adı + aksiyonlar */}
+                        <div className="menu-settings-prod-header">
+                          <div className="menu-settings-prod-title truncate" title={prod.name}>
+                            {prod.name}
+                          </div>
+                          <div className="menu-settings-prod-actions">
+                            {bulkOn ? (
                               <label className="menu-settings-prod-check">
                                 <input
                                   type="checkbox"
                                   checked={bulkSelected.has(prod.id)}
                                   onChange={() => toggleBulkOne(prod.id)}
+                                  disabled={working}
                                 />
                               </label>
-                            )}
-                            {cat?.name ? <span className="menu-settings-prod-category">{cat.name}</span> : null}
-                          </div>
-                          <div className="menu-settings-prod-actions">
-                            {!prod.is_deleted ? (
+                            ) : prod.is_deleted ? (
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => restoreProduct(prod.id)} disabled={working}>
+                                Geri al
+                              </button>
+                            ) : (
                               <>
                                 <button
                                   type="button"
@@ -755,8 +779,9 @@ export default function MenuSettingsPage() {
                                   title="Düzenle"
                                   aria-label={`${prod.name} ürününü düzenle`}
                                   onClick={() => navigate(`/settings/menu/product/${prod.id}`)}
+                                  disabled={working}
                                 >
-                                  <Pencil size={16} />
+                                  <Pencil size={14} />
                                 </button>
                                 <button
                                   type="button"
@@ -764,37 +789,32 @@ export default function MenuSettingsPage() {
                                   title="Kaldır"
                                   aria-label={`${prod.name} ürününü kaldır`}
                                   onClick={() => deleteProduct(prod.id)}
+                                  disabled={working}
                                 >
-                                  <Trash2 size={16} color="var(--danger)" />
+                                  <Trash2 size={14} />
                                 </button>
                               </>
-                            ) : (
-                              <button type="button" className="btn btn-primary btn-sm" onClick={() => restoreProduct(prod.id)}>
-                                Geri al
-                              </button>
                             )}
                           </div>
                         </div>
-                        <div className="menu-settings-prod-title truncate" title={prod.name}>
-                          {prod.name}
-                        </div>
-                        <div
-                          className={`menu-settings-prod-sub ${description ? 'truncate' : 'menu-settings-prod-sub--muted'}`}
-                          title={description || 'Bu ürün için açıklama eklenmemiş'}
-                        >
-                          {description || 'Bu ürün için açıklama eklenmemiş'}
-                        </div>
-                        <div className="menu-settings-prod-bottom">
-                          <div className="menu-settings-prod-price-block">
-                            <span className="menu-settings-prod-price-label">Fiyat</span>
-                            <span className="menu-settings-prod-price">{formatCurrency(prod.price)}</span>
+
+                        {/* Açıklama */}
+                        {description ? (
+                          <div className="menu-settings-prod-sub truncate" title={description}>
+                            {description}
                           </div>
-                          <div className="menu-settings-prod-status">
+                        ) : null}
+
+                        {/* Alt satır: kategori / durum + fiyat */}
+                        <div className="menu-settings-prod-bottom">
+                          <div className="menu-settings-prod-meta">
+                            {cat?.name ? <span className="menu-settings-prod-category">{cat.name}</span> : null}
                             {!prod.is_deleted && Number(prod.is_active) === 0 && (
                               <span className="badge badge-warning">Pasif</span>
                             )}
                             {prod.is_deleted && <span className="badge badge-danger">Kaldırıldı</span>}
                           </div>
+                          <span className="menu-settings-prod-price">{formatCurrency(prod.price)}</span>
                         </div>
                       </div>
                     );
@@ -802,7 +822,7 @@ export default function MenuSettingsPage() {
                 </div>
                 {filteredProducts.length > displayedProducts.length && (
                   <div className="menu-settings-more-wrap">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVisibleCount((v) => v + PAGE_SIZE)} disabled={working}>
                       Daha fazla göster ({filteredProducts.length - displayedProducts.length} kaldı)
                     </button>
                   </div>
@@ -823,6 +843,7 @@ export default function MenuSettingsPage() {
               type="button"
               className="menu-settings-dropdown-item"
               role="menuitem"
+              disabled={working}
               onClick={() => {
                 const cat = menuCatForDropdown;
                 closeCategoryMenu();
@@ -840,6 +861,7 @@ export default function MenuSettingsPage() {
               type="button"
               className="menu-settings-dropdown-item"
               role="menuitem"
+              disabled={working}
               onClick={() => {
                 const cat = menuCatForDropdown;
                 closeCategoryMenu();
@@ -853,6 +875,7 @@ export default function MenuSettingsPage() {
               type="button"
               className="menu-settings-dropdown-item"
               role="menuitem"
+              disabled={working}
               onClick={() => {
                 const cat = menuCatForDropdown;
                 closeCategoryMenu();
@@ -868,6 +891,7 @@ export default function MenuSettingsPage() {
               type="button"
               className="menu-settings-dropdown-item"
               role="menuitem"
+              disabled={working}
               onClick={() => {
                 const cat = menuCatForDropdown;
                 closeCategoryMenu();
@@ -881,6 +905,7 @@ export default function MenuSettingsPage() {
               type="button"
               className="menu-settings-dropdown-item menu-settings-dropdown-item--danger"
               role="menuitem"
+              disabled={working}
               onClick={() => {
                 const cat = menuCatForDropdown;
                 closeCategoryMenu();
@@ -918,6 +943,16 @@ export default function MenuSettingsPage() {
           }}
         />
       )}
+      <ConfirmDialog
+        open={!!confirmDialog}
+        title={confirmDialog?.title}
+        body={confirmDialog?.body}
+        confirmLabel={confirmDialog?.confirmLabel}
+        tone={confirmDialog?.tone}
+        loading={working}
+        onCancel={cancelConfirm}
+        onConfirm={acceptConfirm}
+      />
     </div>
   );
 }

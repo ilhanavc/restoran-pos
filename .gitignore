@@ -30,12 +30,28 @@ logs/
 .env.*.local
 
 server/.env
+server/.env.local
+server/.env.*.local
+client/.env
+client/.env.local
+client/.env.*.local
 
 # SQLite veritabanı ve yardımcı dosyalar (server/data tek blok)
 server/data/
 server/data/pos.db
 server/data/*.db-shm
 server/data/*.db-wal
+
+# Güvenlik — her yerden her türlü SQLite / yedek / yüklenen dosya
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+backups/
+uploads/
+server/uploads/
+*.bak
 
 # Kök dizinde yerel yedek / deneme verisi
 /data/
@@ -60,3 +76,15 @@ fisornek.txt
 restoran-pos-v3-ozet.docx
 .claude/
 .tmp/
+
+# Yerel uygulama config (JWT secret içerebilir — asla commit etme)
+pos-config.json
+
+# Üretilmiş rapor/roadmap PDF çıktıları (generate-roadmap.cjs çıktısı)
+*.pdf
+
+# Playwright test çıktıları
+test-results/
+teslim/uygulama/
+Restoran-POS-Bitirme-Teslim.zip
+teslim.zip

@@ -58,17 +58,7 @@ export default function CallerIdScreen() {
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 24px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <h1 className="page-title" style={{ fontSize: 20 }}>
-          <Phone size={20} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 8 }} />
-          Gelen Aramalar
-        </h1>
-        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-          Simülasyon burada; canlı bildirim üstteki global banner’dadır. call_logs’ta opened_order, ilk sipariş kaydında güncellenir.
-        </p>
-      </div>
-
-      <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+      <div className="page-top-safe" style={{ flex: 1, overflow: 'auto', paddingLeft: 24, paddingRight: 24, paddingBottom: 24 }}>
         <div className="card card-padded" style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
             <PhoneIncoming size={16} color="var(--success)" />

@@ -109,6 +109,12 @@ export function IncomingCallProvider({ children }) {
     if (user?.id) persistSuppressedSet(user.id, suppressedBannerIdsRef.current);
     setBannerCall(null);
 
+    try {
+      await api.patchCallLogStatus(call.id, 'opened_order');
+    } catch {
+      /* Sipariş ekranına geçişi engelleme; kayıt sırasında call_log_id tekrar bağlanır. */
+    }
+
     let customer = null;
     if (call.customer_id) {
       try {
