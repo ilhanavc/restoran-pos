@@ -136,7 +136,7 @@ for _ in range(5):
 
 p = doc.add_paragraph()
 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = p.add_run("Hazırlayan: İlhan AVCI")
+run = p.add_run("Hazırlayan: İlhan AVCİ")
 run.bold = True
 run.font.size = Pt(14)
 
@@ -194,7 +194,7 @@ add_para(
 )
 add_para(doc, "")
 add_para(doc, "Saygılarımla,", italic=True)
-add_para(doc, "İlhan AVCI", bold=True)
+add_para(doc, "İlhan AVCİ", bold=True)
 add_para(doc, "220357008", italic=True)
 page_break(doc)
 
@@ -577,7 +577,7 @@ add_para(
 add_para(doc, "")
 add_para(
     doc,
-    "İlhan AVCI",
+    "İlhan AVCİ",
     bold=True,
     align=WD_ALIGN_PARAGRAPH.CENTER,
     size=14,

@@ -138,7 +138,7 @@ run.font.size = Pt(13)
 
 p = doc.add_paragraph()
 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = p.add_run("İlhan AVCI")
+run = p.add_run("İlhan AVCİ")
 run.bold = True
 run.font.size = Pt(14)
 
@@ -166,10 +166,10 @@ add_table(
     doc,
     ["Tarih", "Sürüm", "Açıklama", "Yazar"],
     [
-        ["2026-04-01", "0.1", "İlk taslak — kapsam ve ana modüller belirlendi", "İlhan Avcı"],
-        ["2026-04-15", "0.5", "Fonksiyonel gereksinimler genişletildi (12 sprint çıktısı)", "İlhan Avcı"],
-        ["2026-04-30", "0.9", "İşlevsel olmayan gereksinimler + güvenlik bölümü (FAZ 0)", "İlhan Avcı"],
-        ["2026-05-15", "1.1.0", "Bitirme teslim sürümü — final revizyon", "İlhan Avcı"],
+        ["2026-04-01", "0.1", "İlk taslak — kapsam ve ana modüller belirlendi", "İlhan AVCİ"],
+        ["2026-04-15", "0.5", "Fonksiyonel gereksinimler genişletildi (12 sprint çıktısı)", "İlhan AVCİ"],
+        ["2026-04-30", "0.9", "İşlevsel olmayan gereksinimler + güvenlik bölümü (FAZ 0)", "İlhan AVCİ"],
+        ["2026-05-15", "1.1.0", "Bitirme teslim sürümü — final revizyon", "İlhan AVCİ"],
     ],
     col_widths=[Cm(3), Cm(2), Cm(8.5), Cm(3.5)],
 )
@@ -1035,7 +1035,7 @@ add_table(
     ["Alan", "Değer"],
     [
         ["Proje Adı", "Restoran POS v1.1.0"],
-        ["Geliştirici", "İlhan AVCI (220357008)"],
+        ["Geliştirici", "İlhan AVCİ (220357008)"],
         ["Üniversite", "Atatürk Üniversitesi"],
         ["Fakülte", "İktisadi ve İdari Bilimler Fakültesi"],
         ["Bölüm", "Yönetim Bilişim Sistemleri"],

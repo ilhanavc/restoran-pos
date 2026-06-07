@@ -125,7 +125,7 @@ for _ in range(6):
 
 p = doc.add_paragraph()
 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-run = p.add_run("Hazırlayan: İlhan AVCI")
+run = p.add_run("Hazırlayan: İlhan AVCİ")
 run.font.size = Pt(13)
 
 p = doc.add_paragraph()

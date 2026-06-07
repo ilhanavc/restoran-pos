@@ -342,7 +342,7 @@ Açık kaynak kütüphaneler için ilgili lisanslar geçerlidir (MIT/Apache/BSD)
 
 ## 📞 İletişim
 - **GitHub repo:** (link)
-- **Geliştirici:** İlhan Avcı — ilhanavci499@gmail.com
+- **Geliştirici:** İlhan AVCİ — ilhanavci499@gmail.com
 - **Demo videosu:** (YouTube link)
 
 ---

@@ -85,7 +85,7 @@ def slide_number_badge(slide, n, total):
 def bottom_bar(slide, label):
     """Alt şerit"""
     add_rect(slide, 0, H - Inches(0.35), W, Inches(0.35), DARK)
-    add_text(slide, "Restoran POS v1.1.0  ·  İlhan AVCI  ·  220357008  ·  Atatürk Üniversitesi",
+    add_text(slide, "Restoran POS v1.1.0  ·  İlhan AVCİ  ·  220357008  ·  Atatürk Üniversitesi",
              Inches(0.2), H - Inches(0.35), W - Inches(1.2), Inches(0.35),
              size=9, color=RGBColor(0x9C, 0xA3, 0xAF), align=PP_ALIGN.LEFT)
 
@@ -361,7 +361,7 @@ def make_cover(prs):
              RGBColor(0x4F, 0x46, 0xE5))
 
     # Yazar
-    add_text(sld, "İlhan AVCI  |  220357008",
+    add_text(sld, "İlhan AVCİ  |  220357008",
              Inches(0.3), Inches(5.2), Inches(4.7), Inches(0.4),
              size=13, bold=True, color=WHITE)
 
@@ -591,7 +591,7 @@ def make_closing_slide(prs, slide_num, total):
              0, Inches(1.2), W, Inches(1.2),
              size=56, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
 
-    add_text(sld, "İlhan AVCI  ·  220357008",
+    add_text(sld, "İlhan AVCİ  ·  220357008",
              0, Inches(2.55), W, Inches(0.6),
              size=18, bold=True, color=RGBColor(0xA5, 0xB4, 0xFC),
              align=PP_ALIGN.CENTER)
