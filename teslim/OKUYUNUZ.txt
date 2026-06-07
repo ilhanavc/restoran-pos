@@ -1,0 +1,86 @@
+═══════════════════════════════════════════════════════════════
+  RESTORAN POS v1.1.0 — BİTİRME PROJESİ TESLİM PAKETİ
+═══════════════════════════════════════════════════════════════
+
+  Hazırlayan : İlhan AVCİ
+  Öğrenci No : 220357008
+  Üniversite : Atatürk Üniversitesi
+  Fakülte    : İktisadi ve İdari Bilimler Fakültesi
+  Bölüm      : Yönetim Bilişim Sistemleri
+  Tarih      : Mayıs 2026
+
+═══════════════════════════════════════════════════════════════
+  📁 PAKET İÇERİĞİ
+═══════════════════════════════════════════════════════════════
+
+  📂 dokumanlar/
+     ├── PROJE-TANITIM-Restoran-POS.docx   ⭐ Önce bunu açın
+     ├── SRS-Restoran-POS-v1.1.0.docx       (Yazılım Gereksinimleri)
+     ├── KULLANIM-KILAVUZU-Restoran-POS.docx (Adım adım kullanıcı klavuzu)
+     └── README-TESLIM.md                   (Teknik özet)
+
+  📂 uygulama/
+     └── Restoran-POS-v1.1.0-demo.zip      (Çalıştırılabilir uygulama)
+
+  📂 ekran-goruntuleri/
+     └── 12 PNG ekran görüntüsü
+
+═══════════════════════════════════════════════════════════════
+  🚀 HIZLI BAŞLAT
+═══════════════════════════════════════════════════════════════
+
+  1) PROJE-TANITIM-Restoran-POS.docx dosyasını açın
+     (Projeyi 5 dakikada tanıyın)
+
+  2) Uygulamayı denemek için:
+     • uygulama/Restoran-POS-v1.1.0-demo.zip dosyasını çıkarın
+     • Çıkan klasörde "Restoran POS.exe" dosyasına çift tıklayın
+     • Windows SmartScreen uyarısı çıkarsa:
+       "Diğer bilgiler" → "Yine de çalıştır"
+
+  3) Giriş ekranında demo bilgileri ile giriş yapın:
+     ┌──────────┬───────────────────┬─────────┐
+     │ Rol      │ E-posta           │ Şifre   │
+     ├──────────┼───────────────────┼─────────┤
+     │ Yönetici │ admin@demo.com    │ 123456  │
+     │ Kasiyer  │ kasiyer@demo.com  │ 123456  │
+     │ Garson   │ garson@demo.com   │ 123456  │
+     │ Mutfak   │ mutfak@demo.com   │ 123456  │
+     └──────────┴───────────────────┴─────────┘
+
+═══════════════════════════════════════════════════════════════
+  💻 SİSTEM GEREKSİNİMLERİ
+═══════════════════════════════════════════════════════════════
+
+  • Windows 10 (1809+) veya Windows 11 (64-bit)
+  • En az 4 GB RAM
+  • 2 GB boş disk alanı
+  • İnternet bağlantısı gerekmez (tamamen offline çalışır)
+
+═══════════════════════════════════════════════════════════════
+  🌐 ÇEVRİMİÇİ KAYNAKLAR
+═══════════════════════════════════════════════════════════════
+
+  • Tüm kaynak kod ve gelişmiş dokümantasyon GitHub'da:
+    https://github.com/ilhanavc/restoran-pos
+
+  • Bu sürümün resmi release sayfası:
+    https://github.com/ilhanavc/restoran-pos/releases/tag/v1.1.0-graduation
+
+═══════════════════════════════════════════════════════════════
+  📞 İLETİŞİM
+═══════════════════════════════════════════════════════════════
+
+  Sorularınız veya geri bildirimleriniz için her zaman ulaşabilirsiniz:
+
+  📧  ilhanavci499@gmail.com
+  🐙  github.com/ilhanavc
+
+═══════════════════════════════════════════════════════════════
+
+  Değerli zamanınızı ayırdığınız için teşekkür ederim.
+
+  Saygılarımla,
+  İlhan AVCİ
+
+═══════════════════════════════════════════════════════════════
